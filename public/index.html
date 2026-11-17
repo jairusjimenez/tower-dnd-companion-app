@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Tower System VTT — Custom D&amp;D &amp; Manhwa RPG</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Real-Time System Toast Overlay -->
+  <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+
+  <!-- ===================================================================== -->
+  <!-- LOGIN PORTAL VIEW                                                     -->
+  <!-- ===================================================================== -->
+  <main id="login-view" class="view active">
+    <div class="login-shell">
+      <header class="brand-banner">
+        <div class="system-badge">[ SYSTEM INITIALIZATION ]</div>
+        <h1>TOWER SYSTEM VTT</h1>
+        <p class="subtitle">
+          Vertical Manhwa Tower Exploration • Custom DM Mechanics • Reactive Combat • Free-Flow Magic • Dice up to d100
+        </p>
+      </header>
+
+      <div class="login-grid">
+        <!-- PLAYER LOGIN CARD (Email First-Time Setup + Username/Password) -->
+        <section class="panel card-glow-cyan">
+          <div class="panel-header">
+            <span class="tag tag-cyan">PLAYER PORTAL</span>
+            <h2>Climber / Player Login</h2>
+          </div>
+
+          <div class="segmented" id="player-auth-tabs">
+            <button type="button" class="seg-btn active" data-auth-mode="returning">Sign In (Username / Email)</button>
+            <button type="button" class="seg-btn" data-auth-mode="first-time">First-Time Email Setup</button>
+          </div>
+
+          <!-- Returning Player Login -->
+          <form id="player-login-form" class="stack-form">
+            <label>
+              <span>Username or Invited Email</span>
+              <input id="login-identifier" type="text" placeholder="e.g. kaelen or kaelen@tower.gg" required />
+            </label>
+            <label>
+              <span>Password</span>
+              <input id="login-password" type="password" placeholder="Enter your password" required />
+            </label>
+            <button type="submit" class="btn btn-cyan btn-lg">Enter Tower as Player</button>
+            <p class="hint-text">First time logging in? Switch to <strong>First-Time Email Setup</strong> above with the email you gave your DM.</p>
+          </form>
+
+          <!-- First-Time Email Onboarding -->
+          <form id="player-activate-form" class="stack-form hidden">
+            <label>
+              <span>Your Invited Email Address</span>
+              <div class="row-inline">
+                <input id="activate-email" type="email" placeholder="name@example.com" required />
+                <button type="button" id="btn-check-email" class="btn btn-outline">Check Email</button>
+              </div>
+            </label>
+
+            <div class="demo-chips">
+              <span class="muted-label">Demo invited emails (pending first-time setup):</span>
+              <button type="button" class="chip-btn" data-demo-email="kaelen@tower.gg">kaelen@tower.gg</button>
+              <button type="button" class="chip-btn" data-demo-email="thalindra@tower.gg">thalindra@tower.gg</button>
+              <button type="button" class="chip-btn" data-demo-email="vex@tower.gg">vex@tower.gg</button>
+              <button type="button" class="chip-btn" data-demo-email="bramwell@tower.gg">bramwell@tower.gg</button>
+            </div>
+
+            <div id="activate-step2" class="stack-form hidden">
+              <div id="activate-char-banner" class="system-callout"></div>
+              <label>
+                <span>Choose Username (editable anytime later)</span>
+                <input id="activate-username" type="text" placeholder="e.g. shadow_monarch" />
+              </label>
+              <label>
+                <span>Create Password (min 4 chars)</span>
+                <input id="activate-password" type="password" placeholder="Create your password" minlength="4" />
+              </label>
+              <details class="sub-details">
+                <summary>Optional: Create a brand-new character instead</summary>
+                <div class="stack-form mt-sm">
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="activate-new-char-toggle" />
+                    <span>Create new custom character</span>
+                  </label>
+                  <input id="activate-char-name" type="text" placeholder="Character Name" />
+                  <div class="grid-2">
+                    <input id="activate-char-race" type="text" placeholder="Race (Elf, Human...)" />
+                    <input id="activate-char-class" type="text" placeholder="Class (Blade, Mage...)" />
+                  </div>
+                </div>
+              </details>
+              <button type="submit" class="btn btn-cyan btn-lg">Create Password &amp; Log In</button>
+            </div>
+          </form>
+          <div id="player-login-error" class="error-box hidden"></div>
+        </section>
+
+        <!-- DUNGEON MASTER LOGIN CARD -->
+        <section class="panel card-glow-gold">
+          <div class="panel-header">
+            <span class="tag tag-gold">ADMIN / ARCHITECT</span>
+            <h2>Dungeon Master Login</h2>
+          </div>
+          <p class="muted">
+            Separate DM Sanctum with Session Start/Stop, System Toast Broadcaster, Monster Spawner, Custom Stats &amp; Formulas Builder, Fog of War Tower Control, and Google Docs Deity Importer.
+          </p>
+          <form id="dm-login-form" class="stack-form">
+            <label>
+              <span>Dungeon Master Passcode <span class="badge-inline">Default: dm123</span></span>
+              <input id="dm-passcode" type="password" value="dm123" required />
+            </label>
+            <button type="submit" class="btn btn-gold btn-lg">Open DM Sanctum</button>
+          </form>
+          <div id="dm-login-error" class="error-box hidden"></div>
+
+          <div class="feature-list">
+            <div><strong>Player Onboarding:</strong> Whitelist player emails in DM Sanctum -> players set password on 1st login.</div>
+            <div><strong>Real-Time Sync:</strong> Server-Sent Events push monster HP, toasts, and map updates instantly across mobile &amp; desktop.</div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===================================================================== -->
+  <!-- PLAYER DASHBOARD VIEW                                                 -->
+  <!-- ===================================================================== -->
+  <section id="player-view" class="view app-shell">
+    <header class="topbar">
+      <div class="topbar-left">
+        <img id="p-top-avatar" class="avatar-sm" alt="Character Portrait" />
+        <div class="topbar-identity">
+          <div class="topbar-title-row">
+            <strong id="p-top-name">Climber</strong>
+            <span id="p-top-rank" class="tag tag-cyan">Rank</span>
+          </div>
+          <div class="topbar-sub">
+            <span id="p-session-pill" class="status-pill live">SESSION LIVE</span>
+            <span id="p-combat-mode-pill" class="status-pill reactive">REACTIVE COMBAT</span>
+          </div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div class="quick-vitals">
+          <span class="vital-chip hp">HP <b id="p-top-hp">0/0</b></span>
+          <span class="vital-chip mp"><span id="p-resource-label">MP</span> <b id="p-top-mp">0/0</b></span>
+        </div>
+        <button type="button" id="btn-open-account-modal" class="btn btn-sm btn-outline">Account</button>
+        <button type="button" id="btn-p-logout" class="btn btn-sm btn-danger-outline">Logout</button>
+      </div>
+    </header>
+
+    <!-- Session Stopped Banner -->
+    <div id="p-session-stopped-banner" class="alert-banner warning hidden">
+      <div>
+        <strong>[SYSTEM]: SESSION STOPPED / PAUSED BY DUNGEON MASTER</strong>
+        <span id="p-session-paused-msg">Waiting for DM to start session...</span>
+      </div>
+    </div>
+
+    <!-- Real-Time Reactive Combat Trigger Banner -->
+    <div id="p-reaction-banner" class="reaction-banner hidden">
+      <div class="reaction-info">
+        <span class="tag tag-crimson">REACTION WINDOW</span>
+        <strong id="p-reaction-text">Monster attacks you!</strong>
+      </div>
+      <div class="reaction-actions">
+        <button type="button" id="btn-react-counter" class="btn btn-sm btn-crimson">Counter-Attack</button>
+        <button type="button" id="btn-react-parry" class="btn btn-sm btn-cyan">Parry / Dodge</button>
+        <button type="button" id="btn-react-spell" class="btn btn-sm btn-purple">Reactive Spell</button>
+        <button type="button" id="btn-react-accept" class="btn btn-sm btn-outline">Take Hit</button>
+      </div>
+    </div>
+
+    <!-- Player Screen Navigation (Desktop Tabs + Sticky Mobile Bottom Nav) -->
+    <nav class="subnav" id="player-nav">
+      <button type="button" class="nav-btn active" data-p-tab="stats">Stats</button>
+      <button type="button" class="nav-btn" data-p-tab="equipment">Equipment</button>
+      <button type="button" class="nav-btn" data-p-tab="inventory">Inventory</button>
+      <button type="button" class="nav-btn" data-p-tab="magic">Magic &amp; Deity</button>
+      <button type="button" class="nav-btn" data-p-tab="map">Tower Map</button>
+      <button type="button" class="nav-btn" data-p-tab="dice">Dice (d100)</button>
+      <button type="button" class="nav-btn" data-p-tab="art">AI Art</button>
+    </nav>
+
+    <div class="app-content" id="player-panels">
+      <!-- TAB 1: STATS & REAL-TIME MONSTER DAMAGE -->
+      <div class="tab-pane active" data-p-pane="stats">
+        <div class="two-col">
+          <div class="col stack">
+            <div class="panel">
+              <div class="panel-header">
+                <h3>[STATUS WINDOW]</h3>
+                <button type="button" id="btn-p-roll-init" class="btn btn-sm btn-outline">Roll Initiative</button>
+              </div>
+              <div class="vitals-editor">
+                <div class="bar-card">
+                  <div class="bar-row"><span>Health Points (HP)</span><strong id="p-hp-readout">34 / 34</strong></div>
+                  <div class="progress"><div id="p-hp-fill" class="progress-fill hp"></div></div>
+                  <div class="btn-row mt-xs">
+                    <button type="button" class="btn btn-xs btn-outline" data-hp-delta="-5">-5</button>
+                    <button type="button" class="btn btn-xs btn-outline" data-hp-delta="-1">-1</button>
+                    <button type="button" class="btn btn-xs btn-outline" data-hp-delta="1">+1</button>
+                    <button type="button" class="btn btn-xs btn-outline" data-hp-delta="5">+5</button>
+                  </div>
+                </div>
+                <div class="bar-card">
+                  <div class="bar-row"><span id="p-mp-name">Mana (MP)</span><strong id="p-mp-readout">45 / 45</strong></div>
+                  <div class="progress"><div id="p-mp-fill" class="progress-fill mp"></div></div>
+                  <div class="btn-row mt-xs">
+                    <button type="button" class="btn btn-xs btn-outline" data-mp-delta="-5">-5</button>
+                    <button type="button" class="btn btn-xs btn-outline" data-mp-delta="-1">-1</button>
+                    <button type="button" class="btn btn-xs btn-outline" data-mp-delta="1">+1</button>
+                    <button type="button" class="btn btn-xs btn-outline" data-mp-delta="5">+5</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mini-stats-strip">
+                <div class="mini-box"><span>Armor Class</span><strong id="p-ac-val">14</strong></div>
+                <div class="mini-box"><span>Armor DR</span><strong id="p-dr-val">2</strong></div>
+                <div class="mini-box"><span>Move Speed</span><strong id="p-speed-val">6 Spaces</strong></div>
+                <div class="mini-box"><span>Divine Favor</span><strong id="p-favor-val">3</strong></div>
+              </div>
+
+              <div class="panel-subheader">
+                <span>Custom Attributes (Formula: <code id="p-formula-badge">floor((SCORE-10)/2)</code>)</span>
+              </div>
+              <div id="p-stats-grid" class="stats-grid"></div>
+
+              <div class="panel-subheader"><span>Skills &amp; Proficiencies</span></div>
+              <div id="p-skills-list" class="list-stack"></div>
+            </div>
+          </div>
+
+          <div class="col stack">
+            <!-- REAL-TIME MONSTER HP CHECK & INFLICT DAMAGE -->
+            <div class="panel card-glow-crimson">
+              <div class="panel-header">
+                <h3>Active Tower Monsters (Real-Time HP)</h3>
+                <span class="tag tag-crimson">LIVE SYNC</span>
+              </div>
+              <p class="muted small">Select a monster summoned by the DM to check its live HP or inflict damage right away.</p>
+              <div id="p-monsters-list" class="list-stack"></div>
+
+              <div class="damage-box mt-sm">
+                <label>
+                  <span>Target Monster</span>
+                  <select id="p-target-monster"></select>
+                </label>
+                <div class="grid-2">
+                  <label>
+                    <span>Damage Amount</span>
+                    <input id="p-direct-dmg" type="number" min="1" value="10" />
+                  </label>
+                  <label>
+                    <span>Damage Type</span>
+                    <select id="p-dmg-type">
+                      <option value="Slashing">Slashing</option>
+                      <option value="Piercing">Piercing</option>
+                      <option value="Fire">Fire</option>
+                      <option value="Arcane">Arcane</option>
+                      <option value="Shadow">Shadow</option>
+                      <option value="Radiant">Radiant</option>
+                      <option value="True">True Damage</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="btn-row mt-xs">
+                  <button type="button" id="btn-p-inflict-direct" class="btn btn-crimson">Inflict Damage to Monster</button>
+                  <button type="button" id="btn-p-weapon-strike" class="btn btn-cyan">Strike w/ Main Weapon</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- SYSTEM FEED & QUESTS -->
+            <div class="panel">
+              <div class="panel-header">
+                <h3>System Notices &amp; Combat Log</h3>
+              </div>
+              <div id="p-system-feed" class="feed-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: DEDICATED EQUIPMENT SCREEN -->
+      <div class="tab-pane" data-p-pane="equipment">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Equipment Loadout</h3>
+            <div id="p-equip-summary" class="tag tag-cyan">ATK +0 • DR 0</div>
+          </div>
+          <p class="muted small">Equip weapons, armor, and tower relics from your Inventory. Equipped weapon &amp; DR feed directly into the DM's custom combat formulas.</p>
+          <div id="p-equipment-slots" class="equip-grid"></div>
+        </div>
+      </div>
+
+      <!-- TAB 3: DEDICATED INVENTORY SCREEN -->
+      <div class="tab-pane" data-p-pane="inventory">
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Inventory Backpack</h3>
+              <div class="currency-pills">
+                <span class="pill-gold">Gold: <b id="p-gold-val">0</b></span>
+                <span class="pill-cyan">Mana Stones: <b id="p-stones-val">0</b></span>
+              </div>
+            </div>
+            <div class="filter-pills" id="inv-filter-pills">
+              <button type="button" class="chip-btn active" data-inv-filter="all">All</button>
+              <button type="button" class="chip-btn" data-inv-filter="weapon">Weapons</button>
+              <button type="button" class="chip-btn" data-inv-filter="armor">Armor</button>
+              <button type="button" class="chip-btn" data-inv-filter="consumable">Consumables</button>
+              <button type="button" class="chip-btn" data-inv-filter="relic">Relics</button>
+            </div>
+            <div id="p-inventory-list" class="list-stack mt-sm"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h3>Add Item to Backpack</h3></div>
+            <form id="p-add-item-form" class="stack-form">
+              <input id="inv-new-name" type="text" placeholder="Item Name (e.g. Dragonfang Blade)" required />
+              <div class="grid-2">
+                <select id="inv-new-cat">
+                  <option value="weapon">Weapon</option>
+                  <option value="armor">Armor</option>
+                  <option value="consumable">Consumable</option>
+                  <option value="relic">Relic / Misc</option>
+                </select>
+                <input id="inv-new-qty" type="number" min="1" value="1" placeholder="Qty" />
+              </div>
+              <div class="grid-2">
+                <input id="inv-new-dmg" type="text" placeholder="Dmg Dice (e.g. 2d6+3)" />
+                <input id="inv-new-range" type="number" min="0" value="2" placeholder="Range (Spaces)" />
+              </div>
+              <div class="grid-2">
+                <input id="inv-new-heal-hp" type="number" min="0" value="0" placeholder="Heal HP" />
+                <input id="inv-new-dr" type="number" min="0" value="0" placeholder="DR / Armor Bonus" />
+              </div>
+              <input id="inv-new-notes" type="text" placeholder="Description / Special Effect" />
+              <button type="submit" class="btn btn-cyan">Add to Inventory</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: FREE-FLOW MAGIC & DEITY SYSTEM -->
+      <div class="tab-pane" data-p-pane="magic">
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Free-Flow Spells &amp; Grimoire</h3>
+              <span class="tag tag-purple">DETAILED SPELLS</span>
+            </div>
+            <p class="muted small">Every spell lists its full mechanics explanation, damage formula, range in <strong>Spaces</strong>, and casts directly onto your target monster.</p>
+            <div class="panel-subheader"><span>My Active Spells</span></div>
+            <div id="p-my-spells" class="list-stack"></div>
+
+            <div class="panel-subheader mt-md"><span>Free-Flow Tower Grimoire (Learn Any)</span></div>
+            <div id="p-grimoire-list" class="list-stack"></div>
+
+            <details class="sub-details mt-md">
+              <summary>+ Manifest / Craft Custom Free-Flow Spell</summary>
+              <form id="p-craft-spell-form" class="stack-form mt-sm">
+                <input id="sp-name" type="text" placeholder="Spell Name" required />
+                <div class="grid-2">
+                  <input id="sp-element" type="text" placeholder="Element (Arcane, Fire...)" value="Arcane" />
+                  <select id="sp-action-type">
+                    <option value="Action">Action</option>
+                    <option value="Reaction">Reaction (Interrupt)</option>
+                  </select>
+                </div>
+                <div class="grid-3">
+                  <input id="sp-dmg" type="text" placeholder="Damage (e.g. 3d8+4)" value="3d6+3" />
+                  <input id="sp-range" type="number" min="0" value="6" placeholder="Range (Spaces)" />
+                  <input id="sp-mp" type="number" min="0" value="5" placeholder="MP Cost" />
+                </div>
+                <textarea id="sp-expl" rows="3" placeholder="Detailed magic explanation: how it works, range in spaces, secondary effects..."></textarea>
+                <button type="submit" class="btn btn-purple">Unlock Custom Spell</button>
+              </form>
+            </details>
+          </div>
+
+          <div class="panel card-glow-gold">
+            <div class="panel-header">
+              <h3>Patron Deity &amp; Constellation System</h3>
+              <span class="tag tag-gold">FAVOR: <b id="p-deity-favor">0</b></span>
+            </div>
+            <div id="p-deity-active-card" class="system-callout"></div>
+            <div id="p-deity-list" class="list-stack mt-sm"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 5: VERTICAL MANHWA TOWER MAP (SPACES GRID) -->
+      <div class="tab-pane" data-p-pane="map">
+        <div class="panel map-panel">
+          <div class="panel-header">
+            <h3>Vertical Tower Map (1F Base &rarr; Apex)</h3>
+            <div class="btn-row">
+              <button type="button" class="btn btn-sm btn-outline active" data-p-maptool="move">Move Me</button>
+              <button type="button" class="btn btn-sm btn-outline" data-p-maptool="measure">Measure Spaces</button>
+              <button type="button" class="btn btn-sm btn-outline" data-p-maptool="ping">Ping</button>
+            </div>
+          </div>
+          <div id="p-map-info" class="map-meta-bar">Tap any revealed space to move your climber token. Upper floors remain veiled in Fog of War until unlocked.</div>
+          <div class="tower-scroll-wrap">
+            <canvas id="player-tower-canvas" width="520" height="1250"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 6: DICE ROLLER UP TO d100 -->
+      <div class="tab-pane" data-p-pane="dice">
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Polyhedral &amp; Percentile Dice (d2 – d100)</h3>
+            </div>
+            <div class="dice-grid" id="p-dice-buttons">
+              <button type="button" class="die-btn" data-sides="2">d2</button>
+              <button type="button" class="die-btn" data-sides="3">d3</button>
+              <button type="button" class="die-btn" data-sides="4">d4</button>
+              <button type="button" class="die-btn" data-sides="6">d6</button>
+              <button type="button" class="die-btn" data-sides="8">d8</button>
+              <button type="button" class="die-btn" data-sides="10">d10</button>
+              <button type="button" class="die-btn" data-sides="12">d12</button>
+              <button type="button" class="die-btn" data-sides="16">d16</button>
+              <button type="button" class="die-btn" data-sides="20">d20</button>
+              <button type="button" class="die-btn" data-sides="24">d24</button>
+              <button type="button" class="die-btn" data-sides="30">d30</button>
+              <button type="button" class="die-btn" data-sides="50">d50</button>
+              <button type="button" class="die-btn" data-sides="60">d60</button>
+              <button type="button" class="die-btn die-d100" data-sides="100">d100</button>
+            </div>
+
+            <form id="p-custom-dice-form" class="stack-form mt-md">
+              <div class="grid-3">
+                <label><span>Count</span><input id="p-dice-count" type="number" min="1" max="30" value="1" /></label>
+                <label><span>Sides (1–100)</span><input id="p-dice-sides" type="number" min="1" max="100" value="100" /></label>
+                <label><span>Modifier</span><input id="p-dice-mod" type="number" value="0" /></label>
+              </div>
+              <div class="grid-2">
+                <label>
+                  <span>Roll Mode</span>
+                  <select id="p-dice-mode">
+                    <option value="normal">Normal</option>
+                    <option value="advantage">Advantage (Keep High)</option>
+                    <option value="disadvantage">Disadvantage (Keep Low)</option>
+                    <option value="exploding">Exploding (Max Reroll)</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Apply as Damage to Monster?</span>
+                  <select id="p-dice-target-monster"></select>
+                </label>
+              </div>
+              <input id="p-dice-label" type="text" placeholder="Roll Label (e.g. Percentile Dodge or Crit Strike)" />
+              <button type="submit" class="btn btn-cyan btn-lg">Roll Custom Dice</button>
+            </form>
+
+            <div id="p-last-roll-banner" class="last-roll-card hidden"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h3>Live Party Roll Log</h3></div>
+            <div id="p-roll-log" class="feed-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 7: AI CHARACTER ART PROMPT STUDIO -->
+      <div class="tab-pane" data-p-pane="art">
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>AI Character Art Generator</h3>
+              <span class="tag tag-cyan">PROMPT DRIVEN</span>
+            </div>
+            <form id="p-art-form" class="stack-form">
+              <label>
+                <span>Push Character Art Prompt</span>
+                <textarea id="p-art-prompt" rows="4" placeholder="Describe race, weapon, armor, mana aura, and mood (e.g. Tiefling shadow assassin with glowing purple twin daggers in obsidian armor)..."></textarea>
+              </label>
+              <label>
+                <span>Visual Style</span>
+                <select id="p-art-style">
+                  <option value="Korean Manhwa Webtoon">Korean Manhwa Webtoon</option>
+                  <option value="Dark Fantasy Concept">Dark Fantasy Concept</option>
+                  <option value="Solo Glow Aura">Solo Glow Aura</option>
+                  <option value="Arcane Tarot">Arcane Tarot</option>
+                  <option value="Retro Pixel Art">Retro Pixel Art</option>
+                </select>
+              </label>
+              <div class="demo-chips">
+                <span class="muted-label">Quick Prompt Boosters:</span>
+                <button type="button" class="chip-btn" data-art-chip="glowing cyan shinsu aura">Cyan Shinsu Aura</button>
+                <button type="button" class="chip-btn" data-art-chip="crimson fire greatsword">Crimson Fire Greatsword</button>
+                <button type="button" class="chip-btn" data-art-chip="purple shadow monarch daggers">Shadow Monarch Daggers</button>
+                <button type="button" class="chip-btn" data-art-chip="golden holy paladin armor">Golden Holy Armor</button>
+              </div>
+              <button type="submit" class="btn btn-cyan btn-lg">Push Prompt &amp; Generate AI Art</button>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h3>Character Portrait Preview</h3></div>
+            <div class="portrait-stage">
+              <img id="p-art-preview" class="portrait-lg" alt="Generated Character Art" />
+            </div>
+            <div class="panel-subheader mt-sm"><span>Recent Prompts</span></div>
+            <div id="p-art-history" class="art-thumbs"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- DUNGEON MASTER SANCTUM VIEW                                           -->
+  <!-- ===================================================================== -->
+  <section id="dm-view" class="view app-shell">
+    <header class="topbar topbar-dm">
+      <div class="topbar-left">
+        <span class="tag tag-gold">DM SANCTUM</span>
+        <div class="topbar-identity">
+          <strong id="dm-session-title-bar">Tower Campaign</strong>
+          <div class="topbar-sub">
+            <span id="dm-session-pill" class="status-pill live">SESSION LIVE</span>
+            <span id="dm-round-pill" class="status-pill">ROUND 1</span>
+          </div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" id="btn-dm-toggle-session" class="btn btn-sm btn-gold">Stop Session</button>
+        <button type="button" id="btn-dm-reset" class="btn btn-sm btn-outline">Reset Demo</button>
+        <button type="button" id="btn-dm-logout" class="btn btn-sm btn-danger-outline">Logout</button>
+      </div>
+    </header>
+
+    <nav class="subnav" id="dm-nav">
+      <button type="button" class="nav-btn active" data-dm-tab="monsters">Monsters &amp; HP</button>
+      <button type="button" class="nav-btn" data-dm-tab="session">Toasts, Session &amp; Emails</button>
+      <button type="button" class="nav-btn" data-dm-tab="map">Vertical Tower Map</button>
+      <button type="button" class="nav-btn" data-dm-tab="rules">Custom Mechanics &amp; Deities</button>
+      <button type="button" class="nav-btn" data-dm-tab="party">Party, Secret Dice &amp; Notes</button>
+    </nav>
+
+    <div class="app-content">
+      <!-- DM TAB 1: MONSTERS, REAL-TIME HP & REACTIVE MONSTER ATTACKS -->
+      <div class="tab-pane active" data-dm-pane="monsters">
+        <div class="two-col">
+          <div class="col stack">
+            <div class="panel">
+              <div class="panel-header"><h3>Add / Summon Monster</h3></div>
+              <form id="dm-spawn-monster-form" class="stack-form">
+                <label>
+                  <span>Bestiary Preset</span>
+                  <select id="dm-bestiary-select"></select>
+                </label>
+                <div class="grid-2">
+                  <label><span>Monster Name</span><input id="dm-mon-name" type="text" required /></label>
+                  <label><span>Tower Floor</span><input id="dm-mon-floor" type="number" min="1" max="20" value="2" /></label>
+                </div>
+                <div class="grid-4">
+                  <label><span>Max HP</span><input id="dm-mon-hp" type="number" min="1" value="30" /></label>
+                  <label><span>AC</span><input id="dm-mon-ac" type="number" value="14" /></label>
+                  <label><span>DR</span><input id="dm-mon-dr" type="number" value="1" /></label>
+                  <label><span>Range (Sp)</span><input id="dm-mon-range" type="number" value="2" /></label>
+                </div>
+                <div class="grid-2">
+                  <label><span>Attack Roll</span><input id="dm-mon-atk" type="text" value="1d20+5" /></label>
+                  <label><span>Damage Dice</span><input id="dm-mon-dmg" type="text" value="1d8+3" /></label>
+                </div>
+                <label class="checkbox-row">
+                  <input type="checkbox" id="dm-mon-hidden" />
+                  <span>Spawn Hidden in Fog of War (DM Eyes Only)</span>
+                </label>
+                <button type="submit" class="btn btn-crimson btn-lg">Add Monster to Floor &amp; Tracker</button>
+              </form>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <h3>Initiative &amp; Turns</h3>
+                <div class="btn-row">
+                  <button type="button" id="btn-dm-prev-turn" class="btn btn-xs btn-outline">Prev</button>
+                  <button type="button" id="btn-dm-next-turn" class="btn btn-xs btn-cyan">Next Turn</button>
+                  <button type="button" id="btn-dm-roll-init" class="btn btn-xs btn-gold">Roll All</button>
+                </div>
+              </div>
+              <div id="dm-initiative-list" class="list-stack"></div>
+            </div>
+          </div>
+
+          <div class="col stack">
+            <div class="panel card-glow-crimson">
+              <div class="panel-header">
+                <h3>Live Monster HP &amp; Reactive Attacks</h3>
+                <span class="tag tag-crimson">REAL-TIME HP</span>
+              </div>
+              <div class="attack-trigger-bar">
+                <select id="dm-atk-monster"></select>
+                <select id="dm-atk-player"></select>
+                <input id="dm-atk-custom-dmg" type="number" placeholder="Auto dmg" />
+                <button type="button" id="btn-dm-monster-attack" class="btn btn-crimson">Trigger Monster Attack</button>
+              </div>
+              <div id="dm-monsters-list" class="list-stack mt-sm"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header"><h3>Real-Time Combat &amp; Damage Feed</h3></div>
+              <div id="dm-combat-log" class="feed-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DM TAB 2: SESSION CONTROL, SYSTEM TOAST BROADCASTER & EMAIL INVITES -->
+      <div class="tab-pane" data-dm-pane="session">
+        <div class="two-col">
+          <div class="col stack">
+            <div class="panel card-glow-gold">
+              <div class="panel-header"><h3>Session Controls (Start / Stop)</h3></div>
+              <form id="dm-session-form" class="stack-form">
+                <label><span>Campaign / Session Title</span><input id="dm-sess-title" type="text" /></label>
+                <label><span>Paused / Offline Message</span><input id="dm-sess-pause-msg" type="text" /></label>
+                <div class="btn-row">
+                  <button type="button" id="btn-dm-start-session" class="btn btn-cyan">Start Session</button>
+                  <button type="button" id="btn-dm-stop-session" class="btn btn-crimson">Stop / Pause Session</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="panel card-glow-cyan">
+              <div class="panel-header"><h3>Send System Message / Toast to Players</h3></div>
+              <form id="dm-toast-form" class="stack-form">
+                <div class="grid-2">
+                  <label><span>Toast Title</span><input id="dm-toast-title" type="text" value="SYSTEM NOTICE" /></label>
+                  <label>
+                    <span>Category</span>
+                    <select id="dm-toast-cat">
+                      <option value="info">System Notice (Cyan)</option>
+                      <option value="combat">Boss / Combat Alert (Crimson)</option>
+                      <option value="warning">Warning / Trap (Amber)</option>
+                      <option value="loot">Quest / Reward (Gold)</option>
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  <span>Target Recipient</span>
+                  <select id="dm-toast-target"></select>
+                </label>
+                <label>
+                  <span>Message</span>
+                  <textarea id="dm-toast-msg" rows="3" placeholder="e.g. A hidden Floor Guardian awakens! Roll d100 Perception!"></textarea>
+                </label>
+                <button type="submit" class="btn btn-cyan btn-lg">Broadcast System Toast</button>
+              </form>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h3>Player Email Whitelist &amp; Onboarding</h3></div>
+            <p class="muted small">Add emails your players sent you. On first login, they enter that email to create their password (and can later change username &amp; password).</p>
+            <form id="dm-invite-form" class="stack-form">
+              <div class="grid-2">
+                <input id="dm-invite-email" type="email" placeholder="player@email.com" required />
+                <select id="dm-invite-char"></select>
+              </div>
+              <div class="grid-3">
+                <input id="dm-invite-char-name" type="text" placeholder="If New: Hero Name" />
+                <input id="dm-invite-char-race" type="text" placeholder="Race" />
+                <input id="dm-invite-char-class" type="text" placeholder="Class" />
+              </div>
+              <button type="submit" class="btn btn-gold">Whitelist Player Email</button>
+            </form>
+            <div class="panel-subheader mt-md"><span>Registered Players</span></div>
+            <div id="dm-invites-list" class="list-stack"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DM TAB 3: VERTICAL TOWER MAP CONTROLLER -->
+      <div class="tab-pane" data-dm-pane="map">
+        <div class="panel map-panel">
+          <div class="panel-header">
+            <h3>DM Vertical Tower Controller (Spaces &amp; Fog of War)</h3>
+            <div class="btn-row">
+              <button type="button" class="btn btn-sm btn-outline active" data-dm-maptool="move">Move Any Token</button>
+              <button type="button" class="btn btn-sm btn-outline" data-dm-maptool="reveal">Reveal Fog</button>
+              <button type="button" class="btn btn-sm btn-outline" data-dm-maptool="fog">Cover Fog</button>
+              <button type="button" class="btn btn-sm btn-outline" data-dm-maptool="measure">Measure Spaces</button>
+              <button type="button" class="btn btn-sm btn-outline" data-dm-maptool="ping">Ping</button>
+            </div>
+          </div>
+          <div class="dm-map-controls">
+            <button type="button" id="btn-dm-add-floor" class="btn btn-sm btn-gold">+ Add Higher Tower Floor</button>
+            <button type="button" id="btn-dm-reveal-all" class="btn btn-sm btn-cyan">Reveal Entire Tower</button>
+            <button type="button" id="btn-dm-cover-all" class="btn btn-sm btn-outline">Fog Entire Tower</button>
+            <div id="dm-floor-fog-buttons" class="btn-row"></div>
+          </div>
+          <div class="tower-scroll-wrap mt-sm">
+            <canvas id="dm-tower-canvas" width="520" height="1250"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- DM TAB 4: CUSTOM GAME MECHANICS BUILDER & DEITY GOOGLE DOCS IMPORTER -->
+      <div class="tab-pane" data-dm-pane="rules">
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Custom Game Mechanics &amp; Formulas Builder</h3>
+            </div>
+            <form id="dm-mechanics-form" class="stack-form">
+              <div class="grid-2">
+                <label>
+                  <span>Ruleset Name</span>
+                  <input id="mech-name" type="text" />
+                </label>
+                <label>
+                  <span>Combat Flow Mode</span>
+                  <select id="mech-combat-mode">
+                    <option value="reactive">Reactive Counter-Combat (Players react when hit!)</option>
+                    <option value="turn_based">Turn-Based Initiative Only</option>
+                  </select>
+                </label>
+              </div>
+              <div class="grid-2">
+                <label><span>Stat Modifier Formula</span><input id="mech-stat-formula" type="text" /></label>
+                <label><span>Damage Inflicted Formula</span><input id="mech-dmg-formula" type="text" /></label>
+              </div>
+              <div class="grid-3">
+                <label><span>Hit Check Formula</span><input id="mech-hit-formula" type="text" /></label>
+                <label><span>Crit Multiplier</span><input id="mech-crit-mult" type="number" step="0.5" min="1" /></label>
+                <label><span>Resource Name</span><input id="mech-resource-name" type="text" /></label>
+              </div>
+              <label class="checkbox-row">
+                <input type="checkbox" id="mech-show-hp" />
+                <span>Show exact Monster HP numbers to Players (real-time HP check)</span>
+              </label>
+
+              <div class="panel-subheader">
+                <span>Custom Stats Definitions</span>
+                <button type="button" id="btn-add-custom-stat" class="btn btn-xs btn-cyan">+ Add Stat</button>
+              </div>
+              <div id="mech-stats-editor" class="list-stack"></div>
+
+              <div class="btn-row mt-sm">
+                <button type="submit" class="btn btn-gold btn-lg">Save &amp; Sync Mechanics to All Players</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Deity System &amp; Google Docs Importer</h3>
+            </div>
+            <form id="dm-gdoc-import-form" class="stack-form">
+              <label>
+                <span>Google Docs Link (optional public "Anyone with link")</span>
+                <input id="dm-gdoc-url" type="url" placeholder="https://docs.google.com/document/d/..." />
+              </label>
+              <label>
+                <span>Or Paste Deity Lore Text directly from your Google Doc</span>
+                <textarea id="dm-gdoc-text" rows="4" placeholder="Example format:&#10;Solarix, Keeper of Dawn&#10;Domain: Sun &amp; Justice&#10;Blessing: Solar Smite&#10;Boon: +8 Radiant Damage&#10;Range: 6 Spaces"></textarea>
+              </label>
+              <button type="submit" class="btn btn-cyan">Import Deities from Google Doc</button>
+            </form>
+
+            <div class="panel-subheader mt-md"><span>Registered Deities</span></div>
+            <div id="dm-deities-list" class="list-stack"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DM TAB 5: PARTY INSPECTOR, SECRET DICE & PRIVATE NOTES -->
+      <div class="tab-pane" data-dm-pane="party">
+        <div class="two-col">
+          <div class="col stack">
+            <div class="panel">
+              <div class="panel-header"><h3>Party Characters Inspector</h3></div>
+              <div id="dm-party-list" class="list-stack"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header"><h3>DM Notes &amp; Shared Quests</h3></div>
+              <form id="dm-notes-form" class="stack-form">
+                <label><span>Private DM Notes (Hidden from Players)</span><textarea id="dm-private-notes" rows="4"></textarea></label>
+                <label><span>Shared Tower Quest Board</span><textarea id="dm-shared-quests" rows="3"></textarea></label>
+                <button type="submit" class="btn btn-gold">Save Notes</button>
+              </form>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h3>DM Dice Tray (Public or Secret up to d100)</h3></div>
+            <form id="dm-dice-form" class="stack-form">
+              <div class="grid-3">
+                <label><span>Count</span><input id="dm-dice-count" type="number" min="1" max="30" value="1" /></label>
+                <label><span>Sides (1–100)</span><input id="dm-dice-sides" type="number" min="1" max="100" value="20" /></label>
+                <label><span>Modifier</span><input id="dm-dice-mod" type="number" value="0" /></label>
+              </div>
+              <input id="dm-dice-label" type="text" placeholder="Roll Label (e.g. Secret Ambush Check)" />
+              <label class="checkbox-row">
+                <input type="checkbox" id="dm-dice-secret" checked />
+                <span>Secret DM Roll (DM Eyes Only — hidden from Players)</span>
+              </label>
+              <button type="submit" class="btn btn-gold">Roll DM Dice</button>
+            </form>
+            <div class="panel-subheader mt-md"><span>All Dice Rolls (Incl. Secret)</span></div>
+            <div id="dm-roll-log" class="feed-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- ACCOUNT SETTINGS MODAL (Change Username & Password)                   -->
+  <!-- ===================================================================== -->
+  <div id="account-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="panel-header">
+        <h3>Player Account Settings</h3>
+        <button type="button" id="btn-close-account-modal" class="btn btn-xs btn-outline">Close</button>
+      </div>
+      <form id="account-update-form" class="stack-form">
+        <label><span>Bound Email</span><input id="acc-email" type="text" disabled /></label>
+        <label><span>Current Password (required to apply changes)</span><input id="acc-current-pw" type="password" required /></label>
+        <label><span>New Username</span><input id="acc-new-username" type="text" required /></label>
+        <label><span>New Password (optional — leave blank to keep current)</span><input id="acc-new-pw" type="password" minlength="4" placeholder="Enter new password" /></label>
+        <div id="acc-msg" class="muted small"></div>
+        <button type="submit" class="btn btn-cyan">Update Username / Password</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

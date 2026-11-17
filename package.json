@@ -1,0 +1,14 @@
+{
+  "name": "tower-system-vtt",
+  "version": "1.0.0",
+  "description": "Tower System VTT — Mobile-friendly D&D & Korean Manhwa Tower RPG with DM/Player logins, custom mechanics builder, d2-d100 dice, real-time monster HP tracking, vertical tower map, and prompt-based AI character art.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
