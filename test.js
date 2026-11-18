@@ -25,12 +25,27 @@ async function runTests() {
     assert.strictEqual(d100.rolls.length, 2);
     assert.ok(d100.rolls.every((n) => n >= 1 && n <= 100));
 
-    // 2. DM login & role isolation
-    const badDm = await req(baseUrl, '/api/auth/login', { role: 'dm', passcode: 'wrong' });
+    // 2. DM & Player mock logins + role isolation
+    const badDm = await req(baseUrl, '/api/auth/login', { identifier: 'admin', password: 'wrong' });
     assert.strictEqual(badDm.status, 401);
-    const okDm = await req(baseUrl, '/api/auth/login', { role: 'dm', passcode: 'dm123' });
+    const okDm = await req(baseUrl, '/api/auth/login', { identifier: 'admin', password: '123456' });
     assert.strictEqual(okDm.status, 200);
     assert.strictEqual(okDm.data.session.role, 'dm');
+    const mockPlayer = await req(baseUrl, '/api/auth/login', { identifier: 'player', password: '123456' });
+    assert.strictEqual(mockPlayer.status, 200);
+    assert.strictEqual(mockPlayer.data.session.role, 'player');
+    assert.strictEqual(mockPlayer.data.session.username, 'player');
+
+    // Unified first-time login auto-activation via invited email
+    await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'dm_manage_invites',
+      payload: { subAction: 'add', email: 'first@tower.gg', characterName: 'First Climber', race: 'Elf', className: 'Mage' },
+    });
+    const unifiedFirst = await req(baseUrl, '/api/auth/login', { identifier: 'first@tower.gg', password: 'initpass' });
+    assert.strictEqual(unifiedFirst.status, 200);
+    assert.strictEqual(unifiedFirst.data.firstTimeActivated, true);
+    assert.strictEqual(unifiedFirst.data.session.role, 'player');
 
     // 3. DM whitelists player email -> first-time login creates password -> change username & password -> re-login
     const invite = await req(baseUrl, '/api/action', {
@@ -194,7 +209,94 @@ async function runTests() {
     });
     assert.ok(gdocImport.data.deities.some((d) => d.name.includes('Noxar')));
 
-    console.log('ALL 10 INTEGRATION TEST SUITES PASSED!');
+    // 11. Story Beats orchestration (add, present, spawn monsters, award treasure, player filtering)
+    const addBeat = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: {
+        subAction: 'add_beat',
+        title: '3F • Bridge Guardian',
+        floor: 3,
+        narration: 'A crystal sentinel blocks the bridge.',
+        dmSecret: 'Weak to Fire.',
+        encounters: [{ name: 'Bridge Sentinel', maxHp: 40, ac: 15, dr: 2, startX: 10, startY: 5 }],
+        treasures: [{ name: 'Bridge Key', category: 'relic', gold: 75, manaStones: 2 }],
+      },
+    });
+    assert.strictEqual(addBeat.status, 200);
+    const beatId = addBeat.data.beat.id;
+
+    // Unpresented beat should be hidden from player state
+    const beforePresent = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    assert.ok(!beforePresent.data.storyBeats.some((b) => b.id === beatId));
+
+    await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'present_beat', beatId } });
+    const afterPresent = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    const playerBeat = afterPresent.data.storyBeats.find((b) => b.id === beatId);
+    assert.ok(playerBeat);
+    assert.strictEqual(playerBeat.dmSecret, null);
+
+    const spawnBeat = await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'spawn_beat_monsters', beatId } });
+    assert.strictEqual(spawnBeat.data.spawned.length, 1);
+
+    // Story Beat Tactical Arena Map defaults to 20x20 and supports switching to 25x25 / custom sizes
+    const beatArenaState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    const arenaBeat = beatArenaState.data.storyBeats.find((b) => b.id === beatId);
+    assert.strictEqual(arenaBeat.arena.cols, 20);
+    assert.strictEqual(arenaBeat.arena.rows, 20);
+    const spawnedTok = arenaBeat.arena.tokens.find((t) => t.id === spawnBeat.data.spawned[0].id);
+    assert.ok(spawnedTok);
+    assert.strictEqual(spawnedTok.x, 9); // 1-based startX 10 -> 0-based 9
+    assert.strictEqual(spawnedTok.y, 4); // 1-based startY 5 -> 0-based 4
+
+    // DM designates & saves starting positions and resets to them
+    await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'move_beat_token', beatId, tokenId: heroCharId, x: 4, y: 15 } });
+    await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'save_beat_starts', beatId } });
+    await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'move_beat_token', beatId, tokenId: heroCharId, x: 1, y: 1 } });
+    await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'reset_beat_starts', beatId } });
+    const resetArenaState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    const resetHeroTok = resetArenaState.data.storyBeats.find((b) => b.id === beatId).arena.tokens.find((t) => t.id === heroCharId);
+    assert.strictEqual(resetHeroTok.x, 4);
+    assert.strictEqual(resetHeroTok.y, 15);
+
+    await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'set_beat_grid', beatId, cols: 25, rows: 25 } });
+    const resizedState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    const resizedBeat = resizedState.data.storyBeats.find((b) => b.id === beatId);
+    assert.strictEqual(resizedBeat.arena.cols, 25);
+    assert.strictEqual(resizedBeat.arena.rows, 25);
+
+    const awardBeat = await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'award_beat_treasure', beatId, characterId: heroCharId } });
+    assert.strictEqual(awardBeat.status, 200);
+
+    // 12. Level 1 start (10 unspent stat points), stat allocation, and Story Beat XP -> Level Up (+2 stat points)
+    const beforeXpState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    const heroBefore = beforeXpState.data.characters[heroCharId];
+    assert.strictEqual(heroBefore.level, 1);
+    assert.strictEqual(heroBefore.unspentStatPoints, 10);
+    const prevStr = heroBefore.stats.STR;
+
+    const alloc = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'allocate_stat',
+      payload: { statKey: 'STR', amount: 3 },
+    });
+    assert.strictEqual(alloc.data.character.stats.STR, prevStr + 3);
+    assert.strictEqual(alloc.data.character.unspentStatPoints, 7);
+
+    // Award 120 XP from Story Beat -> Level 1 (100 XP) -> Level 2 with 20 XP leftover and 7 + 2 = 9 unspent stat points
+    await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: { subAction: 'award_beat_xp', beatId, characterId: heroCharId, xpReward: 120 },
+    });
+    const afterXpState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    const heroAfter = afterXpState.data.characters[heroCharId];
+    assert.strictEqual(heroAfter.level, 2);
+    assert.strictEqual(heroAfter.xp, 20);
+    assert.strictEqual(heroAfter.unspentStatPoints, 9);
+
+    console.log('ALL 12 INTEGRATION TEST SUITES PASSED!');
   } finally {
     await req(baseUrl, '/api/action', { role: 'dm', type: 'reset_campaign' }).catch(() => {});
     server.close();

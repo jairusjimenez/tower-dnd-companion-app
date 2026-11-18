@@ -3,133 +3,92 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Tower System VTT — Custom D&amp;D &amp; Manhwa RPG</title>
+  <title>The Tower — DnD Companion App</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <!-- Real-Time System Toast Overlay -->
   <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+  <div id="map-token-tooltip" class="token-tooltip hidden" role="tooltip"></div>
 
   <!-- ===================================================================== -->
-  <!-- LOGIN PORTAL VIEW                                                     -->
+  <!-- SINGLE LOGIN PORTAL VIEW ("The Tower")                                -->
   <!-- ===================================================================== -->
   <main id="login-view" class="view active">
-    <div class="login-shell">
-      <header class="brand-banner">
-        <div class="system-badge">[ SYSTEM INITIALIZATION ]</div>
-        <h1>TOWER SYSTEM VTT</h1>
-        <p class="subtitle">
-          Vertical Manhwa Tower Exploration • Custom DM Mechanics • Reactive Combat • Free-Flow Magic • Dice up to d100
-        </p>
-      </header>
+    <div class="login-stage">
+      <!-- Ambient Tower Spire Backdrop -->
+      <svg class="tower-bg-art" viewBox="0 0 800 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        <defs>
+          <radialGradient id="towerAura" cx="50%" cy="32%" r="55%">
+            <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.28" />
+            <stop offset="45%" stop-color="#6366f1" stop-opacity="0.12" />
+            <stop offset="100%" stop-color="#070b14" stop-opacity="0" />
+          </radialGradient>
+          <linearGradient id="spireBeam" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#7dd3fc" stop-opacity="0.7" />
+            <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.18" />
+            <stop offset="100%" stop-color="#070b14" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+        <rect width="800" height="900" fill="url(#towerAura)" />
+        <polygon points="400,45 480,860 320,860" fill="url(#spireBeam)" opacity="0.22" />
+        <polygon points="400,90 432,860 368,860" fill="#0b1426" stroke="#38bdf8" stroke-opacity="0.28" stroke-width="1.2" />
+        <line x1="400" y1="30" x2="400" y2="880" stroke="#7dd3fc" stroke-opacity="0.35" stroke-width="1.5" stroke-dasharray="6 8" />
+        <g class="rune-ring" transform="translate(400 280)">
+          <circle r="210" fill="none" stroke="#38bdf8" stroke-opacity="0.18" stroke-width="1" stroke-dasharray="12 8" />
+          <circle r="155" fill="none" stroke="#a855f7" stroke-opacity="0.2" stroke-width="1" stroke-dasharray="4 10" />
+        </g>
+        <circle class="mote mote-1" cx="220" cy="240" r="2.5" fill="#7dd3fc" />
+        <circle class="mote mote-2" cx="585" cy="210" r="2" fill="#c084fc" />
+        <circle class="mote mote-3" cx="290" cy="540" r="2" fill="#38bdf8" />
+        <circle class="mote mote-4" cx="520" cy="590" r="2.5" fill="#fbbf24" />
+      </svg>
 
-      <div class="login-grid">
-        <!-- PLAYER LOGIN CARD (Email First-Time Setup + Username/Password) -->
-        <section class="panel card-glow-cyan">
-          <div class="panel-header">
-            <span class="tag tag-cyan">PLAYER PORTAL</span>
-            <h2>Climber / Player Login</h2>
+      <div class="login-shell">
+        <header class="brand-banner">
+          <div class="tower-crest" aria-hidden="true">
+            <svg viewBox="0 0 64 64" width="46" height="46">
+              <defs>
+                <linearGradient id="crestGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#e0f2fe" />
+                  <stop offset="50%" stop-color="#38bdf8" />
+                  <stop offset="100%" stop-color="#6366f1" />
+                </linearGradient>
+              </defs>
+              <polygon points="32,4 44,54 20,54" fill="rgba(56,189,248,0.14)" stroke="url(#crestGrad)" stroke-width="2" />
+              <line x1="32" y1="10" x2="32" y2="58" stroke="#7dd3fc" stroke-width="1.6" />
+              <polygon points="32,18 39,27 32,36 25,27" fill="#38bdf8" fill-opacity="0.4" stroke="#e0f2fe" stroke-width="1.2" />
+              <line x1="14" y1="54" x2="50" y2="54" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" />
+            </svg>
           </div>
+          <h1>The Tower</h1>
+          <p class="brand-subtitle">DnD Companion App</p>
+        </header>
 
-          <div class="segmented" id="player-auth-tabs">
-            <button type="button" class="seg-btn active" data-auth-mode="returning">Sign In (Username / Email)</button>
-            <button type="button" class="seg-btn" data-auth-mode="first-time">First-Time Email Setup</button>
-          </div>
-
-          <!-- Returning Player Login -->
+        <section id="login-card" class="login-monolith">
           <form id="player-login-form" class="stack-form">
-            <label>
-              <span>Username or Invited Email</span>
-              <input id="login-identifier" type="text" placeholder="e.g. kaelen or kaelen@tower.gg" required />
+            <label for="login-identifier">
+              <span>Username or Email</span>
+              <input id="login-identifier" type="text" autocomplete="username" placeholder="Username or email" required />
             </label>
-            <label>
+            <label for="login-password">
               <span>Password</span>
-              <input id="login-password" type="password" placeholder="Enter your password" required />
+              <input id="login-password" type="password" autocomplete="current-password" placeholder="Password" required />
             </label>
-            <button type="submit" class="btn btn-cyan btn-lg">Enter Tower as Player</button>
-            <p class="hint-text">First time logging in? Switch to <strong>First-Time Email Setup</strong> above with the email you gave your DM.</p>
+            <button type="submit" class="btn btn-cyan btn-lg btn-glow-cyan">Enter The Tower</button>
           </form>
 
-          <!-- First-Time Email Onboarding -->
-          <form id="player-activate-form" class="stack-form hidden">
-            <label>
-              <span>Your Invited Email Address</span>
-              <div class="row-inline">
-                <input id="activate-email" type="email" placeholder="name@example.com" required />
-                <button type="button" id="btn-check-email" class="btn btn-outline">Check Email</button>
-              </div>
-            </label>
-
-            <div class="demo-chips">
-              <span class="muted-label">Demo invited emails (pending first-time setup):</span>
-              <button type="button" class="chip-btn" data-demo-email="kaelen@tower.gg">kaelen@tower.gg</button>
-              <button type="button" class="chip-btn" data-demo-email="thalindra@tower.gg">thalindra@tower.gg</button>
-              <button type="button" class="chip-btn" data-demo-email="vex@tower.gg">vex@tower.gg</button>
-              <button type="button" class="chip-btn" data-demo-email="bramwell@tower.gg">bramwell@tower.gg</button>
-            </div>
-
-            <div id="activate-step2" class="stack-form hidden">
-              <div id="activate-char-banner" class="system-callout"></div>
-              <label>
-                <span>Choose Username (editable anytime later)</span>
-                <input id="activate-username" type="text" placeholder="e.g. shadow_monarch" />
-              </label>
-              <label>
-                <span>Create Password (min 4 chars)</span>
-                <input id="activate-password" type="password" placeholder="Create your password" minlength="4" />
-              </label>
-              <details class="sub-details">
-                <summary>Optional: Create a brand-new character instead</summary>
-                <div class="stack-form mt-sm">
-                  <label class="checkbox-row">
-                    <input type="checkbox" id="activate-new-char-toggle" />
-                    <span>Create new custom character</span>
-                  </label>
-                  <input id="activate-char-name" type="text" placeholder="Character Name" />
-                  <div class="grid-2">
-                    <input id="activate-char-race" type="text" placeholder="Race (Elf, Human...)" />
-                    <input id="activate-char-class" type="text" placeholder="Class (Blade, Mage...)" />
-                  </div>
-                </div>
-              </details>
-              <button type="submit" class="btn btn-cyan btn-lg">Create Password &amp; Log In</button>
-            </div>
-          </form>
-          <div id="player-login-error" class="error-box hidden"></div>
-        </section>
-
-        <!-- DUNGEON MASTER LOGIN CARD -->
-        <section class="panel card-glow-gold">
-          <div class="panel-header">
-            <span class="tag tag-gold">ADMIN / ARCHITECT</span>
-            <h2>Dungeon Master Login</h2>
-          </div>
-          <p class="muted">
-            Separate DM Sanctum with Session Start/Stop, System Toast Broadcaster, Monster Spawner, Custom Stats &amp; Formulas Builder, Fog of War Tower Control, and Google Docs Deity Importer.
-          </p>
-          <form id="dm-login-form" class="stack-form">
-            <label>
-              <span>Dungeon Master Passcode <span class="badge-inline">Default: dm123</span></span>
-              <input id="dm-passcode" type="password" value="dm123" required />
-            </label>
-            <button type="submit" class="btn btn-gold btn-lg">Open DM Sanctum</button>
-          </form>
-          <div id="dm-login-error" class="error-box hidden"></div>
-
-          <div class="feature-list">
-            <div><strong>Player Onboarding:</strong> Whitelist player emails in DM Sanctum -> players set password on 1st login.</div>
-            <div><strong>Real-Time Sync:</strong> Server-Sent Events push monster HP, toasts, and map updates instantly across mobile &amp; desktop.</div>
-          </div>
+          <div id="player-login-error" class="error-box hidden" role="alert"></div>
         </section>
       </div>
     </div>
   </main>
 
   <!-- ===================================================================== -->
-  <!-- PLAYER DASHBOARD VIEW                                                 -->
+  <!-- PLAYER DASHBOARD VIEW (Mobile-First)                                  -->
   <!-- ===================================================================== -->
-  <section id="player-view" class="view app-shell">
-    <header class="topbar">
+  <section id="player-view" class="view app-shell player-shell">
+    <header class="topbar player-topbar">
       <div class="topbar-left">
         <img id="p-top-avatar" class="avatar-sm" alt="Character Portrait" />
         <div class="topbar-identity">
@@ -138,8 +97,8 @@
             <span id="p-top-rank" class="tag tag-cyan">Rank</span>
           </div>
           <div class="topbar-sub">
-            <span id="p-session-pill" class="status-pill live">SESSION LIVE</span>
-            <span id="p-combat-mode-pill" class="status-pill reactive">REACTIVE COMBAT</span>
+            <span id="p-session-pill" class="status-pill live">LIVE</span>
+            <span id="p-combat-mode-pill" class="status-pill reactive">REACTIVE</span>
           </div>
         </div>
       </div>
@@ -148,42 +107,63 @@
           <span class="vital-chip hp">HP <b id="p-top-hp">0/0</b></span>
           <span class="vital-chip mp"><span id="p-resource-label">MP</span> <b id="p-top-mp">0/0</b></span>
         </div>
-        <button type="button" id="btn-open-account-modal" class="btn btn-sm btn-outline">Account</button>
-        <button type="button" id="btn-p-logout" class="btn btn-sm btn-danger-outline">Logout</button>
+        <button type="button" id="btn-open-account-modal" class="btn btn-xs btn-outline">Account</button>
+        <button type="button" id="btn-p-logout" class="btn btn-xs btn-danger-outline">Exit</button>
       </div>
     </header>
 
     <!-- Session Stopped Banner -->
     <div id="p-session-stopped-banner" class="alert-banner warning hidden">
       <div>
-        <strong>[SYSTEM]: SESSION STOPPED / PAUSED BY DUNGEON MASTER</strong>
-        <span id="p-session-paused-msg">Waiting for DM to start session...</span>
+        <strong>SESSION PAUSED</strong>
+        <span id="p-session-paused-msg">Waiting for DM...</span>
       </div>
     </div>
 
     <!-- Real-Time Reactive Combat Trigger Banner -->
     <div id="p-reaction-banner" class="reaction-banner hidden">
       <div class="reaction-info">
-        <span class="tag tag-crimson">REACTION WINDOW</span>
+        <span class="tag tag-crimson">REACTION</span>
         <strong id="p-reaction-text">Monster attacks you!</strong>
       </div>
       <div class="reaction-actions">
-        <button type="button" id="btn-react-counter" class="btn btn-sm btn-crimson">Counter-Attack</button>
-        <button type="button" id="btn-react-parry" class="btn btn-sm btn-cyan">Parry / Dodge</button>
-        <button type="button" id="btn-react-spell" class="btn btn-sm btn-purple">Reactive Spell</button>
+        <button type="button" id="btn-react-counter" class="btn btn-sm btn-crimson">Counter</button>
+        <button type="button" id="btn-react-parry" class="btn btn-sm btn-cyan">Parry</button>
+        <button type="button" id="btn-react-spell" class="btn btn-sm btn-purple">Spell</button>
         <button type="button" id="btn-react-accept" class="btn btn-sm btn-outline">Take Hit</button>
       </div>
     </div>
 
-    <!-- Player Screen Navigation (Desktop Tabs + Sticky Mobile Bottom Nav) -->
-    <nav class="subnav" id="player-nav">
-      <button type="button" class="nav-btn active" data-p-tab="stats">Stats</button>
-      <button type="button" class="nav-btn" data-p-tab="equipment">Equipment</button>
-      <button type="button" class="nav-btn" data-p-tab="inventory">Inventory</button>
-      <button type="button" class="nav-btn" data-p-tab="magic">Magic &amp; Deity</button>
-      <button type="button" class="nav-btn" data-p-tab="map">Tower Map</button>
-      <button type="button" class="nav-btn" data-p-tab="dice">Dice (d100)</button>
-      <button type="button" class="nav-btn" data-p-tab="art">AI Art</button>
+    <!-- Player Navigation (Sticky Bottom Dock on Mobile, Pill Bar on Desktop) -->
+    <nav class="subnav player-nav" id="player-nav" aria-label="Player sections">
+      <button type="button" class="nav-btn active" data-p-tab="stats">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+        <span>Stats</span>
+      </button>
+      <button type="button" class="nav-btn" data-p-tab="equipment">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2l7 4v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-4z"/></svg>
+        <span>Gear</span>
+      </button>
+      <button type="button" class="nav-btn" data-p-tab="inventory">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 7h12l1 13H5L6 7z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg>
+        <span>Bag</span>
+      </button>
+      <button type="button" class="nav-btn" data-p-tab="magic">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/></svg>
+        <span>Magic</span>
+      </button>
+      <button type="button" class="nav-btn" data-p-tab="map">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 4l6 2 5-2v14l-5 2-6-2-5 2V6l5-2z"/><path d="M9 4v14M15 6v14"/></svg>
+        <span>Tower</span>
+      </button>
+      <button type="button" class="nav-btn" data-p-tab="dice">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="12 2 21 7 21 17 12 22 3 17 3 7 12 2"/><circle cx="12" cy="12" r="2"/></svg>
+        <span>Dice</span>
+      </button>
+      <button type="button" class="nav-btn" data-p-tab="art">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>
+        <span>Art</span>
+      </button>
     </nav>
 
     <div class="app-content" id="player-panels">
@@ -191,14 +171,14 @@
       <div class="tab-pane active" data-p-pane="stats">
         <div class="two-col">
           <div class="col stack">
-            <div class="panel">
+            <div class="panel card-glow-cyan">
               <div class="panel-header">
-                <h3>[STATUS WINDOW]</h3>
-                <button type="button" id="btn-p-roll-init" class="btn btn-sm btn-outline">Roll Initiative</button>
+                <h3>Status</h3>
+                <button type="button" id="btn-p-roll-init" class="btn btn-xs btn-cyan">Roll Initiative</button>
               </div>
               <div class="vitals-editor">
                 <div class="bar-card">
-                  <div class="bar-row"><span>Health Points (HP)</span><strong id="p-hp-readout">34 / 34</strong></div>
+                  <div class="bar-row"><span>HP</span><strong id="p-hp-readout">34 / 34</strong></div>
                   <div class="progress"><div id="p-hp-fill" class="progress-fill hp"></div></div>
                   <div class="btn-row mt-xs">
                     <button type="button" class="btn btn-xs btn-outline" data-hp-delta="-5">-5</button>
@@ -219,45 +199,55 @@
                 </div>
               </div>
 
+              <div class="bar-card mt-xs">
+                <div class="bar-row"><span>Experience (XP)</span><strong id="p-xp-readout">Lv 1 • 0 / 100 XP</strong></div>
+                <div class="progress"><div id="p-xp-fill" class="progress-fill xp"></div></div>
+              </div>
+
               <div class="mini-stats-strip">
-                <div class="mini-box"><span>Armor Class</span><strong id="p-ac-val">14</strong></div>
-                <div class="mini-box"><span>Armor DR</span><strong id="p-dr-val">2</strong></div>
-                <div class="mini-box"><span>Move Speed</span><strong id="p-speed-val">6 Spaces</strong></div>
-                <div class="mini-box"><span>Divine Favor</span><strong id="p-favor-val">3</strong></div>
+                <div class="mini-box"><span>AC</span><strong id="p-ac-val">14</strong></div>
+                <div class="mini-box"><span>DR</span><strong id="p-dr-val">2</strong></div>
+                <div class="mini-box"><span>Move</span><strong id="p-speed-val">6 Sp</strong></div>
+                <div class="mini-box"><span>Favor</span><strong id="p-favor-val">3</strong></div>
               </div>
 
               <div class="panel-subheader">
-                <span>Custom Attributes (Formula: <code id="p-formula-badge">floor((SCORE-10)/2)</code>)</span>
+                <span>Attributes <span id="p-stat-points-pill" class="tag tag-gold hidden">10 Pts</span></span>
+                <code id="p-formula-badge" class="formula-pill">floor((SCORE-10)/2)</code>
               </div>
               <div id="p-stats-grid" class="stats-grid"></div>
 
-              <div class="panel-subheader"><span>Skills &amp; Proficiencies</span></div>
-              <div id="p-skills-list" class="list-stack"></div>
+              <details class="sub-details mt-sm">
+                <summary>Skills &amp; Proficiencies</summary>
+                <div id="p-skills-list" class="list-stack mt-sm"></div>
+              </details>
             </div>
           </div>
 
           <div class="col stack">
+            <!-- ACTIVE STORY BEAT FROM DM -->
+            <div id="p-active-story-card" class="panel card-glow-gold hidden"></div>
+
             <!-- REAL-TIME MONSTER HP CHECK & INFLICT DAMAGE -->
             <div class="panel card-glow-crimson">
               <div class="panel-header">
-                <h3>Active Tower Monsters (Real-Time HP)</h3>
-                <span class="tag tag-crimson">LIVE SYNC</span>
+                <h3>Monsters</h3>
+                <span class="tag tag-crimson">LIVE HP</span>
               </div>
-              <p class="muted small">Select a monster summoned by the DM to check its live HP or inflict damage right away.</p>
               <div id="p-monsters-list" class="list-stack"></div>
 
               <div class="damage-box mt-sm">
                 <label>
-                  <span>Target Monster</span>
+                  <span>Target</span>
                   <select id="p-target-monster"></select>
                 </label>
-                <div class="grid-2">
+                <div class="grid-2 mt-xs">
                   <label>
-                    <span>Damage Amount</span>
+                    <span>Damage</span>
                     <input id="p-direct-dmg" type="number" min="1" value="10" />
                   </label>
                   <label>
-                    <span>Damage Type</span>
+                    <span>Type</span>
                     <select id="p-dmg-type">
                       <option value="Slashing">Slashing</option>
                       <option value="Piercing">Piercing</option>
@@ -265,36 +255,32 @@
                       <option value="Arcane">Arcane</option>
                       <option value="Shadow">Shadow</option>
                       <option value="Radiant">Radiant</option>
-                      <option value="True">True Damage</option>
+                      <option value="True">True</option>
                     </select>
                   </label>
                 </div>
-                <div class="btn-row mt-xs">
-                  <button type="button" id="btn-p-inflict-direct" class="btn btn-crimson">Inflict Damage to Monster</button>
-                  <button type="button" id="btn-p-weapon-strike" class="btn btn-cyan">Strike w/ Main Weapon</button>
+                <div class="btn-row mt-sm">
+                  <button type="button" id="btn-p-inflict-direct" class="btn btn-crimson">Deal Damage</button>
+                  <button type="button" id="btn-p-weapon-strike" class="btn btn-cyan">Weapon Strike</button>
                 </div>
               </div>
             </div>
 
-            <!-- SYSTEM FEED & QUESTS -->
-            <div class="panel">
-              <div class="panel-header">
-                <h3>System Notices &amp; Combat Log</h3>
-              </div>
-              <div id="p-system-feed" class="feed-list"></div>
-            </div>
+            <details class="panel sub-details-panel">
+              <summary>System &amp; Combat Feed</summary>
+              <div id="p-system-feed" class="feed-list mt-sm"></div>
+            </details>
           </div>
         </div>
       </div>
 
       <!-- TAB 2: DEDICATED EQUIPMENT SCREEN -->
       <div class="tab-pane" data-p-pane="equipment">
-        <div class="panel">
+        <div class="panel card-glow-cyan">
           <div class="panel-header">
-            <h3>Equipment Loadout</h3>
-            <div id="p-equip-summary" class="tag tag-cyan">ATK +0 • DR 0</div>
+            <h3>Equipment</h3>
+            <div id="p-equip-summary" class="tag tag-cyan">AC 14 • DR 0</div>
           </div>
-          <p class="muted small">Equip weapons, armor, and tower relics from your Inventory. Equipped weapon &amp; DR feed directly into the DM's custom combat formulas.</p>
           <div id="p-equipment-slots" class="equip-grid"></div>
         </div>
       </div>
@@ -302,92 +288,98 @@
       <!-- TAB 3: DEDICATED INVENTORY SCREEN -->
       <div class="tab-pane" data-p-pane="inventory">
         <div class="two-col">
-          <div class="panel">
+          <div class="panel card-glow-cyan">
             <div class="panel-header">
-              <h3>Inventory Backpack</h3>
+              <h3>Inventory</h3>
               <div class="currency-pills">
-                <span class="pill-gold">Gold: <b id="p-gold-val">0</b></span>
-                <span class="pill-cyan">Mana Stones: <b id="p-stones-val">0</b></span>
+                <span class="pill-gold">G: <b id="p-gold-val">0</b></span>
+                <span class="pill-cyan">Stones: <b id="p-stones-val">0</b></span>
               </div>
             </div>
             <div class="filter-pills" id="inv-filter-pills">
               <button type="button" class="chip-btn active" data-inv-filter="all">All</button>
               <button type="button" class="chip-btn" data-inv-filter="weapon">Weapons</button>
               <button type="button" class="chip-btn" data-inv-filter="armor">Armor</button>
-              <button type="button" class="chip-btn" data-inv-filter="consumable">Consumables</button>
+              <button type="button" class="chip-btn" data-inv-filter="consumable">Potions</button>
               <button type="button" class="chip-btn" data-inv-filter="relic">Relics</button>
             </div>
             <div id="p-inventory-list" class="list-stack mt-sm"></div>
           </div>
 
-          <div class="panel">
-            <div class="panel-header"><h3>Add Item to Backpack</h3></div>
-            <form id="p-add-item-form" class="stack-form">
-              <input id="inv-new-name" type="text" placeholder="Item Name (e.g. Dragonfang Blade)" required />
+          <details class="panel sub-details-panel">
+            <summary>+ Add Item</summary>
+            <form id="p-add-item-form" class="stack-form mt-sm">
+              <label><span>Item Name</span><input id="inv-new-name" type="text" placeholder="Item Name" required /></label>
               <div class="grid-2">
-                <select id="inv-new-cat">
-                  <option value="weapon">Weapon</option>
-                  <option value="armor">Armor</option>
-                  <option value="consumable">Consumable</option>
-                  <option value="relic">Relic / Misc</option>
-                </select>
-                <input id="inv-new-qty" type="number" min="1" value="1" placeholder="Qty" />
+                <label>
+                  <span>Category</span>
+                  <select id="inv-new-cat">
+                    <option value="weapon">Weapon</option>
+                    <option value="armor">Armor</option>
+                    <option value="consumable">Consumable</option>
+                    <option value="relic">Relic</option>
+                  </select>
+                </label>
+                <label><span>Quantity</span><input id="inv-new-qty" type="number" min="1" value="1" /></label>
               </div>
               <div class="grid-2">
-                <input id="inv-new-dmg" type="text" placeholder="Dmg Dice (e.g. 2d6+3)" />
-                <input id="inv-new-range" type="number" min="0" value="2" placeholder="Range (Spaces)" />
+                <label><span>Damage Dice</span><input id="inv-new-dmg" type="text" placeholder="2d6+3" /></label>
+                <label><span>Range (Spaces)</span><input id="inv-new-range" type="number" min="0" value="2" /></label>
               </div>
               <div class="grid-2">
-                <input id="inv-new-heal-hp" type="number" min="0" value="0" placeholder="Heal HP" />
-                <input id="inv-new-dr" type="number" min="0" value="0" placeholder="DR / Armor Bonus" />
+                <label><span>Heal HP</span><input id="inv-new-heal-hp" type="number" min="0" value="0" /></label>
+                <label><span>DR Bonus</span><input id="inv-new-dr" type="number" min="0" value="0" /></label>
               </div>
-              <input id="inv-new-notes" type="text" placeholder="Description / Special Effect" />
-              <button type="submit" class="btn btn-cyan">Add to Inventory</button>
+              <label><span>Notes</span><input id="inv-new-notes" type="text" placeholder="Special effect or notes" /></label>
+              <button type="submit" class="btn btn-cyan">Add Item</button>
             </form>
-          </div>
+          </details>
         </div>
       </div>
 
       <!-- TAB 4: FREE-FLOW MAGIC & DEITY SYSTEM -->
       <div class="tab-pane" data-p-pane="magic">
         <div class="two-col">
-          <div class="panel">
+          <div class="panel card-glow-purple">
             <div class="panel-header">
-              <h3>Free-Flow Spells &amp; Grimoire</h3>
-              <span class="tag tag-purple">DETAILED SPELLS</span>
+              <h3>Spells</h3>
+              <span class="tag tag-purple">FREE-FLOW</span>
             </div>
-            <p class="muted small">Every spell lists its full mechanics explanation, damage formula, range in <strong>Spaces</strong>, and casts directly onto your target monster.</p>
-            <div class="panel-subheader"><span>My Active Spells</span></div>
             <div id="p-my-spells" class="list-stack"></div>
 
-            <div class="panel-subheader mt-md"><span>Free-Flow Tower Grimoire (Learn Any)</span></div>
-            <div id="p-grimoire-list" class="list-stack"></div>
+            <details class="sub-details mt-sm">
+              <summary>Tower Grimoire</summary>
+              <div id="p-grimoire-list" class="list-stack mt-sm"></div>
+            </details>
 
-            <details class="sub-details mt-md">
-              <summary>+ Manifest / Craft Custom Free-Flow Spell</summary>
+            <details class="sub-details mt-sm">
+              <summary>+ Craft Custom Spell</summary>
               <form id="p-craft-spell-form" class="stack-form mt-sm">
-                <input id="sp-name" type="text" placeholder="Spell Name" required />
+                <label><span>Spell Name</span><input id="sp-name" type="text" placeholder="Spell Name" required /></label>
                 <div class="grid-2">
-                  <input id="sp-element" type="text" placeholder="Element (Arcane, Fire...)" value="Arcane" />
-                  <select id="sp-action-type">
-                    <option value="Action">Action</option>
-                    <option value="Reaction">Reaction (Interrupt)</option>
-                  </select>
+                  <label><span>Element</span><input id="sp-element" type="text" value="Arcane" /></label>
+                  <label>
+                    <span>Cast Timing</span>
+                    <select id="sp-action-type">
+                      <option value="Action">Action</option>
+                      <option value="Reaction">Reaction</option>
+                    </select>
+                  </label>
                 </div>
                 <div class="grid-3">
-                  <input id="sp-dmg" type="text" placeholder="Damage (e.g. 3d8+4)" value="3d6+3" />
-                  <input id="sp-range" type="number" min="0" value="6" placeholder="Range (Spaces)" />
-                  <input id="sp-mp" type="number" min="0" value="5" placeholder="MP Cost" />
+                  <label><span>Damage Dice</span><input id="sp-dmg" type="text" value="3d6+3" /></label>
+                  <label><span>Range (Spaces)</span><input id="sp-range" type="number" min="0" value="6" /></label>
+                  <label><span>MP Cost</span><input id="sp-mp" type="number" min="0" value="5" /></label>
                 </div>
-                <textarea id="sp-expl" rows="3" placeholder="Detailed magic explanation: how it works, range in spaces, secondary effects..."></textarea>
-                <button type="submit" class="btn btn-purple">Unlock Custom Spell</button>
+                <label><span>Explanation</span><textarea id="sp-expl" rows="2" placeholder="Spell effect &amp; range details..."></textarea></label>
+                <button type="submit" class="btn btn-purple">Unlock Spell</button>
               </form>
             </details>
           </div>
 
           <div class="panel card-glow-gold">
             <div class="panel-header">
-              <h3>Patron Deity &amp; Constellation System</h3>
+              <h3>Patron Deity</h3>
               <span class="tag tag-gold">FAVOR: <b id="p-deity-favor">0</b></span>
             </div>
             <div id="p-deity-active-card" class="system-callout"></div>
@@ -398,16 +390,16 @@
 
       <!-- TAB 5: VERTICAL MANHWA TOWER MAP (SPACES GRID) -->
       <div class="tab-pane" data-p-pane="map">
-        <div class="panel map-panel">
+        <div class="panel map-panel card-glow-cyan">
           <div class="panel-header">
-            <h3>Vertical Tower Map (1F Base &rarr; Apex)</h3>
+            <h3>Tower Map</h3>
             <div class="btn-row">
-              <button type="button" class="btn btn-sm btn-outline active" data-p-maptool="move">Move Me</button>
-              <button type="button" class="btn btn-sm btn-outline" data-p-maptool="measure">Measure Spaces</button>
-              <button type="button" class="btn btn-sm btn-outline" data-p-maptool="ping">Ping</button>
+              <button type="button" class="btn btn-xs btn-outline active" data-p-maptool="move">Move</button>
+              <button type="button" class="btn btn-xs btn-outline" data-p-maptool="measure">Spaces</button>
+              <button type="button" class="btn btn-xs btn-outline" data-p-maptool="ping">Ping</button>
             </div>
           </div>
-          <div id="p-map-info" class="map-meta-bar">Tap any revealed space to move your climber token. Upper floors remain veiled in Fog of War until unlocked.</div>
+          <div id="p-map-info" class="map-meta-bar">Tap a revealed space to move.</div>
           <div class="tower-scroll-wrap">
             <canvas id="player-tower-canvas" width="520" height="1250"></canvas>
           </div>
@@ -417,9 +409,10 @@
       <!-- TAB 6: DICE ROLLER UP TO d100 -->
       <div class="tab-pane" data-p-pane="dice">
         <div class="two-col">
-          <div class="panel">
+          <div class="panel card-glow-cyan">
             <div class="panel-header">
-              <h3>Polyhedral &amp; Percentile Dice (d2 – d100)</h3>
+              <h3>Dice</h3>
+              <span class="tag tag-gold">d2 – d100</span>
             </div>
             <div class="dice-grid" id="p-dice-buttons">
               <button type="button" class="die-btn" data-sides="2">d2</button>
@@ -438,36 +431,36 @@
               <button type="button" class="die-btn die-d100" data-sides="100">d100</button>
             </div>
 
+            <div id="p-last-roll-banner" class="last-roll-card hidden"></div>
+
             <form id="p-custom-dice-form" class="stack-form mt-md">
               <div class="grid-3">
                 <label><span>Count</span><input id="p-dice-count" type="number" min="1" max="30" value="1" /></label>
-                <label><span>Sides (1–100)</span><input id="p-dice-sides" type="number" min="1" max="100" value="100" /></label>
-                <label><span>Modifier</span><input id="p-dice-mod" type="number" value="0" /></label>
+                <label><span>Sides</span><input id="p-dice-sides" type="number" min="1" max="100" value="100" /></label>
+                <label><span>Mod</span><input id="p-dice-mod" type="number" value="0" /></label>
               </div>
               <div class="grid-2">
                 <label>
-                  <span>Roll Mode</span>
+                  <span>Mode</span>
                   <select id="p-dice-mode">
                     <option value="normal">Normal</option>
-                    <option value="advantage">Advantage (Keep High)</option>
-                    <option value="disadvantage">Disadvantage (Keep Low)</option>
-                    <option value="exploding">Exploding (Max Reroll)</option>
+                    <option value="advantage">Advantage</option>
+                    <option value="disadvantage">Disadvantage</option>
+                    <option value="exploding">Exploding</option>
                   </select>
                 </label>
                 <label>
-                  <span>Apply as Damage to Monster?</span>
+                  <span>Hit Monster</span>
                   <select id="p-dice-target-monster"></select>
                 </label>
               </div>
-              <input id="p-dice-label" type="text" placeholder="Roll Label (e.g. Percentile Dodge or Crit Strike)" />
-              <button type="submit" class="btn btn-cyan btn-lg">Roll Custom Dice</button>
+              <input id="p-dice-label" type="text" placeholder="Label (optional)" />
+              <button type="submit" class="btn btn-cyan btn-lg btn-glow-cyan">Roll</button>
             </form>
-
-            <div id="p-last-roll-banner" class="last-roll-card hidden"></div>
           </div>
 
           <div class="panel">
-            <div class="panel-header"><h3>Live Party Roll Log</h3></div>
+            <div class="panel-header"><h3>Roll Log</h3></div>
             <div id="p-roll-log" class="feed-list"></div>
           </div>
         </div>
@@ -476,18 +469,25 @@
       <!-- TAB 7: AI CHARACTER ART PROMPT STUDIO -->
       <div class="tab-pane" data-p-pane="art">
         <div class="two-col">
-          <div class="panel">
+          <div class="panel card-glow-cyan">
             <div class="panel-header">
-              <h3>AI Character Art Generator</h3>
-              <span class="tag tag-cyan">PROMPT DRIVEN</span>
+              <h3>Character Art</h3>
+              <span class="tag tag-cyan">AI PROMPT</span>
             </div>
+            <div class="portrait-stage mb-sm">
+              <img id="p-art-preview" class="portrait-lg" alt="Generated Character Art" />
+            </div>
+            <div id="p-art-history" class="art-thumbs mt-xs"></div>
+          </div>
+
+          <div class="panel">
             <form id="p-art-form" class="stack-form">
               <label>
-                <span>Push Character Art Prompt</span>
-                <textarea id="p-art-prompt" rows="4" placeholder="Describe race, weapon, armor, mana aura, and mood (e.g. Tiefling shadow assassin with glowing purple twin daggers in obsidian armor)..."></textarea>
+                <span>Prompt</span>
+                <textarea id="p-art-prompt" rows="3" placeholder="Describe race, weapon, armor, aura..."></textarea>
               </label>
               <label>
-                <span>Visual Style</span>
+                <span>Style</span>
                 <select id="p-art-style">
                   <option value="Korean Manhwa Webtoon">Korean Manhwa Webtoon</option>
                   <option value="Dark Fantasy Concept">Dark Fantasy Concept</option>
@@ -497,23 +497,13 @@
                 </select>
               </label>
               <div class="demo-chips">
-                <span class="muted-label">Quick Prompt Boosters:</span>
-                <button type="button" class="chip-btn" data-art-chip="glowing cyan shinsu aura">Cyan Shinsu Aura</button>
-                <button type="button" class="chip-btn" data-art-chip="crimson fire greatsword">Crimson Fire Greatsword</button>
-                <button type="button" class="chip-btn" data-art-chip="purple shadow monarch daggers">Shadow Monarch Daggers</button>
-                <button type="button" class="chip-btn" data-art-chip="golden holy paladin armor">Golden Holy Armor</button>
+                <button type="button" class="chip-btn" data-art-chip="glowing cyan shinsu aura">Cyan Aura</button>
+                <button type="button" class="chip-btn" data-art-chip="crimson fire greatsword">Crimson Blade</button>
+                <button type="button" class="chip-btn" data-art-chip="purple shadow monarch daggers">Shadow Daggers</button>
+                <button type="button" class="chip-btn" data-art-chip="golden holy paladin armor">Holy Armor</button>
               </div>
-              <button type="submit" class="btn btn-cyan btn-lg">Push Prompt &amp; Generate AI Art</button>
+              <button type="submit" class="btn btn-cyan btn-lg btn-glow-cyan">Generate Art</button>
             </form>
-          </div>
-
-          <div class="panel">
-            <div class="panel-header"><h3>Character Portrait Preview</h3></div>
-            <div class="portrait-stage">
-              <img id="p-art-preview" class="portrait-lg" alt="Generated Character Art" />
-            </div>
-            <div class="panel-subheader mt-sm"><span>Recent Prompts</span></div>
-            <div id="p-art-history" class="art-thumbs"></div>
           </div>
         </div>
       </div>
@@ -523,7 +513,7 @@
   <!-- ===================================================================== -->
   <!-- DUNGEON MASTER SANCTUM VIEW                                           -->
   <!-- ===================================================================== -->
-  <section id="dm-view" class="view app-shell">
+  <section id="dm-view" class="view app-shell dm-shell">
     <header class="topbar topbar-dm">
       <div class="topbar-left">
         <span class="tag tag-gold">DM SANCTUM</span>
@@ -536,23 +526,147 @@
         </div>
       </div>
       <div class="topbar-actions">
-        <button type="button" id="btn-dm-toggle-session" class="btn btn-sm btn-gold">Stop Session</button>
+        <button type="button" id="btn-dm-toggle-session" class="btn btn-sm btn-gold btn-glow-gold">Stop Session</button>
         <button type="button" id="btn-dm-reset" class="btn btn-sm btn-outline">Reset Demo</button>
         <button type="button" id="btn-dm-logout" class="btn btn-sm btn-danger-outline">Logout</button>
       </div>
     </header>
 
-    <nav class="subnav" id="dm-nav">
-      <button type="button" class="nav-btn active" data-dm-tab="monsters">Monsters &amp; HP</button>
-      <button type="button" class="nav-btn" data-dm-tab="session">Toasts, Session &amp; Emails</button>
-      <button type="button" class="nav-btn" data-dm-tab="map">Vertical Tower Map</button>
-      <button type="button" class="nav-btn" data-dm-tab="rules">Custom Mechanics &amp; Deities</button>
-      <button type="button" class="nav-btn" data-dm-tab="party">Party, Secret Dice &amp; Notes</button>
+    <nav class="subnav dm-nav" id="dm-nav">
+      <button type="button" class="nav-btn active" data-dm-tab="story">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span>Story Beats</span>
+      </button>
+      <button type="button" class="nav-btn" data-dm-tab="monsters">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/></svg>
+        <span>Monsters &amp; HP</span>
+      </button>
+      <button type="button" class="nav-btn" data-dm-tab="session">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Toasts &amp; Invites</span>
+      </button>
+      <button type="button" class="nav-btn" data-dm-tab="map">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 4l6 2 5-2v14l-5 2-6-2-5 2V6l5-2z"/></svg>
+        <span>Tower Map</span>
+      </button>
+      <button type="button" class="nav-btn" data-dm-tab="rules">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Rules &amp; Deities</span>
+      </button>
+      <button type="button" class="nav-btn" data-dm-tab="party">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg>
+        <span>Party &amp; Dice</span>
+      </button>
     </nav>
 
     <div class="app-content">
+      <!-- DM TAB 0 (DEFAULT): STORY BEATS & ENCOUNTER/TREASURE ORCHESTRATION -->
+      <div class="tab-pane active" data-dm-pane="story">
+        <div class="two-col">
+          <div class="col stack">
+            <div class="panel card-glow-gold">
+              <div class="panel-header">
+                <h3>Story Beats</h3>
+                <div class="row-inline" style="max-width: 240px;">
+                  <select id="dm-story-loot-target" title="Treasure Recipient"></select>
+                </div>
+              </div>
+              <div id="dm-story-list" class="list-stack"></div>
+            </div>
+          </div>
+
+          <div class="col stack">
+            <div class="panel card-glow-cyan">
+              <div class="panel-header">
+                <h3>+ New Story Beat</h3>
+                <span class="tag tag-cyan">ORCHESTRATOR</span>
+              </div>
+              <form id="dm-add-beat-form" class="stack-form">
+                <div class="grid-2">
+                  <label><span>Beat Title</span><input id="beat-title" type="text" placeholder="e.g. 3F • Shinsu Bridge" required /></label>
+                  <label><span>Floor</span><input id="beat-floor" type="number" min="1" max="20" value="3" /></label>
+                </div>
+                <div class="grid-2">
+                  <label><span>XP Reward</span><input id="beat-xp" type="number" min="0" value="100" /></label>
+                  <label>
+                    <span>Arena Grid Size</span>
+                    <select id="beat-grid-size">
+                      <option value="20" selected>20 × 20 Spaces (Default)</option>
+                      <option value="25">25 × 25 Spaces</option>
+                      <option value="30">30 × 30 Spaces</option>
+                      <option value="40">40 × 40 Spaces</option>
+                      <option value="50">50 × 50 Spaces</option>
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  <span>Player Narration (Shown when presented)</span>
+                  <textarea id="beat-narration" rows="3" placeholder="Scene description read/pushed to players..."></textarea>
+                </label>
+                <label>
+                  <span>DM Secret Note (DM Eyes Only)</span>
+                  <input id="beat-secret" type="text" placeholder="Hidden trap DC, twist, or condition..." />
+                </label>
+
+                <details class="sub-details">
+                  <summary>+ Attach Monster Encounters (Optional)</summary>
+                  <div class="stack-form mt-sm">
+                    <div id="beat-encounters-staged" class="list-stack"></div>
+                    <div class="grid-2">
+                      <label><span>Monster Name</span><input id="beat-mon-name" type="text" placeholder="e.g. Goblin Gatekeeper" /></label>
+                      <label><span>Damage Dice</span><input id="beat-mon-dmg" type="text" value="2d6+3" /></label>
+                    </div>
+                    <div class="grid-3">
+                      <label><span>Max HP</span><input id="beat-mon-hp" type="number" min="1" value="35" /></label>
+                      <label><span>Armor Class (AC)</span><input id="beat-mon-ac" type="number" value="14" /></label>
+                      <label><span>Damage Red. (DR)</span><input id="beat-mon-dr" type="number" value="1" /></label>
+                    </div>
+                    <div class="grid-2">
+                      <label><span>Start X (Col, optional)</span><input id="beat-mon-x" type="number" min="1" max="100" placeholder="Auto" /></label>
+                      <label><span>Start Y (Row, optional)</span><input id="beat-mon-y" type="number" min="1" max="100" placeholder="Auto" /></label>
+                    </div>
+                    <button type="button" id="btn-stage-beat-mon" class="btn btn-sm btn-crimson">+ Add Monster to Beat</button>
+                  </div>
+                </details>
+
+                <details class="sub-details">
+                  <summary>+ Attach Treasures / Loot (Optional)</summary>
+                  <div class="stack-form mt-sm">
+                    <div id="beat-treasures-staged" class="list-stack"></div>
+                    <div class="grid-2">
+                      <label><span>Item Name</span><input id="beat-tr-name" type="text" placeholder="e.g. Gate Key Blade" /></label>
+                      <label>
+                        <span>Category</span>
+                        <select id="beat-tr-cat">
+                          <option value="relic">Relic</option>
+                          <option value="weapon">Weapon</option>
+                          <option value="armor">Armor</option>
+                          <option value="consumable">Consumable</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div class="grid-3">
+                      <label><span>Gold</span><input id="beat-tr-gold" type="number" min="0" value="100" /></label>
+                      <label><span>Mana Stones</span><input id="beat-tr-stones" type="number" min="0" value="2" /></label>
+                      <label><span>Weapon Dice</span><input id="beat-tr-dmg" type="text" placeholder="e.g. 2d6" /></label>
+                    </div>
+                    <button type="button" id="btn-stage-beat-tr" class="btn btn-sm btn-cyan">+ Add Treasure to Beat</button>
+                  </div>
+                </details>
+
+                <label class="checkbox-row">
+                  <input type="checkbox" id="beat-present-now" />
+                  <span>Present immediately to Players</span>
+                </label>
+                <button type="submit" class="btn btn-gold btn-lg btn-glow-gold">Add Story Beat</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- DM TAB 1: MONSTERS, REAL-TIME HP & REACTIVE MONSTER ATTACKS -->
-      <div class="tab-pane active" data-dm-pane="monsters">
+      <div class="tab-pane" data-dm-pane="monsters">
         <div class="two-col">
           <div class="col stack">
             <div class="panel">
@@ -820,6 +934,53 @@
       </div>
     </div>
   </section>
+
+  <!-- ===================================================================== -->
+  <!-- STORY BEAT TACTICAL ARENA MAP MODAL (50x50 / 40x40 / 20x20)           -->
+  <!-- ===================================================================== -->
+  <div id="beat-map-modal" class="modal-backdrop hidden">
+    <div class="modal-card modal-arena">
+      <div class="panel-header">
+        <div>
+          <h3 id="beat-map-title">Story Beat Arena</h3>
+          <span id="beat-map-size-badge" class="tag tag-cyan">50 × 50 Spaces</span>
+        </div>
+        <button type="button" id="btn-close-beat-map" class="btn btn-xs btn-outline">Close</button>
+      </div>
+
+      <div id="beat-map-dm-controls" class="arena-controls hidden">
+        <div class="btn-row" style="align-items: center;">
+          <span class="muted small">Grid:</span>
+          <button type="button" class="btn btn-xs btn-outline" data-beat-grid="20">20×20</button>
+          <button type="button" class="btn btn-xs btn-outline" data-beat-grid="25">25×25</button>
+          <button type="button" class="btn btn-xs btn-outline" data-beat-grid="30">30×30</button>
+          <button type="button" class="btn btn-xs btn-outline" data-beat-grid="40">40×40</button>
+          <button type="button" class="btn btn-xs btn-outline" data-beat-grid="50">50×50</button>
+          <input id="beat-custom-cols" type="number" min="5" max="100" value="20" style="width:64px; min-height:32px; padding:4px 6px;" aria-label="Custom columns" />
+          <span class="muted small">×</span>
+          <input id="beat-custom-rows" type="number" min="5" max="100" value="20" style="width:64px; min-height:32px; padding:4px 6px;" aria-label="Custom rows" />
+          <button type="button" id="btn-apply-beat-grid" class="btn btn-xs btn-cyan">Apply</button>
+        </div>
+        <div id="beat-map-players-bar" class="demo-chips mt-xs"></div>
+        <div class="btn-row mt-xs">
+          <button type="button" id="btn-beat-save-starts" class="btn btn-xs btn-gold">Save Start Positions</button>
+          <button type="button" id="btn-beat-reset-starts" class="btn btn-xs btn-outline">Reset to Start</button>
+        </div>
+      </div>
+
+      <div class="btn-row mt-xs" style="align-items: center;">
+        <button type="button" class="btn btn-xs btn-outline active" data-arena-tool="move">Move Token</button>
+        <button type="button" class="btn btn-xs btn-outline" data-arena-tool="measure">Measure Spaces</button>
+        <button type="button" id="btn-arena-zoom-out" class="btn btn-xs btn-outline" title="Narrow spaces">Space -</button>
+        <button type="button" id="btn-arena-zoom-in" class="btn btn-xs btn-outline" title="Widen spaces">Space +</button>
+        <span id="beat-map-info" class="muted small">Tap a token, then tap a space to move.</span>
+      </div>
+
+      <div class="arena-scroll-wrap mt-sm">
+        <canvas id="beat-map-canvas" width="900" height="900"></canvas>
+      </div>
+    </div>
+  </div>
 
   <!-- ===================================================================== -->
   <!-- ACCOUNT SETTINGS MODAL (Change Username & Password)                   -->
