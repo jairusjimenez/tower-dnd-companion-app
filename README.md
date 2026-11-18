@@ -1,48 +1,75 @@
-# Tower System VTT
+# The Tower — DnD Companion App (`v0.2`)
 
-A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** companion web application (`v0.1`). Designed around separate **Dungeon Master** and **Player (Climber)** login portals, customizable homebrew game mechanics, reactive counter-attack combat, a vertical floor-by-floor Tower map measured in grid **Spaces**, free-flow magic with full descriptions and ranges, dice up to `d100`, email-whitelisted player onboarding, prompt-driven AI character art, and a Deity/Constellation lore system with Google Docs import.
+A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** virtual tabletop and companion app. Built with a single centralized login portal that routes **Dungeon Masters** and **Players (Climbers)** into tailored interfaces, synchronized in real time via Server-Sent Events (SSE).
 
----
-
-## Core Features
-
-### 1. Dual Role-Based Portals & Email Onboarding
-- **Dungeon Master Sanctum (`role: "dm"`)**: Passcode-gated DM dashboard (`DM_PASSCODE`, defaults to `dm123`) with full campaign control, private DM notes, hidden Fog of War visibility, and secret DM dice rolls.
-- **Player / Climber Terminal (`role: "player"`)**:
-  - **First-Time Email Onboarding**: The DM whitelists each player's email address inside the DM Sanctum. On first login, the player verifies their invited email, creates their password, and chooses a username (and can optionally create a new character).
-  - **Returning Login & Credential Updates**: Returning players sign in with their **username or email + password**, and can change their username or password anytime from the **Account** modal.
-  - Password hashing uses salted `crypto.scryptSync` and timing-safe comparison (`crypto.timingSafeEqual`).
-
-### 2. Real-Time Dungeon Master Controls
-- **Session Start / Stop**: Start or pause/stop the live game session with a custom session title and pause message; broadcasts an instant `[SYSTEM]` alert and live status banner to all connected players.
-- **System Message / Toast Broadcaster**: Push categorized holographic `[SYSTEM]` toast notifications (`info`, `combat`, `warning`, `loot`) to all players or a specific player in real time over Server-Sent Events (SSE).
-- **Monster Spawner & Real-Time Monster HP Tracking**: Summon preset or custom monsters onto any Tower floor (optionally hidden in Fog of War). As players inflict weapon, spell, or custom damage, monster HP drops immediately and updates live on both DM and Player screens.
-
-### 3. Custom Game Mechanics & Formula Builder
-- **Editable Attributes**: Define, add, rename, or remove custom stats (default hybrid set: `STR`, `AGI`, `VIT`, `INT`, `PER`, `LUCK`).
-- **Safe Expression Evaluator**: Configure custom mathematical formulas (`floor`, `ceil`, `round`, `min`, `max`, `abs`) for **Stat Modifiers**, **Hit Checks**, **Damage Inflicted** (accounting for `RAW_DMG`, `STAT_MOD`, `TARGET_DR`, `CRIT_MULT`), **Crit Multiplier**, and secondary resource labels (e.g., `Mana (MP)`).
-- **Reactive Counter-Combat vs. Turn-Based Mode**:
-  - In **Reactive** mode, when the DM triggers a monster attack on a player, an immediate **Reaction Window** pops up on the player's screen so they can **Counter-Attack**, **Parry / Dodge**, cast a **Reactive Spell**, or accept the hit—without waiting solely for turn order.
-
-### 4. Player Character Screens (Mobile-Friendly)
-- **Stats & Live Monsters**: View custom-formula stat modifiers, adjust HP/MP, roll attribute/skill checks, inspect visible monster HP bars, and inflict direct or main-hand weapon damage in real time.
-- **Equipment Screen**: Manage `Main Hand`, `Off-Hand`, `Head`, `Body Armor`, `Boots`, and `Tower Relic` slots with automatic AC/DR recalculation and 1-tap weapon strikes.
-- **Inventory Screen**: Filterable backpack (`Weapons`, `Armor`, `Consumables`, `Relics`), item quantities, 1-tap **Use** for healing/mana potions, **Equip** to gear slots, Gold & Mana Stones counters, and custom item creation.
-- **Free-Flow Magic & Deity System**:
-  - **Tower Grimoire & Custom Spell Crafting**: Freely learn or craft spells showing full mechanical explanations, damage formulas, MP cost, `Action`/`Reaction` tags, and ranges in **Spaces**.
-  - **Patron Deities & Google Docs Import**: Pledge to a Deity/Constellation, earn and spend **Divine Favor** on Miracles, and let the DM import Deity lore directly from a public Google Docs link or pasted doc text.
-- **Vertical Tower Map (`1F` Base &rarr; Boss Apex)**:
-  - Scrollable bottom-to-top Manhwa Tower canvas (`10` columns &times; `25+` rows across stacked floors `1F`–`5F+`, expandable upward via `+ Add Higher Tower Floor`).
-  - Explicitly grid-based in **Spaces** with warp gates, Fog of War (opaque for players, hatched translucent vision for the DM), token movement, distance measurement in Spaces, and map pings.
-- **Full Polyhedral & Percentile Dice (`d2`–`d100`)**:
-  - Quick buttons for `d2`, `d3`, `d4`, `d6`, `d8`, `d10`, `d12`, `d16`, `d20`, `d24`, `d30`, `d50`, `d60`, `d100`, plus any custom `1`–`100` sided die with Normal, Advantage, Disadvantage, or Exploding modes and optional direct damage application to a target monster.
-- **AI Character Art Studio**: Push a text prompt and art style (`Korean Manhwa Webtoon`, `Dark Fantasy Concept`, `Solo Glow Aura`, `Arcane Tarot`, `Retro Pixel Art`) to synthesize and save a bespoke character portrait (uses Gemini Imagen 3 when `GEMINI_API_KEY` is configured, with a built-in prompt-aware SVG synthesis engine fallback).
+![The Tower Login Screen](docs/images/login.png)
 
 ---
 
-## Tech Stack
+## Screenshots
+
+| Mobile-First Player Dashboard | DM Sanctum — Story Beats Orchestrator |
+| :---: | :---: |
+| ![Player Dashboard](docs/images/player-dashboard.png) | ![DM Story Beats](docs/images/dm-story-beats.png) |
+
+### Story Beat Tactical Arena Map (`20×20` Default, Adjustable Spaces & Start Positions)
+![Story Beat Tactical Arena Map](docs/images/beat-map.png)
+
+---
+
+## What's Implemented
+
+### 1. Centralized Login & Role Routing
+- **Single Login Screen (`The Tower — DnD Companion App`)**: One glassmorphic **Username or Email + Password** form automatically routes users to the **DM Sanctum** or **Player Dashboard** based on their credentials.
+- **Mock Demo Credentials**:
+  - **Dungeon Master**: `admin` / `123456` (or `DM_PASSCODE`)
+  - **Player**: `player` / `123456`
+- **Email-Whitelisted Onboarding & Account Settings**: DMs can whitelist player emails in **Toasts & Invites**; first-time players activate with their invited email + new password and can update their username/password anytime in **Account** (salted `crypto.scryptSync` + timing-safe comparison).
+
+### 2. DM Sanctum & Story Beats Orchestrator
+- **Story Beats First**: The DM lands directly on **Story Beats**, where each beat tracks Floor, Player Narration, DM Secret Notes, XP Reward, multiple Monster Encounters (with optional `Start X / Start Y`), and multiple Treasures/Loot.
+- **Live Orchestration**:
+  - **Present to Players**: Broadcasts the beat's narration as a `[STORY]` toast and displays the active scene card on the Player Dashboard.
+  - **Spawn Monsters / Award Treasure / Award XP**: Summons all attached monsters directly onto the beat's arena and Live Monster HP tracker, awards Gold/Mana Stones/items to chosen players, and grants XP.
+- **View Map (Isolated Story Beat Arena)**:
+  - Defaults to **`20×20` Spaces**, with quick presets (`20×20`, `25×25`, `30×30`, `40×40`, `50×50`) and custom `Cols × Rows` sizing.
+  - Shows **only** the players toggled into the fight, the monsters spawned for that beat, and the arena grid with coordinate axes, `Space - / +` width controls, **Save Start Positions**, and **Reset to Start**.
+- **Session Control & System Toasts**: Start/Stop live sessions and broadcast categorized `[SYSTEM]` toast alerts (`info`, `combat`, `warning`, `loot`).
+
+### 3. Mobile-First Player Dashboard
+- **Sticky Bottom Icon Dock**: Quick phone navigation across **Stats**, **Gear**, **Bag**, **Magic**, **Tower**, **Dice**, and **Art**.
+- **XP, Level-Up & Stat Allocation**:
+  - All characters start at **Level 1** (`0 / 100 XP`) with **10 free stat points** to allocate freely (`+1` buttons on any attribute).
+  - Every level up (`level * 100` XP threshold) grants **+2 stat points**.
+- **Real-Time Monster HP & Reactive Combat**:
+  - Inspect live monster HP bars, deal direct or weapon-formula damage, and respond to DM-triggered monster attacks in **Reactive** mode with **Counter**, **Parry**, **Spell**, or **Take Hit**.
+- **Equipment & Inventory**: 6 gear slots (`Main Hand`, `Off-Hand`, `Head`, `Body`, `Boots`, `Relic`), filterable backpack, consumable healing, and custom item creation.
+- **Free-Flow Magic & Patron Deities**: Learn or craft spells with full mechanical explanations, damage formulas, and ranges in **Spaces**; pledge to a Patron Deity (with Google Docs lore import) and spend Divine Favor on Miracles.
+- **Polyhedral & Percentile Dice (`d2`–`d100`)**: One-tap dice from `d2` up to `d100` plus custom `1–100` sided rolls with Normal, Advantage, Disadvantage, and Exploding modes.
+- **AI Character Art as Map Icons**: Push a text prompt and style to generate a bespoke character portrait (`GEMINI_API_KEY` Imagen 3 when configured, or built-in SVG synthesis) that automatically renders as the player's token icon on both the **Story Beat Map** and **Vertical Tower Map**, complete with hover and touch-hold name/HP tooltips.
+
+### 4. Custom Game Mechanics Builder
+- Customize attribute definitions (`STR`, `AGI`, `VIT`, `INT`, `PER`, `LUCK`, or custom stats), safe math formulas (`Stat Modifier`, `Hit Check`, `Damage Inflicted`, `Crit Multiplier`), resource names, and `Reactive` vs `Turn-Based` combat flow.
+
+---
+
+## Tech Stack & Project Structure
 - **Backend**: Zero-dependency Node.js (`http`, `fs`, `path`, `crypto`) with Server-Sent Events (`/api/events`) and JSON persistence (`data/state.json`).
-- **Frontend**: Vanilla HTML5, CSS3 (responsive dark fantasy UI with sticky mobile bottom navigation), and Canvas-rendered vertical Tower map (`public/`).
+- **Frontend**: Vanilla HTML5, CSS3, and HTML5 Canvas (`public/`).
+
+```text
+dnd-vtt/
+├── server.js          # HTTP server, SSE broadcaster, auth, formula engine, game actions
+├── test.js            # Automated integration test suite (12 suites)
+├── package.json       # Scripts (start, test) and Node engine config
+├── render.yaml        # Render Free Web Service blueprint
+├── Dockerfile         # Container setup for Koyeb / Fly / Docker hosts
+├── docs/images/       # README screenshots
+└── public/
+    ├── index.html     # Single login portal, Player dashboard, DM Sanctum & arena modal
+    ├── styles.css     # Mobile-friendly dark fantasy & System UI theme
+    └── app.js         # Client state sync, arena & tower canvas renderers, dice & sheet logic
+```
 
 ---
 
@@ -52,38 +79,14 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** co
 ```bash
 npm start
 ```
-Open `http://localhost:3456` in your browser (or `http://<your-local-IP>:3456` on mobile devices on the same network).
+Open `http://localhost:3456` (or `http://<your-local-IP>:3456` on mobile devices on the same network).
 
-- **Default DM Passcode**: `dm123` (set `DM_PASSCODE` env var to customize)
-- **Pre-seeded Player Emails (pending first-time password setup)**:
-  - `kaelen@tower.gg`
-  - `thalindra@tower.gg`
-  - `vex@tower.gg`
-  - `bramwell@tower.gg`
-
-### Run Automated Integration Tests
+### Run Automated Tests
 ```bash
 npm test
 ```
 
-### Project Structure
-```text
-dnd-vtt/
-├── server.js          # HTTP server, SSE broadcaster, auth, formula engine, game actions
-├── test.js            # Automated end-to-end integration test suite
-├── package.json       # Scripts (start, test) and Node engine config
-├── render.yaml        # Render Free Web Service blueprint
-├── Dockerfile         # Container setup for Koyeb / Fly / Docker hosts
-└── public/
-    ├── index.html     # Login portal, Player dashboard, DM Sanctum & modals
-    ├── styles.css     # Mobile-friendly dark fantasy & System UI theme
-    └── app.js         # Client state sync, Tower Canvas renderer, dice & sheet logic
-```
-
----
-
 ## Free Hosting (Render / Docker)
-Because real-time Server-Sent Events (`/api/events`) rely on a persistent connection, container/PaaS hosts are recommended over short-lived serverless functions:
 1. Push this repository to GitHub.
 2. On **Render**, create a **Blueprint** (uses `render.yaml`) or **Web Service** on the **Free** tier (`$0/month`).
 3. Set `DM_PASSCODE` (and optionally `GEMINI_API_KEY`) in Environment Variables and deploy.
