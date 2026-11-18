@@ -236,20 +236,81 @@
     $('#dm-view').classList.remove('active');
     $('#beat-detail-view')?.classList.remove('active');
     $('#login-view').classList.add('active');
+    resetLoginStep();
   }
 
   // -------------------------------------------------------------------------
   // Auth / Unified Login Handler (routes to DM or Player by credentials)
   // -------------------------------------------------------------------------
+  let pendingDmSetupEmail = null;
+  let loginIdentifierVerified = false;
+
+  function resetLoginStep() {
+    loginIdentifierVerified = false;
+    $('#login-view')?.classList.remove('login-denied');
+    $('#login-password-group')?.classList.add('hidden');
+    if ($('#login-password')) {
+      $('#login-password').value = '';
+      $('#login-password').required = false;
+    }
+    if ($('#login-identifier')) $('#login-identifier').readOnly = false;
+    $('#player-login-error')?.classList.add('hidden');
+  }
+
+  $('#btn-login-change-user')?.addEventListener('click', () => {
+    resetLoginStep();
+    $('#login-identifier')?.focus();
+  });
+
+  $('#login-identifier')?.addEventListener('input', () => {
+    $('#login-view')?.classList.remove('login-denied');
+    $('#player-login-error')?.classList.add('hidden');
+    if (loginIdentifierVerified) resetLoginStep();
+  });
+
   $('#player-login-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const errBox = $('#player-login-error');
     errBox.classList.add('hidden');
+    $('#login-view')?.classList.remove('login-denied');
+    const identifier = $('#login-identifier').value.trim();
     try {
+      if (!loginIdentifierVerified) {
+        const check = await api('/api/auth/check-identifier', { identifier });
+        if (check.requiresDmSetup) {
+          pendingDmSetupEmail = check.email;
+          if ($('#dm-setup-email-label')) $('#dm-setup-email-label').textContent = check.email;
+          $('#dm-setup-error')?.classList.add('hidden');
+          $('#dm-setup-modal')?.classList.remove('hidden');
+          return;
+        }
+        loginIdentifierVerified = true;
+        $('#login-identifier').readOnly = true;
+        $('#login-password-group')?.classList.remove('hidden');
+        if ($('#login-password-label')) {
+          $('#login-password-label').textContent = check.activated === false
+            ? 'Create Password (First-Time Setup)'
+            : 'Password';
+        }
+        if ($('#login-password')) {
+          $('#login-password').required = true;
+          $('#login-password').focus();
+        }
+        return;
+      }
+
       const res = await api('/api/auth/login', {
-        identifier: $('#login-identifier').value.trim(),
+        identifier,
         password: $('#login-password').value,
       });
+      if (res.requiresDmSetup) {
+        pendingDmSetupEmail = res.email;
+        if ($('#dm-setup-email-label')) $('#dm-setup-email-label').textContent = res.email;
+        $('#dm-setup-error')?.classList.add('hidden');
+        $('#dm-setup-modal')?.classList.remove('hidden');
+        return;
+      }
+      resetLoginStep();
       enterSession(res.session);
       if (res.firstTimeActivated) {
         showToast({
@@ -259,8 +320,48 @@
         });
       }
     } catch (err) {
+      $('#login-view')?.classList.add('login-denied');
       errBox.textContent = err.message;
       errBox.classList.remove('hidden');
+    }
+  });
+
+  $('#btn-close-dm-setup')?.addEventListener('click', () => {
+    $('#dm-setup-modal')?.classList.add('hidden');
+  });
+
+  $('#dm-setup-form')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const errBox = $('#dm-setup-error');
+    errBox?.classList.add('hidden');
+    const pw = $('#dm-setup-password').value;
+    const confirm = $('#dm-setup-confirm').value;
+    if (pw !== confirm) {
+      if (errBox) {
+        errBox.textContent = 'Passwords do not match.';
+        errBox.classList.remove('hidden');
+      }
+      return;
+    }
+    try {
+      const res = await api('/api/auth/dm-setup', {
+        email: pendingDmSetupEmail || 'jairusjimenez@live.com',
+        newUsername: $('#dm-setup-username').value.trim(),
+        newPassword: pw,
+      });
+      $('#dm-setup-modal')?.classList.add('hidden');
+      ev.target.reset();
+      enterSession(res.session);
+      showToast({
+        title: 'DM LOGIN CREATED',
+        message: `Welcome, ${res.session.username}! Your DM login is now active.`,
+        category: 'info',
+      });
+    } catch (err) {
+      if (errBox) {
+        errBox.textContent = err.message;
+        errBox.classList.remove('hidden');
+      }
     }
   });
 

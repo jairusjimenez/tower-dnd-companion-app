@@ -992,6 +992,13 @@ function getInitialState() {
     deities,
     characters,
     playerAccounts,
+    dmAccount: {
+      email: 'jairusjimenez@live.com',
+      username: '',
+      activated: false,
+      salt: null,
+      passwordHash: null,
+    },
     monsters,
     pendingReactions: [],
     bestiary: [
@@ -1136,6 +1143,15 @@ function loadState() {
           parsed.mechanics.statMilestones = DEFAULT_STAT_MILESTONES.map((m) => ({ ...m }));
         }
         if (!Array.isArray(parsed.playerHistory)) parsed.playerHistory = [];
+        if (!parsed.dmAccount) {
+          parsed.dmAccount = {
+            email: 'jairusjimenez@live.com',
+            username: '',
+            activated: false,
+            salt: null,
+            passwordHash: null,
+          };
+        }
         return parsed;
       }
     }
@@ -3673,6 +3689,41 @@ function createServer() {
       }
     }
 
+    if (req.method === 'POST' && pathname === '/api/auth/check-identifier') {
+      try {
+        const body = await readJsonBody(req);
+        const identifier = String(body.identifier || body.email || body.username || '').trim().toLowerCase();
+        if (!identifier) {
+          return sendJson(res, 400, { ok: false, error: 'Please enter your username or email.' });
+        }
+        if (identifier === 'admin' || identifier === 'player' || ['dm', 'dungeonmaster', 'dm@tower.gg'].includes(identifier)) {
+          return sendJson(res, 200, { ok: true, found: true, activated: true, role: identifier === 'player' ? 'player' : 'dm' });
+        }
+        const dmAcc = state.dmAccount;
+        if (dmAcc && (identifier === dmAcc.email.toLowerCase() || (dmAcc.activated && dmAcc.username && identifier === dmAcc.username.toLowerCase()))) {
+          if (!dmAcc.activated) {
+            return sendJson(res, 200, { ok: true, found: true, requiresDmSetup: true, email: dmAcc.email, role: 'dm' });
+          }
+          return sendJson(res, 200, { ok: true, found: true, activated: true, role: 'dm', email: dmAcc.email });
+        }
+        const account = Object.values(state.playerAccounts).find(
+          (a) => a.email.toLowerCase() === identifier || a.username.toLowerCase() === identifier
+        );
+        if (!account) {
+          return sendJson(res, 404, { ok: false, error: 'You are not allowed to enter the Tower' });
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          found: true,
+          activated: Boolean(account.activated),
+          role: 'player',
+          email: account.email,
+        });
+      } catch {
+        return sendJson(res, 400, { ok: false, error: 'Invalid identifier check request.' });
+      }
+    }
+
     if (req.method === 'POST' && pathname === '/api/auth/login') {
       try {
         const body = await readJsonBody(req);
@@ -3684,6 +3735,24 @@ function createServer() {
             return sendJson(res, 401, { ok: false, error: 'Invalid Dungeon Master password.' });
           }
           return sendJson(res, 200, { ok: true, session: { role: 'dm', name: 'Dungeon Master' } });
+        }
+
+        const dmAcc = state.dmAccount;
+        if (dmAcc && (identifier === dmAcc.email.toLowerCase() || (dmAcc.activated && dmAcc.username && identifier === dmAcc.username.toLowerCase()))) {
+          if (!dmAcc.activated) {
+            return sendJson(res, 200, {
+              ok: true,
+              requiresDmSetup: true,
+              email: dmAcc.email,
+            });
+          }
+          if (!verifyPassword(password, dmAcc.salt, dmAcc.passwordHash)) {
+            return sendJson(res, 401, { ok: false, error: 'Invalid Dungeon Master password.' });
+          }
+          return sendJson(res, 200, {
+            ok: true,
+            session: { role: 'dm', email: dmAcc.email, username: dmAcc.username, name: 'Dungeon Master' },
+          });
         }
 
         if (identifier === 'player') {
@@ -3752,6 +3821,42 @@ function createServer() {
         });
       } catch {
         return sendJson(res, 400, { ok: false, error: 'Invalid login request.' });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/auth/dm-setup') {
+      try {
+        const body = await readJsonBody(req);
+        const email = String(body.email || '').trim().toLowerCase();
+        const newUsername = String(body.newUsername || '').trim().replace(/\s+/g, '');
+        const newPassword = String(body.newPassword || '');
+        const dmAcc = state.dmAccount;
+        if (!dmAcc || dmAcc.email.toLowerCase() !== email) {
+          return sendJson(res, 404, { ok: false, error: 'DM email account not found.' });
+        }
+        if (dmAcc.activated) {
+          return sendJson(res, 400, { ok: false, error: 'DM account is already activated. Please log in normally.' });
+        }
+        if (newUsername.length < 2) {
+          return sendJson(res, 400, { ok: false, error: 'New DM login username must be at least 2 characters.' });
+        }
+        if (newPassword.length < 4) {
+          return sendJson(res, 400, { ok: false, error: 'New DM password must be at least 4 characters.' });
+        }
+        const { salt, hash } = hashPassword(newPassword);
+        dmAcc.username = newUsername.slice(0, 32);
+        dmAcc.salt = salt;
+        dmAcc.passwordHash = hash;
+        dmAcc.activated = true;
+        state.version++;
+        saveState();
+        broadcastEvent('state');
+        return sendJson(res, 200, {
+          ok: true,
+          session: { role: 'dm', email: dmAcc.email, username: dmAcc.username, name: 'Dungeon Master' },
+        });
+      } catch {
+        return sendJson(res, 400, { ok: false, error: 'Invalid DM setup request.' });
       }
     }
 

@@ -884,6 +884,19 @@ canvas {
   max-height: 85vh;
   overflow-y: auto;
 }
+#login-view.login-denied,
+#login-view.login-denied .login-stage {
+  background: radial-gradient(circle at center, rgba(153, 27, 27, 0.85), rgba(32, 4, 8, 0.98)) !important;
+  transition: background 0.35s ease;
+}
+#login-view.login-denied .tower-bg-art {
+  filter: hue-rotate(155deg) saturate(1.65) brightness(1.08);
+  transition: filter 0.35s ease;
+}
+#login-view.login-denied .login-monolith {
+  border-color: rgba(239, 68, 68, 0.85);
+  box-shadow: 0 0 36px rgba(239, 68, 68, 0.35);
+}
 .arena-controls {
   display: flex;
   flex-direction: column;

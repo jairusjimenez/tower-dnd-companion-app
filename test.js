@@ -489,6 +489,30 @@ async function runTests() {
     assert.ok(Array.isArray(awkState.data.playerHistory) && awkState.data.playerHistory.length > 0);
     assert.ok(Array.isArray(awkState.data.characters[heroCharId].history) && awkState.data.characters[heroCharId].history.length > 0);
 
+    // 14. Two-Step Login Check & DM Email First-Time Setup Flow (jairusjimenez@live.com)
+    const unknownCheck = await req(baseUrl, '/api/auth/check-identifier', { identifier: 'not-invited@tower.gg' });
+    assert.strictEqual(unknownCheck.status, 404);
+    assert.strictEqual(unknownCheck.data.error, 'You are not allowed to enter the Tower');
+    const invitedPlayerCheck = await req(baseUrl, '/api/auth/check-identifier', { identifier: 'thalindra@tower.gg' });
+    assert.strictEqual(invitedPlayerCheck.status, 200);
+    assert.strictEqual(invitedPlayerCheck.data.found, true);
+
+    const dmFirstTry = await req(baseUrl, '/api/auth/login', { identifier: 'jairusjimenez@live.com', password: 'random-password-123' });
+    assert.strictEqual(dmFirstTry.status, 200);
+    assert.strictEqual(dmFirstTry.data.requiresDmSetup, true);
+    const dmSetupRes = await req(baseUrl, '/api/auth/dm-setup', {
+      email: 'jairusjimenez@live.com',
+      newUsername: 'jairus_dm',
+      newPassword: 'secret-dm-pass',
+    });
+    assert.strictEqual(dmSetupRes.status, 200);
+    assert.strictEqual(dmSetupRes.data.session.role, 'dm');
+    const dmBadLogin = await req(baseUrl, '/api/auth/login', { identifier: 'jairus_dm', password: 'wrong' });
+    assert.strictEqual(dmBadLogin.status, 401);
+    const dmGoodLogin = await req(baseUrl, '/api/auth/login', { identifier: 'jairus_dm', password: 'secret-dm-pass' });
+    assert.strictEqual(dmGoodLogin.status, 200);
+    assert.strictEqual(dmGoodLogin.data.session.role, 'dm');
+
     console.log('ALL 12 INTEGRATION TEST SUITES PASSED!');
   } finally {
     await req(baseUrl, '/api/action', { role: 'dm', type: 'reset_campaign' }).catch(() => {});

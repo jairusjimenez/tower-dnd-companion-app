@@ -71,11 +71,14 @@
               <span>Username or Email</span>
               <input id="login-identifier" type="text" autocomplete="username" placeholder="Username or email" required />
             </label>
-            <label for="login-password">
-              <span>Password</span>
-              <input id="login-password" type="password" autocomplete="current-password" placeholder="Password" required />
-            </label>
-            <button type="submit" class="btn btn-cyan btn-lg btn-glow-cyan">Enter The Tower</button>
+            <div id="login-password-group" class="stack-form hidden">
+              <label for="login-password">
+                <span id="login-password-label">Password</span>
+                <input id="login-password" type="password" autocomplete="current-password" placeholder="Password" />
+              </label>
+              <button type="button" id="btn-login-change-user" class="btn btn-xs btn-outline" style="align-self:flex-start;">Change Username / Email</button>
+            </div>
+            <button type="submit" id="btn-login-submit" class="btn btn-cyan btn-lg btn-glow-cyan">Enter The Tower</button>
           </form>
 
           <div id="player-login-error" class="error-box hidden" role="alert"></div>
@@ -1065,6 +1068,33 @@
       <div class="arena-scroll-wrap mt-sm">
         <canvas id="beat-map-canvas" width="900" height="900"></canvas>
       </div>
+    </div>
+  </div>
+
+  <!-- DM First-Time Setup Modal (Create New DM Login & Password) -->
+  <div id="dm-setup-modal" class="modal-backdrop hidden">
+    <div class="modal-card card-glow-gold">
+      <div class="panel-header">
+        <h3>First-Time DM Setup</h3>
+        <button type="button" id="btn-close-dm-setup" class="btn btn-xs btn-outline">&times;</button>
+      </div>
+      <p class="muted small">Welcome! Create your permanent Dungeon Master login and password for <b id="dm-setup-email-label">jairusjimenez@live.com</b>.</p>
+      <form id="dm-setup-form" class="stack-form mt-sm">
+        <label>
+          <span>New DM Login (Username)</span>
+          <input id="dm-setup-username" type="text" minlength="2" placeholder="e.g. jairus_dm" required />
+        </label>
+        <label>
+          <span>New Password (min 4 chars)</span>
+          <input id="dm-setup-password" type="password" minlength="4" placeholder="Create password" required />
+        </label>
+        <label>
+          <span>Confirm Password</span>
+          <input id="dm-setup-confirm" type="password" minlength="4" placeholder="Repeat password" required />
+        </label>
+        <div id="dm-setup-error" class="error-banner hidden"></div>
+        <button type="submit" class="btn btn-gold btn-lg">Create DM Login &amp; Enter</button>
+      </form>
     </div>
   </div>
 
