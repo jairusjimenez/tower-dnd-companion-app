@@ -877,6 +877,13 @@ canvas {
   display: flex;
   flex-direction: column;
 }
+.modal-char-profile {
+  width: 85vw;
+  max-width: 85vw;
+  height: 85vh;
+  max-height: 85vh;
+  overflow-y: auto;
+}
 .arena-controls {
   display: flex;
   flex-direction: column;
@@ -895,14 +902,109 @@ canvas {
   padding: 8px;
   max-height: 66vh;
 }
-#beat-map-canvas {
+#beat-map-canvas, #beat-draft-canvas, #beat-detail-canvas {
   max-width: none;
+  cursor: crosshair;
   touch-action: pan-x pan-y;
+}
+.beat-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+.beat-detail-side-col {
+  min-width: 0;
+}
+.stat-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+.stat-pill {
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #cbd5e1;
+}
+
+/* Graphical Polyhedral Dice Simulation Tray */
+.dice-sim-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 108px;
+  padding: 14px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: radial-gradient(circle at center, rgba(16, 33, 62, 0.92), rgba(5, 9, 18, 0.98));
+  box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.65);
+}
+.dice-sim-die {
+  position: relative;
+  width: 66px;
+  height: 66px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.25s ease;
+}
+.dice-sim-die svg {
+  width: 66px;
+  height: 66px;
+  filter: drop-shadow(0 4px 10px rgba(56, 189, 248, 0.28));
+}
+.dice-sim-die.rolling {
+  animation: diceTumble 0.48s cubic-bezier(0.25, 0.8, 0.35, 1) infinite;
+}
+.dice-sim-die.crit svg polygon,
+.dice-sim-die.crit svg rect {
+  stroke: #fbbf24;
+  fill: rgba(251, 191, 36, 0.22);
+}
+.dice-sim-die.fumble svg polygon,
+.dice-sim-die.fumble svg rect {
+  stroke: #ef4444;
+  fill: rgba(239, 68, 68, 0.22);
+}
+.dice-sim-val {
+  position: absolute;
+  font-weight: 800;
+  font-size: 1.15rem;
+  color: #f8fafc;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+.dice-sim-die.crit .dice-sim-val {
+  color: #fde047;
+}
+.dice-sim-die.fumble .dice-sim-val {
+  color: #fca5a5;
+}
+.dice-sim-total {
+  width: 100%;
+  text-align: center;
+  font-size: 0.92rem;
+  color: #e2e8f0;
+  padding-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+@keyframes diceTumble {
+  0% { transform: translateY(0) rotate(0deg) scale(1); }
+  25% { transform: translateY(-10px) rotate(110deg) scale(1.12); }
+  50% { transform: translateY(2px) rotate(220deg) scale(0.95); }
+  75% { transform: translateY(-6px) rotate(310deg) scale(1.08); }
+  100% { transform: translateY(0) rotate(360deg) scale(1); }
 }
 
 /* Mobile Responsive Overrides */
 @media (max-width: 960px) {
-  .login-grid, .two-col, .equip-grid {
+  .login-grid, .two-col, .equip-grid, .beat-detail-grid {
     grid-template-columns: 1fr;
   }
   .attack-trigger-bar {

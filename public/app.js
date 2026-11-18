@@ -15,6 +15,11 @@
   let arenaCellOverride = null;
   let arenaMeasureStart = null;
   let arenaMeasureEnd = null;
+  let activeBeatDetailId = null;
+  let lastVisitedViewId = null;
+  let lastScrollY = 0;
+  let editBeatEncounters = [];
+  let editBeatTreasures = [];
   const portraitImageCache = new Map();
 
   function getPortraitImage(url) {
@@ -31,6 +36,9 @@
       if (activeBeatMapId && !$('#beat-map-modal').classList.contains('hidden')) {
         renderBeatMapModal();
       }
+      if (activeBeatDetailId && $('#beat-detail-view')?.classList.contains('active')) {
+        renderBeatDetailModal();
+      }
       if (state) {
         if (session?.role === 'dm') drawTowerCanvas('dm-tower-canvas', true);
         else drawTowerCanvas('player-tower-canvas', false);
@@ -38,6 +46,25 @@
     };
     img.src = url;
     return null;
+  }
+
+  function drawChestIcon(ctx, chest, cx, cy, size) {
+    const half = Math.max(7, Math.floor(size * 0.36));
+    ctx.save();
+    if (chest.opened) ctx.globalAlpha = 0.45;
+    // Chest body
+    ctx.fillStyle = chest.opened ? '#78350f' : '#b45309';
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(cx - half, cy - half * 0.75, half * 2, half * 1.5, 3);
+    ctx.fill();
+    ctx.stroke();
+    // Lid band & gold lock clasp
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillRect(cx - half, cy - 2, half * 2, 3);
+    ctx.fillRect(cx - 2.5, cy - 3.5, 5, 6);
+    ctx.restore();
   }
 
   function drawTokenAvatar(ctx, tok, cx, cy, r, selected) {
@@ -56,7 +83,7 @@
       ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
       ctx.restore();
     } else {
-      ctx.fillStyle = tok.type === 'monster' ? '#ef4444' : (tok.color || '#38bdf8');
+      ctx.fillStyle = tok.type === 'monster' ? '#ef4444' : tok.type === 'npc' ? '#10b981' : (tok.color || '#38bdf8');
       ctx.fill();
       ctx.fillStyle = '#020617';
       ctx.font = `bold ${Math.max(9, Math.floor(r * 0.72))}px Segoe UI, sans-serif`;
@@ -65,7 +92,7 @@
     }
 
     ctx.lineWidth = selected ? 3 : 2;
-    ctx.strokeStyle = selected ? '#fbbf24' : (tok.type === 'monster' ? '#fca5a5' : '#7dd3fc');
+    ctx.strokeStyle = selected ? '#fbbf24' : (tok.type === 'monster' ? '#fca5a5' : tok.type === 'npc' ? '#6ee7b7' : '#7dd3fc');
     ctx.stroke();
     ctx.restore();
   }
@@ -105,13 +132,15 @@
     if (toast.id && seenToastIds.has(toast.id)) return;
     if (toast.id) seenToastIds.add(toast.id);
 
+    const rawMsg = String(toast.message || '').trim();
+    const displayMsg = /^SYSTEM:/i.test(rawMsg) ? rawMsg : `SYSTEM: ${rawMsg}`;
     const stack = $('#toast-stack');
     const card = document.createElement('div');
     card.className = `toast-card ${toast.category || 'info'}`;
     card.innerHTML = `
       <div>
         <div class="toast-title">[${esc(toast.title || 'SYSTEM NOTICE')}]</div>
-        <div class="toast-body">${esc(toast.message)}</div>
+        <div class="toast-body">${esc(displayMsg)}</div>
       </div>
       <button type="button" class="toast-close" aria-label="Dismiss">&times;</button>
     `;
@@ -184,6 +213,8 @@
     session = newSession;
     localStorage.setItem('tower_vtt_session', JSON.stringify(session));
     $('#login-view').classList.remove('active');
+    $('#beat-detail-view')?.classList.remove('active');
+    activeBeatDetailId = null;
     if (session.role === 'dm') {
       $('#player-view').classList.remove('active');
       $('#dm-view').classList.add('active');
@@ -199,9 +230,11 @@
     sse = null;
     session = null;
     state = null;
+    activeBeatDetailId = null;
     localStorage.removeItem('tower_vtt_session');
     $('#player-view').classList.remove('active');
     $('#dm-view').classList.remove('active');
+    $('#beat-detail-view')?.classList.remove('active');
     $('#login-view').classList.add('active');
   }
 
@@ -358,13 +391,28 @@
     $('#p-favor-val').textContent = ch.favor || 0;
     $('#p-formula-badge').textContent = state.mechanics?.statFormula || 'floor((SCORE-10)/2)';
 
+    const milestones = state.mechanics?.statMilestones || [];
     const statsGrid = $('#p-stats-grid');
     statsGrid.innerHTML = (state.mechanics?.stats || []).map((st) => {
       const score = Number(ch.stats?.[st.key] ?? st.defaultValue ?? 10);
       const mod = evalLocalFormula(state.mechanics.statFormula, { ...ch.stats, SCORE: score, LEVEL: ch.level });
       const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+      const statMilestones = milestones
+        .filter((m) => m.statKey === st.key)
+        .sort((a, b) => Number(a.threshold || 0) - Number(b.threshold || 0));
+      const unlockedList = statMilestones.filter((m) => score >= Number(m.threshold || 20));
+      const nextMs = statMilestones.find((m) => score < Number(m.threshold || 20));
+      const msUnlocked = unlockedList.length > 0;
+      const latestUnlocked = unlockedList[unlockedList.length - 1];
+      const msBadge = statMilestones.length
+        ? `<div class="muted small" style="margin-top:4px; color:${msUnlocked ? '#fbbf24' : '#94a3b8'};" title="${esc((latestUnlocked || nextMs)?.description || '')}">
+            ${latestUnlocked ? `AWAKENED (${latestUnlocked.threshold}): ${esc(latestUnlocked.abilityName)}` : ''}
+            ${latestUnlocked && nextMs ? '<br>' : ''}
+            ${nextMs ? `Next ${nextMs.threshold}: ${esc(nextMs.abilityName)}` : ''}
+          </div>`
+        : '';
       return `
-        <div class="stat-card">
+        <div class="stat-card ${msUnlocked ? 'card-glow-gold' : ''}">
           <div class="stat-key">${esc(st.key)}</div>
           <div class="stat-mod">${esc(modStr)}</div>
           <input type="number" data-stat-input="${esc(st.key)}" value="${score}" />
@@ -372,6 +420,7 @@
             ${unspentPts > 0 ? `<button type="button" class="btn btn-xs btn-gold" data-alloc-stat="${esc(st.key)}">+1</button>` : ''}
             <button type="button" class="btn btn-xs btn-outline" data-roll-stat="${esc(st.key)}" data-stat-mod="${mod}">d20${esc(modStr)}</button>
           </div>
+          ${msBadge}
         </div>
       `;
     }).join('');
@@ -405,6 +454,7 @@
         </div>
         <div class="story-narration">${esc(activeBeat.narration)}</div>
         <div class="btn-row mt-xs">
+          <button type="button" class="btn btn-xs btn-gold" data-beat-open="${esc(activeBeat.id)}">View Beat</button>
           <button type="button" class="btn btn-xs btn-cyan" data-beat-view-map="${esc(activeBeat.id)}">View Map (${cols}×${rows})</button>
         </div>
       `;
@@ -575,8 +625,15 @@
     $('#p-art-history').innerHTML = (ch.artHistory || []).map((a) => `<img class="art-thumb" src="${a.url}" title="${esc(a.prompt)}" />`).join('');
 
     drawTowerCanvas('player-tower-canvas', false);
+    renderTowerFloorsAndBeats('p-tower-floors-beats', false);
     if (activeBeatMapId && !$('#beat-map-modal').classList.contains('hidden')) {
       renderBeatMapModal();
+    }
+    if (activeBeatDetailId && $('#beat-detail-view')?.classList.contains('active')) {
+      renderBeatDetailModal();
+    }
+    if (activeDmCharModalId && !$('#dm-char-modal')?.classList.contains('hidden')) {
+      renderDmCharModal(activeDmCharModalId);
     }
   }
 
@@ -636,6 +693,7 @@
           ${monSummary ? `<div class="small"><span class="tag tag-crimson">MONSTERS</span> ${esc(monSummary)}</div>` : ''}
           ${trSummary ? `<div class="small"><span class="tag tag-gold">TREASURE</span> ${esc(trSummary)}</div>` : ''}
           <div class="btn-row mt-xs">
+            <button type="button" class="btn btn-xs btn-gold" data-beat-open="${esc(b.id)}">View Beat</button>
             <button type="button" class="btn btn-xs btn-outline" data-beat-view-map="${esc(b.id)}">View Map (${b.arena?.cols || 20}×${b.arena?.rows || 20})</button>
             <button type="button" class="btn btn-xs ${b.presented ? 'btn-outline' : 'btn-cyan'}" data-beat-present="${esc(b.id)}" data-presented="${!b.presented}">${b.presented ? 'Hide from Players' : 'Present to Players'}</button>
             ${b.xpReward ? `<button type="button" class="btn btn-xs btn-purple" data-beat-xp="${esc(b.id)}">Award XP (+${b.xpReward})</button>` : ''}
@@ -682,7 +740,9 @@
     $('#dm-combat-log').innerHTML = (state.combatLog || []).map((c) => `<div class="feed-entry combat">${esc(c.summary)}</div>`).join('');
 
     // Toast Target & Invites Dropdown
-    $('#dm-toast-target').innerHTML = '<option value="all">All Connected Players</option>' + chars.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+    if ($('#dm-toast-target')) {
+      $('#dm-toast-target').innerHTML = '<option value="all">All Connected Players</option>' + chars.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+    }
     $('#dm-invite-char').innerHTML = '<option value="__new__">Create New Character</option>' + chars.map((c) => `<option value="${esc(c.id)}">Assign: ${esc(c.name)}</option>`).join('');
 
     $('#dm-invites-list').innerHTML = Object.values(state.playerAccounts || {}).map((acc) => {
@@ -695,6 +755,7 @@
           </div>
           <div class="muted small">Character: ${esc(chName)}</div>
           <div class="btn-row">
+            <button type="button" class="btn btn-xs btn-cyan" data-view-char="${esc(acc.characterId)}">View Character</button>
             <button type="button" class="btn btn-xs btn-outline" data-reset-acc="${esc(acc.email)}">Reset Password Setup</button>
             <button type="button" class="btn btn-xs btn-danger-outline" data-remove-acc="${esc(acc.email)}">Remove</button>
           </div>
@@ -702,11 +763,26 @@
       `;
     }).join('');
 
+    if ($('#dm-player-history-list')) {
+      const historyEntries = state.playerHistory || [];
+      $('#dm-player-history-list').innerHTML = historyEntries.length
+        ? historyEntries.map((h) => `
+            <div class="feed-entry">
+              <span class="tag tag-cyan">${esc((h.category || 'event').toUpperCase())}</span>
+              <strong>${esc(h.characterName || 'Player')}</strong>: ${esc(h.summary)}
+              <span class="muted small">(${new Date(h.timestamp).toLocaleTimeString()})</span>
+            </div>
+          `).join('')
+        : '<div class="muted small">No player activity logged yet.</div>';
+    }
+
     // Floor Fog Buttons
-    $('#dm-floor-fog-buttons').innerHTML = (state.map?.floors || []).map((f) => `
-      <button type="button" class="btn btn-xs btn-outline" data-floor-reveal="${f.number}">Reveal ${f.number}F</button>
-      <button type="button" class="btn btn-xs btn-outline" data-floor-fog="${f.number}">Fog ${f.number}F</button>
-    `).join('');
+    if ($('#dm-floor-fog-buttons')) {
+      $('#dm-floor-fog-buttons').innerHTML = (state.map?.floors || []).map((f) => `
+        <button type="button" class="btn btn-xs btn-outline" data-floor-reveal="${f.number}">Reveal ${f.number}F</button>
+        <button type="button" class="btn btn-xs btn-outline" data-floor-fog="${f.number}">Fog ${f.number}F</button>
+      `).join('');
+    }
 
     // Mechanics Editor
     if (document.activeElement?.closest('#dm-mechanics-form') === null) {
@@ -721,12 +797,43 @@
       $('#mech-show-hp').checked = mech.showExactMonsterHpToPlayers !== false;
       $('#mech-stats-editor').innerHTML = (mech.stats || []).map((s, idx) => `
         <div class="grid-4 mech-stat-row" data-idx="${idx}">
-          <input type="text" class="mech-st-key" value="${esc(s.key)}" placeholder="KEY" />
-          <input type="text" class="mech-st-name" value="${esc(s.name)}" placeholder="Full Name" />
-          <input type="number" class="mech-st-def" value="${Number(s.defaultValue ?? 10)}" />
+          <input type="text" class="mech-st-key" value="${esc(s.key)}" placeholder="KEY" title="Formula variable key (e.g. STR)" aria-label="Stat Key" />
+          <input type="text" class="mech-st-name" value="${esc(s.name)}" placeholder="Full Name" title="Display name (e.g. Strength)" aria-label="Stat Name" />
+          <input type="number" class="mech-st-def" value="${Number(s.defaultValue ?? 10)}" title="Starting Value for new characters" aria-label="Starting Value" />
           <button type="button" class="btn btn-xs btn-danger-outline" data-del-stat="${idx}">Del</button>
         </div>
       `).join('');
+      if ($('#mech-milestones-editor')) {
+        const allMs = (mech.statMilestones || []).map((ms, idx) => ({ ...ms, _idx: idx }));
+        const grouped = new Map();
+        for (const ms of allMs) {
+          const k = ms.statKey || 'OTHER';
+          if (!grouped.has(k)) grouped.set(k, []);
+          grouped.get(k).push(ms);
+        }
+        $('#mech-milestones-editor').innerHTML = Array.from(grouped.entries()).map(([statKey, list], gIdx) => {
+          const statObj = (mech.stats || []).find((s) => s.key === statKey);
+          const statName = statObj ? `${statKey} — ${statObj.name}` : statKey;
+          const tiersSummary = list.map((m) => m.threshold).join(' / ');
+          const rowsHtml = list.map((ms) => `
+            <div class="mech-ms-row" data-ms-id="${esc(ms.id || `ms-${ms._idx}`)}" style="padding:6px 0; border-top:1px solid rgba(148,163,184,0.12);">
+              <input type="hidden" class="mech-ms-key" value="${esc(ms.statKey)}" />
+              <div class="btn-row" style="gap:8px; align-items:center;">
+                <span class="tag tag-gold" style="min-width:44px; text-align:center;">Lv/Stat</span>
+                <input type="number" class="mech-ms-thresh" value="${Number(ms.threshold || 20)}" min="1" style="width:72px; min-height:30px; padding:4px 8px;" aria-label="Threshold" />
+                <input type="text" class="mech-ms-name" value="${esc(ms.abilityName)}" placeholder="Ability Name" style="flex:1; min-width:160px; min-height:30px; padding:4px 8px;" aria-label="Ability Name" />
+              </div>
+              <input type="text" class="mech-ms-desc mt-xs" value="${esc(ms.description)}" placeholder="Ability effect description..." style="min-height:30px; padding:4px 8px; font-size:0.84rem;" aria-label="Description" />
+            </div>
+          `).join('');
+          return `
+            <details class="sub-details" ${gIdx === 0 ? 'open' : ''}>
+              <summary>${esc(statName)} <span class="muted small">(${esc(tiersSummary)})</span></summary>
+              <div class="mt-xs">${rowsHtml}</div>
+            </details>
+          `;
+        }).join('');
+      }
     }
 
     // Deities list
@@ -741,22 +848,51 @@
     `).join('');
 
     // Party list
-    $('#dm-party-list').innerHTML = chars.map((c) => `
-      <div class="item-card">
-        <div class="item-card-top">
-          <strong>${esc(c.name)} (Lv ${c.level})</strong>
-          <span>HP ${c.hp}/${c.maxHp} • XP ${c.xp || 0}/${c.xpToNext || c.level * 100} • Pts ${c.unspentStatPoints || 0}</span>
+    $('#dm-party-list').innerHTML = chars.map((c) => {
+      const statPills = Object.entries(c.stats || {}).map(([k, v]) => {
+        const mod = evalLocalFormula(state.mechanics?.statFormula || 'floor((SCORE - 10) / 2)', { ...c.stats, SCORE: Number(v), LEVEL: c.level });
+        const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+        return `<span class="stat-pill">${esc(k)}: <b>${v}</b> (${modStr})</span>`;
+      }).join('');
+      const equipEntries = Object.entries(c.equipment || {}).filter(([, item]) => Boolean(item));
+      const equipHtml = equipEntries.length
+        ? equipEntries.map(([slot, item]) => {
+            const label = typeof item === 'string' ? item : (item.name || 'Equipped');
+            return `<span class="stat-pill"><b>${esc(slot)}:</b> ${esc(label)}</span>`;
+          }).join('')
+        : '<span class="muted small">None equipped</span>';
+      const invList = c.inventory || [];
+      const invHtml = invList.length
+        ? invList.map((it) => `<li><b>${esc(it.name)}</b> <span class="muted small">(${esc(it.category || 'item')}${it.qty > 1 ? ` ×${it.qty}` : ''}${it.damageDice ? ` • ${esc(it.damageDice)}` : ''})</span></li>`).join('')
+        : '<li class="muted small">Empty inventory</li>';
+      return `
+        <div class="item-card">
+          <div class="item-card-top">
+            <strong>${esc(c.name)} (Lv ${c.level}${c.className ? ` ${esc(c.className)}` : ''})</strong>
+            <span>HP ${c.hp}/${c.maxHp} • MP ${c.mp}/${c.maxMp} • AC ${c.ac} • DR ${c.dr || 0}</span>
+          </div>
+          <div class="muted small">XP ${c.xp || 0}/${c.xpToNext || c.level * 100} • Pts ${c.unspentStatPoints || 0} • Favor ${c.favor || 0} • ${c.currency?.gold || 0}G • ${c.currency?.manaStones || 0} Stones</div>
+          <div class="stat-pills">${statPills}</div>
+          <div class="small mt-xs"><b>Equipment:</b></div>
+          <div class="stat-pills">${equipHtml}</div>
+          <details class="sub-details mt-xs">
+            <summary class="small">Inventory (${invList.length})</summary>
+            <ul class="small" style="margin:4px 0 0 16px; padding:0;">${invHtml}</ul>
+          </details>
+          <div class="btn-row mt-xs">
+            <button type="button" class="btn btn-xs btn-outline" data-view-char="${esc(c.id)}">View Character</button>
+            <button type="button" class="btn btn-xs btn-purple" data-grant-xp="${esc(c.id)}">+50 XP</button>
+            <button type="button" class="btn btn-xs btn-gold" data-grant-favor="${esc(c.id)}">+1 Favor</button>
+            <button type="button" class="btn btn-xs btn-cyan" data-heal-char="${esc(c.id)}">+10 HP</button>
+          </div>
         </div>
-        <div class="btn-row">
-          <button type="button" class="btn btn-xs btn-purple" data-grant-xp="${esc(c.id)}">+50 XP</button>
-          <button type="button" class="btn btn-xs btn-gold" data-grant-favor="${esc(c.id)}">+1 Favor</button>
-          <button type="button" class="btn btn-xs btn-cyan" data-heal-char="${esc(c.id)}">+10 HP</button>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
-    if (document.activeElement?.id !== 'dm-private-notes') $('#dm-private-notes').value = state.notes?.dmPrivate || '';
-    if (document.activeElement?.id !== 'dm-shared-quests') $('#dm-shared-quests').value = state.notes?.sharedQuests || '';
+    if ($('#dm-private-notes') && document.activeElement?.id !== 'dm-private-notes') $('#dm-private-notes').value = state.notes?.dmPrivate || '';
+    if ($('#dm-shared-quests') && document.activeElement?.id !== 'dm-shared-quests') $('#dm-shared-quests').value = state.notes?.sharedQuests || '';
+
+    if (typeof renderBeatDraftDesigner === 'function') renderBeatDraftDesigner();
 
     $('#dm-roll-log').innerHTML = (state.rollLog || []).map((r) => `
       <div class="feed-entry ${r.isSecret ? 'secret' : ''}">
@@ -766,9 +902,113 @@
     `).join('');
 
     drawTowerCanvas('dm-tower-canvas', true);
+    renderTowerFloorsAndBeats('dm-tower-floors-beats', true);
+    renderDmFloorThemeRows();
     if (activeBeatMapId && !$('#beat-map-modal').classList.contains('hidden')) {
       renderBeatMapModal();
     }
+    if (activeBeatDetailId && $('#beat-detail-view')?.classList.contains('active')) {
+      renderBeatDetailModal();
+    }
+    if (activeDmCharModalId && !$('#dm-char-modal')?.classList.contains('hidden')) {
+      renderDmCharModal(activeDmCharModalId);
+    }
+  }
+
+  function renderTowerFloorsAndBeats(containerId, isDmView) {
+    const el = document.getElementById(containerId);
+    if (!el || !state?.map?.floors) return;
+    const floors = [...state.map.floors].sort((a, b) => a.number - b.number);
+    const mapTokens = state.map.tokens || [];
+    const charsMap = state.characters || {};
+
+    el.innerHTML = floors.map((fl) => {
+      const theme = (fl.theme || 'obsidian').toUpperCase();
+      const beats = (state.storyBeats || []).filter((b) => Number(b.floor) === Number(fl.number) && (isDmView || b.presented));
+      const activeBeats = beats.filter((b) => b.presented || b.status === 'active');
+      const resolvedBeats = beats.filter((b) => b.status === 'resolved');
+
+      // 1. Players currently on this floor & their status
+      const floorPlayerTokens = mapTokens.filter((t) => t.type === 'player' && t.y >= fl.rowStart && t.y <= fl.rowEnd);
+      const playersHtml = floorPlayerTokens.length
+        ? `<div class="stat-pills" style="margin-top:6px;">
+            ${floorPlayerTokens.map((pt) => {
+              const ch = charsMap[pt.id];
+              const hp = ch ? ch.hp : pt.hp;
+              const maxHp = ch ? ch.maxHp : pt.maxHp;
+              const mp = ch ? ch.mp : null;
+              const maxMp = ch ? ch.maxMp : null;
+              const statusText = hp <= 0 ? 'Downed' : (maxHp && hp <= maxHp * 0.5 ? 'Wounded' : 'Healthy');
+              const condText = ch?.conditions?.length ? ` • ${ch.conditions.join(', ')}` : '';
+              return `<span class="stat-pill"><b>${esc(ch?.name || pt.name)}</b> (Lv ${ch?.level || 1}) • HP ${hp}/${maxHp}${mp !== null ? ` • MP ${mp}/${maxMp}` : ''} • <i>${esc(statusText)}${esc(condText)}</i></span>`;
+            }).join('')}
+          </div>`
+        : '<div class="muted small" style="margin-top:6px;">No players currently on this floor.</div>';
+
+      // 2. Current & all Story Beats on this floor
+      const beatsHtml = beats.length
+        ? beats.map((b) => {
+            const isCurrent = b.presented || b.status === 'active';
+            return `
+              <div class="item-card ${isCurrent ? 'card-glow-cyan' : ''}" style="margin-top:6px;">
+                <div class="item-card-top">
+                  <strong>${esc(b.title)} ${isCurrent ? '<span class="tag tag-cyan">CURRENT BEAT</span>' : `<span class="tag tag-gold">${esc((b.status || 'upcoming').toUpperCase())}</span>`}</strong>
+                  <button type="button" class="btn btn-xs btn-gold" data-beat-open="${esc(b.id)}">View Beat</button>
+                </div>
+                ${b.narration ? `<div class="muted small">${esc(b.narration)}</div>` : ''}
+              </div>
+            `;
+          }).join('')
+        : '<div class="muted small" style="margin-top:4px;">No story beats on this floor yet.</div>';
+
+      // 3. Floor Overview (what happened on this floor)
+      const openedChests = beats.reduce((n, b) => n + (b.arena?.chests || []).filter((c) => c.opened).length, 0);
+      const talkedNpcs = beats.reduce((n, b) => n + (b.arena?.tokens || []).filter((t) => t.type === 'npc' && t.rewardClaimed).length, 0);
+      const defeatedMons = beats.reduce((n, b) => n + (b.arena?.tokens || []).filter((t) => t.type === 'monster' && t.hp !== null && t.hp <= 0).length, 0);
+      const floorLogs = (state.combatLog || [])
+        .filter((l) => (l.summary || '').includes(`${fl.number}F`))
+        .slice(0, 3);
+      const summaryParts = [
+        `${beats.length} Story Beat${beats.length === 1 ? '' : 's'} (${activeBeats.length} active, ${resolvedBeats.length} resolved)`,
+        defeatedMons ? `${defeatedMons} monster${defeatedMons === 1 ? '' : 's'} defeated` : '',
+        openedChests ? `${openedChests} chest${openedChests === 1 ? '' : 's'} opened` : '',
+        talkedNpcs ? `${talkedNpcs} NPC reward${talkedNpcs === 1 ? '' : 's'} claimed` : '',
+      ].filter(Boolean).join(' • ');
+
+      return `
+        <div class="panel" style="padding:10px 12px;">
+          <div class="panel-header">
+            <strong>${esc(fl.title)}</strong>
+            <div class="btn-row" style="align-items:center;">
+              <span class="tag tag-green">${esc(theme)}</span>
+              ${isDmView && floors.length > 1 ? `<button type="button" class="btn btn-xs btn-danger-outline" data-dm-delete-floor="${fl.number}" data-floor-title="${esc(fl.title)}">Delete Floor</button>` : ''}
+            </div>
+          </div>
+          ${fl.description ? `<div class="muted small" style="margin-top:2px;">${esc(fl.description)}</div>` : ''}
+          <div class="small" style="margin-top:6px;"><b>Overview:</b> ${esc(summaryParts)}</div>
+          ${floorLogs.length ? `<div class="muted small" style="margin-top:3px;">Recent: ${floorLogs.map((l) => esc(l.summary)).join(' | ')}</div>` : ''}
+          <div class="small" style="margin-top:6px;"><b>Players on ${fl.number}F:</b></div>
+          ${playersHtml}
+          <div class="small" style="margin-top:8px;"><b>Story Beats on ${fl.number}F:</b></div>
+          ${beatsHtml}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderDmFloorThemeRows() {
+    const el = $('#dm-floor-theme-rows');
+    if (!el || !state?.map?.floors) return;
+    const themes = ['forest', 'desert', 'underworld', 'plains', 'frost', 'obsidian'];
+    const floors = [...state.map.floors].sort((a, b) => a.number - b.number);
+    el.innerHTML = floors.map((fl) => `
+      <label class="chip-btn" style="display:inline-flex; align-items:center; gap:6px;">
+        <span>${fl.number}F:</span>
+        <select data-floor-theme-pick="${fl.number}" style="width:auto; min-height:26px; padding:2px 6px;">
+          ${themes.map((t) => `<option value="${t}" ${fl.theme === t ? 'selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`).join('')}
+        </select>
+      </label>
+    `).join('');
   }
 
   // -------------------------------------------------------------------------
@@ -791,50 +1031,54 @@
     ctx.clearRect(0, 0, totalW, totalH);
 
     // Draw Floors from top (highest floor) to bottom (1F)
+    const floorThemeColors = {
+      forest:     { top: '#11291a', bot: '#09180f', spine: '#4ade80', border: '#22c55e' },
+      desert:     { top: '#3b2812', bot: '#211508', spine: '#fbbf24', border: '#f59e0b' },
+      underworld: { top: '#310d14', bot: '#18060a', spine: '#f87171', border: '#ef4444' },
+      plains:     { top: '#1f2d14', bot: '#111a0b', spine: '#a3e635', border: '#84cc16' },
+      frost:      { top: '#0e293d', bot: '#081826', spine: '#7dd3fc', border: '#38bdf8' },
+      obsidian:   { top: '#0f172a', bot: '#090f1d', spine: '#38bdf8', border: '#38bdf8' },
+    };
     for (const fl of state.map.floors || []) {
       const yTop = fl.rowStart * cellSize;
       const flH = (fl.rowEnd - fl.rowStart + 1) * cellSize;
+      const thKey = fl.theme || (fl.safeZone ? 'forest' : 'obsidian');
+      const th = floorThemeColors[thKey] || floorThemeColors.obsidian;
       const grad = ctx.createLinearGradient(0, yTop, 0, yTop + flH);
-      if (fl.safeZone) {
-        grad.addColorStop(0, '#092229');
-        grad.addColorStop(1, '#06151c');
-      } else if (fl.number >= 5) {
-        grad.addColorStop(0, '#2a0912');
-        grad.addColorStop(1, '#14060c');
-      } else {
-        grad.addColorStop(0, '#0f172a');
-        grad.addColorStop(1, '#090f1d');
-      }
+      grad.addColorStop(0, th.top);
+      grad.addColorStop(1, th.bot);
       ctx.fillStyle = grad;
       ctx.fillRect(labelW, yTop, cols * cellSize, flH);
 
       // Floor Left Spine Marker
       ctx.fillStyle = '#070b14';
       ctx.fillRect(0, yTop, labelW, flH);
-      ctx.fillStyle = fl.safeZone ? '#34d399' : '#38bdf8';
+      ctx.fillStyle = th.spine;
       ctx.font = 'bold 13px Segoe UI, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(`${fl.number}F`, labelW / 2, yTop + flH / 2 + 4);
 
-      // Floor header banner
-      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      // Floor header banner + Theme + Story Beats summary
+      const floorBeats = (state.storyBeats || []).filter((b) => Number(b.floor) === Number(fl.number) && (isDmView || b.presented));
+      const beatNames = floorBeats.length ? ` • Beats: ${floorBeats.map((b) => b.title).join(' | ')}` : '';
+      ctx.fillStyle = 'rgba(255,255,255,0.78)';
       ctx.font = 'bold 11px Segoe UI, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(fl.title, labelW + 8, yTop + 15);
+      ctx.fillText(`${fl.title} [${thKey.toUpperCase()}]${beatNames}`, labelW + 8, yTop + 15);
 
       // Warp Gate / Ascend Portal
       const px = labelW + fl.portalCol * cellSize + cellSize / 2;
       const py = fl.portalRow * cellSize + cellSize / 2;
       ctx.beginPath();
       ctx.arc(px, py, 14, 0, Math.PI * 2);
-      ctx.strokeStyle = '#38bdf8';
+      ctx.strokeStyle = th.border;
       ctx.lineWidth = 2;
       ctx.stroke();
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.14)';
       ctx.fill();
 
       // Floor Divider Line
-      ctx.strokeStyle = '#38bdf8';
+      ctx.strokeStyle = th.border;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, yTop + flH);
@@ -950,7 +1194,7 @@
     });
   });
 
-  $('#player-tower-canvas').addEventListener('click', async (ev) => {
+  $('#player-tower-canvas')?.addEventListener('click', async (ev) => {
     const cell = getGridCellFromClick(ev.currentTarget, ev);
     if (!cell || !session) return;
     if (playerMapTool === 'move') {
@@ -967,9 +1211,11 @@
         const spaces = Math.max(Math.abs(cell.x - measureStart.x), Math.abs(cell.y - measureStart.y));
         $('#p-map-info').textContent = `Distance measured: ${spaces} Spaces.`;
         drawTowerCanvas('player-tower-canvas', false);
+    renderTowerFloorsAndBeats('p-tower-floors-beats', false);
         measureStart = null;
       }
       drawTowerCanvas('player-tower-canvas', false);
+    renderTowerFloorsAndBeats('p-tower-floors-beats', false);
     }
   });
 
@@ -984,7 +1230,7 @@
     });
   });
 
-  $('#dm-tower-canvas').addEventListener('click', async (ev) => {
+  $('#dm-tower-canvas')?.addEventListener('click', async (ev) => {
     const cell = getGridCellFromClick(ev.currentTarget, ev);
     if (!cell || !session) return;
     if (dmMapTool === 'move') {
@@ -992,6 +1238,8 @@
       if (hitTok) {
         dmSelectedTokenId = hitTok.id;
         drawTowerCanvas('dm-tower-canvas', true);
+    renderTowerFloorsAndBeats('dm-tower-floors-beats', true);
+    renderDmFloorThemeRows();
       } else if (dmSelectedTokenId) {
         await sendAction('move_token', { tokenId: dmSelectedTokenId, x: cell.x, y: cell.y });
       }
@@ -1008,9 +1256,13 @@
       } else {
         measureEnd = cell;
         drawTowerCanvas('dm-tower-canvas', true);
+    renderTowerFloorsAndBeats('dm-tower-floors-beats', true);
+    renderDmFloorThemeRows();
         measureStart = null;
       }
       drawTowerCanvas('dm-tower-canvas', true);
+    renderTowerFloorsAndBeats('dm-tower-floors-beats', true);
+    renderDmFloorThemeRows();
     }
   });
 
@@ -1211,7 +1463,66 @@
   });
 
   // Dice Roller (d2..d100 + Custom 1..100)
+  function renderDiePolyhedronSvg(sides) {
+    const s = Number(sides || 20);
+    if (s === 4) {
+      return '<svg viewBox="0 0 64 64"><polygon points="32,6 58,54 6,54" fill="rgba(56,189,248,0.16)" stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round"/></svg>';
+    }
+    if (s === 6) {
+      return '<svg viewBox="0 0 64 64"><rect x="10" y="10" width="44" height="44" rx="8" fill="rgba(56,189,248,0.16)" stroke="#38bdf8" stroke-width="2.5"/></svg>';
+    }
+    if (s === 8) {
+      return '<svg viewBox="0 0 64 64"><polygon points="32,5 57,32 32,59 7,32" fill="rgba(56,189,248,0.16)" stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round"/><line x1="7" y1="32" x2="57" y2="32" stroke="rgba(56,189,248,0.35)" stroke-width="1.5"/></svg>';
+    }
+    if (s === 10 || s === 100) {
+      return '<svg viewBox="0 0 64 64"><polygon points="32,5 56,28 32,59 8,28" fill="rgba(168,85,247,0.18)" stroke="#a855f7" stroke-width="2.5" stroke-linejoin="round"/></svg>';
+    }
+    if (s === 12) {
+      return '<svg viewBox="0 0 64 64"><polygon points="32,6 56,24 47,54 17,54 8,24" fill="rgba(56,189,248,0.16)" stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round"/></svg>';
+    }
+    return '<svg viewBox="0 0 64 64"><polygon points="32,5 55,18 55,46 32,59 9,46 9,18" fill="rgba(56,189,248,0.16)" stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round"/><polygon points="32,14 48,42 16,42" fill="none" stroke="rgba(56,189,248,0.35)" stroke-width="1.3"/></svg>';
+  }
+
+  function simulateDiceTray(stageId, sides, roll) {
+    const stage = document.getElementById(stageId);
+    if (!stage || !roll) return;
+    const rolls = Array.isArray(roll.rolls) && roll.rolls.length ? roll.rolls : [roll.total];
+    const s = Number(sides || 20);
+    const svg = renderDiePolyhedronSvg(s);
+
+    stage.innerHTML = rolls.map((_, idx) => `
+      <div class="dice-sim-die rolling" data-die-idx="${idx}">
+        ${svg}
+        <span class="dice-sim-val">${Math.floor(Math.random() * s) + 1}</span>
+      </div>
+    `).join('') + `<div class="dice-sim-total">Rolling <b>${esc(roll.formula)}</b>...</div>`;
+
+    const tick = setInterval(() => {
+      stage.querySelectorAll('.dice-sim-die.rolling .dice-sim-val').forEach((el) => {
+        el.textContent = String(Math.floor(Math.random() * s) + 1);
+      });
+    }, 65);
+
+    setTimeout(() => {
+      clearInterval(tick);
+      stage.querySelectorAll('.dice-sim-die').forEach((dieEl, idx) => {
+        dieEl.classList.remove('rolling');
+        const val = Number(rolls[idx] ?? roll.total);
+        dieEl.querySelector('.dice-sim-val').textContent = String(val);
+        if (s >= 4 && val === s) dieEl.classList.add('crit');
+        else if (s >= 4 && val === 1) dieEl.classList.add('fumble');
+      });
+      const totalEl = stage.querySelector('.dice-sim-total');
+      if (totalEl) {
+        totalEl.innerHTML = `<b>${esc(roll.formula)}</b> (${esc(roll.label || 'Roll')}) = <strong class="tag tag-gold">${roll.total}</strong>`;
+      }
+    }, 460);
+  }
+
   function displayLastRoll(roll) {
+    if (!roll) return;
+    const sidesMatch = String(roll.formula || '').match(/d(\d+)/i);
+    simulateDiceTray('p-dice-sim-stage', sidesMatch ? Number(sidesMatch[1]) : 20, roll);
     const box = $('#p-last-roll-banner');
     box.classList.remove('hidden');
     box.innerHTML = `<div class="small muted">${esc(roll.label)} (${esc(roll.formula)})</div>
@@ -1276,10 +1587,413 @@
   // DM Event Handlers
   // -------------------------------------------------------------------------
   let stagedBeatMonsters = [];
+  let stagedBeatNpcs = [];
   let stagedBeatTreasures = [];
+  let draftPlayerPositions = {}; // { [charId]: { x, y } }
+  let draftChests = [];          // [{ name, x, y, gold, itemName }]
+  let draftBiome = 'obsidian';
+  let draftTerrain = [];         // [{ x, y, type: 'tree'|'rock'|'water' }]
+  let draftSelectedTool = null;  // { kind: 'player', id } | { kind: 'monster', index } | { kind: 'chest' | 'tree' | 'rock' | 'water' }
+  let draftHoverCell = null;
+
+  function getScaledCanvasCell(canvas, clientX, clientY, axisPad, cellPx) {
+    const rect = canvas.getBoundingClientRect();
+    const px = (clientX - rect.left) * (canvas.width / rect.width);
+    const py = (clientY - rect.top) * (canvas.height / rect.height);
+    return {
+      x: Math.floor((px - axisPad) / cellPx),
+      y: Math.floor((py - axisPad) / cellPx),
+    };
+  }
+
+  function hashSeedStr(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function makeSeededRng(seed) {
+    let s = (seed || 1) >>> 0;
+    return () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  }
+
+  function generateLocalDraftTerrain(promptText, cols, rows, explicitBiome, occupiedSet) {
+    const lower = String(promptText || '').toLowerCase();
+    let biome = ['obsidian', 'forest', 'plains', 'desert'].includes(explicitBiome) ? explicitBiome : 'obsidian';
+    if (!explicitBiome || explicitBiome === 'obsidian') {
+      if (/\b(forest|wood|woods|grove|jungle|glade|thicket|canopy|trees?)\b/.test(lower)) biome = 'forest';
+      else if (/\b(desert|sand|dune|oasis|arid|canyon|wasteland|sunbaked)\b/.test(lower)) biome = 'desert';
+      else if (/\b(plain|plains|meadow|grass|steppe|field|prairie|savanna)\b/.test(lower)) biome = 'plains';
+    }
+    const rng = makeSeededRng(hashSeedStr(`${promptText || ''}|${cols}x${rows}|${biome}`));
+    const terrain = [];
+    const seen = new Set(occupiedSet || []);
+    const addTile = (x, y, type) => {
+      if (x < 0 || x >= cols || y < 0 || y >= rows) return;
+      const k = `${x},${y}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      terrain.push({ x, y, type });
+    };
+
+    const wantsWater = /\b(river|stream|water|creek|brook|lake|pond|ford|moat|flood|oasis|marsh)\b/.test(lower);
+    const wantsRocks = /\b(rock|rocks|boulder|boulders|crag|cliff|stone|ruin|ruins|rubble|canyon|pillar)\b/.test(lower);
+    const wantsTrees = /\b(tree|trees|forest|wood|woods|grove|jungle|thicket|timber)\b/.test(lower) || biome === 'forest';
+
+    if (wantsWater || (lower.trim() && rng() < 0.35)) {
+      const horizontal = rng() < 0.6;
+      const ford1 = Math.floor((horizontal ? cols : rows) * (0.28 + rng() * 0.14));
+      const ford2 = Math.floor((horizontal ? cols : rows) * (0.66 + rng() * 0.14));
+      let pos = Math.floor((horizontal ? rows : cols) * (0.35 + rng() * 0.3));
+      const len = horizontal ? cols : rows;
+      for (let i = 0; i < len; i++) {
+        if (i === ford1 || i === ford1 + 1 || i === ford2) continue;
+        if (horizontal) {
+          addTile(i, pos, 'water');
+          if (rng() < 0.35) addTile(i, pos + 1, 'water');
+        } else {
+          addTile(pos, i, 'water');
+          if (rng() < 0.35) addTile(pos + 1, i, 'water');
+        }
+        if (rng() < 0.4) pos += rng() < 0.5 ? -1 : 1;
+        pos = Math.max(2, Math.min((horizontal ? rows : cols) - 3, pos));
+      }
+    }
+
+    const area = cols * rows;
+    const rockCount = Math.max(2, Math.round(area * (wantsRocks ? 0.055 : 0.02)));
+    for (let i = 0; i < rockCount; i++) {
+      const rx = Math.floor(rng() * cols);
+      const ry = Math.floor(rng() * rows);
+      addTile(rx, ry, 'rock');
+      if (wantsRocks && rng() < 0.35) addTile(rx + (rng() < 0.5 ? 1 : -1), ry, 'rock');
+    }
+
+    const treeDensity = biome === 'forest' ? 0.09 : biome === 'plains' ? 0.03 : biome === 'desert' ? 0.008 : 0.015;
+    const treeCount = Math.round(area * (wantsTrees ? Math.max(treeDensity, 0.06) : treeDensity));
+    for (let i = 0; i < treeCount; i++) {
+      addTile(Math.floor(rng() * cols), Math.floor(rng() * rows), 'tree');
+    }
+    return { biome, terrain };
+  }
+
+  function drawArenaBackground(ctx, biome, axisPad, cols, rows, cellPx, w, h) {
+    const palettes = {
+      obsidian: { bg: '#070b14', alt: 'rgba(56, 189, 248, 0.03)', grid: 'rgba(56, 189, 248, 0.2)', axis: '#64748b' },
+      forest:   { bg: '#102116', alt: 'rgba(74, 222, 128, 0.05)', grid: 'rgba(74, 222, 128, 0.18)', axis: '#86efac' },
+      plains:   { bg: '#1e2b15', alt: 'rgba(163, 230, 53, 0.05)', grid: 'rgba(163, 230, 53, 0.18)', axis: '#bef264' },
+      desert:   { bg: '#2b1e10', alt: 'rgba(251, 191, 36, 0.06)', grid: 'rgba(251, 191, 36, 0.18)', axis: '#fcd34d' },
+    };
+    const pal = palettes[biome] || palettes.obsidian;
+    ctx.fillStyle = pal.bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // Subtle biome texture patches
+    ctx.fillStyle = pal.alt;
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        if (((x * 13 + y * 29) % 7) === 0) {
+          ctx.fillRect(axisPad + x * cellPx, axisPad + y * cellPx, cellPx, cellPx);
+        }
+      }
+    }
+
+    ctx.fillStyle = pal.axis;
+    ctx.font = `bold ${cellPx >= 36 ? 10 : 9}px Segoe UI, sans-serif`;
+    ctx.textAlign = 'center';
+    for (let x = 0; x < cols; x++) ctx.fillText(String(x + 1), axisPad + x * cellPx + cellPx / 2, axisPad - 8);
+    for (let y = 0; y < rows; y++) ctx.fillText(String(y + 1), Math.floor(axisPad / 2), axisPad + y * cellPx + cellPx / 2 + 3);
+
+    ctx.strokeStyle = pal.grid;
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= cols; x++) {
+      ctx.beginPath(); ctx.moveTo(axisPad + x * cellPx, axisPad); ctx.lineTo(axisPad + x * cellPx, h); ctx.stroke();
+    }
+    for (let y = 0; y <= rows; y++) {
+      ctx.beginPath(); ctx.moveTo(axisPad, axisPad + y * cellPx); ctx.lineTo(w, axisPad + y * cellPx); ctx.stroke();
+    }
+  }
+
+  function drawTerrainTile(ctx, tile, cx, cy, cellPx, biome) {
+    const half = cellPx / 2;
+    const x0 = cx - half;
+    const y0 = cy - half;
+    if (tile.type === 'water') {
+      ctx.fillStyle = '#0369a1';
+      ctx.fillRect(x0 + 1, y0 + 1, cellPx - 2, cellPx - 2);
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = Math.max(1, cellPx * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(x0 + cellPx * 0.2, cy - cellPx * 0.14);
+      ctx.quadraticCurveTo(cx, cy - cellPx * 0.24, x0 + cellPx * 0.8, cy - cellPx * 0.14);
+      ctx.moveTo(x0 + cellPx * 0.22, cy + cellPx * 0.16);
+      ctx.quadraticCurveTo(cx, cy + cellPx * 0.06, x0 + cellPx * 0.78, cy + cellPx * 0.16);
+      ctx.stroke();
+    } else if (tile.type === 'rock') {
+      ctx.fillStyle = biome === 'desert' ? '#92400e' : '#475569';
+      ctx.beginPath();
+      ctx.moveTo(cx - cellPx * 0.34, cy + cellPx * 0.26);
+      ctx.lineTo(cx - cellPx * 0.38, cy - cellPx * 0.08);
+      ctx.lineTo(cx - cellPx * 0.08, cy - cellPx * 0.34);
+      ctx.lineTo(cx + cellPx * 0.32, cy - cellPx * 0.2);
+      ctx.lineTo(cx + cellPx * 0.36, cy + cellPx * 0.24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = biome === 'desert' ? '#f59e0b' : '#94a3b8';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.beginPath();
+      ctx.arc(cx - cellPx * 0.08, cy - cellPx * 0.12, cellPx * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (tile.type === 'tree') {
+      ctx.fillStyle = 'rgba(0,0,0,0.32)';
+      ctx.beginPath();
+      ctx.ellipse(cx + 1, cy + cellPx * 0.26, cellPx * 0.28, cellPx * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#78350f';
+      ctx.fillRect(cx - cellPx * 0.08, cy + cellPx * 0.05, cellPx * 0.16, cellPx * 0.24);
+      ctx.fillStyle = biome === 'desert' ? '#65a30d' : '#15803d';
+      ctx.beginPath();
+      ctx.arc(cx, cy - cellPx * 0.05, cellPx * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = biome === 'desert' ? '#84cc16' : '#22c55e';
+      ctx.beginPath();
+      ctx.arc(cx - cellPx * 0.07, cy - cellPx * 0.12, cellPx * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function getDraftCellPx(gridSize) {
+    return gridSize >= 50 ? 22 : gridSize >= 40 ? 24 : gridSize >= 30 ? 26 : 30;
+  }
+
+  function renderBeatDraftDesigner() {
+    const palette = $('#beat-draft-palette');
+    const canvas = $('#beat-draft-canvas');
+    if (!palette || !canvas || !state?.characters) return;
+
+    const gridSize = Number($('#beat-grid-size')?.value || 20);
+    const chars = Object.values(state.characters);
+    if (!draftSelectedTool && chars[0]) draftSelectedTool = { kind: 'player', id: chars[0].id };
+
+    // Initialize default starting coordinates for players if not set
+    const startX = Math.max(0, Math.floor(gridSize / 2) - Math.floor(chars.length / 2));
+    const startY = Math.max(0, gridSize - 4);
+    chars.forEach((ch, idx) => {
+      if (!draftPlayerPositions[ch.id]) {
+        draftPlayerPositions[ch.id] = { x: Math.min(gridSize - 1, startX + idx * 2), y: startY };
+      }
+      draftPlayerPositions[ch.id].x = Math.min(gridSize - 1, draftPlayerPositions[ch.id].x);
+      draftPlayerPositions[ch.id].y = Math.min(gridSize - 1, draftPlayerPositions[ch.id].y);
+    });
+
+    const chips = [
+      ...chars.map((ch) => {
+        const active = draftSelectedTool?.kind === 'player' && draftSelectedTool.id === ch.id;
+        return `<button type="button" class="chip-btn ${active ? 'active' : ''}" data-draft-pick="player" data-id="${esc(ch.id)}">${esc(ch.name.split(' ')[0])}</button>`;
+      }),
+      ...stagedBeatMonsters.map((m, idx) => {
+        const active = draftSelectedTool?.kind === 'monster' && draftSelectedTool.index === idx;
+        return `<button type="button" class="chip-btn ${active ? 'active' : ''}" data-draft-pick="monster" data-idx="${idx}" style="border-color:rgba(239,68,68,0.6);">${esc(m.name)}</button>`;
+      }),
+      ...stagedBeatNpcs.map((n, idx) => {
+        const active = draftSelectedTool?.kind === 'npc' && draftSelectedTool.index === idx;
+        return `<button type="button" class="chip-btn ${active ? 'active' : ''}" data-draft-pick="npc" data-idx="${idx}" style="border-color:rgba(16,185,129,0.7); color:#34d399;">${esc(n.name)}</button>`;
+      }),
+      `<button type="button" class="chip-btn ${draftSelectedTool?.kind === 'chest' ? 'active' : ''}" data-draft-pick="chest" style="border-color:rgba(251,191,36,0.7); color:#fbbf24;">+ Treasure Chest</button>`,
+      `<button type="button" class="chip-btn ${draftSelectedTool?.kind === 'tree' ? 'active' : ''}" data-draft-pick="tree" style="border-color:rgba(34,197,94,0.6); color:#4ade80;">Tree</button>`,
+      `<button type="button" class="chip-btn ${draftSelectedTool?.kind === 'rock' ? 'active' : ''}" data-draft-pick="rock" style="border-color:rgba(148,163,184,0.6); color:#cbd5e1;">Rock</button>`,
+      `<button type="button" class="chip-btn ${draftSelectedTool?.kind === 'water' ? 'active' : ''}" data-draft-pick="water" style="border-color:rgba(56,189,248,0.6); color:#38bdf8;">Water</button>`,
+    ];
+    palette.innerHTML = chips.join('');
+
+    const cellPx = getDraftCellPx(gridSize);
+    const axisPad = 22;
+    const w = axisPad + gridSize * cellPx;
+    const h = axisPad + gridSize * cellPx;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+
+    const ctx = canvas.getContext('2d');
+    drawArenaBackground(ctx, draftBiome, axisPad, gridSize, gridSize, cellPx, w, h);
+
+    if (draftHoverCell && draftHoverCell.x >= 0 && draftHoverCell.x < gridSize && draftHoverCell.y >= 0 && draftHoverCell.y < gridSize) {
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.16)';
+      ctx.fillRect(axisPad + draftHoverCell.x * cellPx, axisPad + draftHoverCell.y * cellPx, cellPx, cellPx);
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(axisPad + draftHoverCell.x * cellPx + 0.5, axisPad + draftHoverCell.y * cellPx + 0.5, cellPx - 1, cellPx - 1);
+    }
+
+    // Draw Impassable Terrain
+    for (const tile of draftTerrain) {
+      if (tile.x >= gridSize || tile.y >= gridSize) continue;
+      const cx = axisPad + tile.x * cellPx + cellPx / 2;
+      const cy = axisPad + tile.y * cellPx + cellPx / 2;
+      drawTerrainTile(ctx, tile, cx, cy, cellPx, draftBiome);
+    }
+
+    // Draw staged Treasure Chests
+    for (const c of draftChests) {
+      const cx = axisPad + c.x * cellPx + cellPx / 2;
+      const cy = axisPad + c.y * cellPx + cellPx / 2;
+      drawChestIcon(ctx, c, cx, cy, cellPx);
+    }
+
+    // Draw player starting positions
+    for (const ch of chars) {
+      const pos = draftPlayerPositions[ch.id];
+      if (!pos) continue;
+      const cx = axisPad + pos.x * cellPx + cellPx / 2;
+      const cy = axisPad + pos.y * cellPx + cellPx / 2;
+      const tok = { id: ch.id, name: ch.name, type: 'player', label: ch.name.slice(0, 2).toUpperCase() };
+      drawTokenAvatar(ctx, tok, cx, cy, Math.max(7, Math.floor(cellPx * 0.4)), draftSelectedTool?.kind === 'player' && draftSelectedTool.id === ch.id);
+    }
+
+    // Draw attached monsters starting positions
+    stagedBeatMonsters.forEach((m, idx) => {
+      const mx = (m.startX ? Number(m.startX) - 1 : Math.min(gridSize - 1, startX + idx * 2));
+      const my = (m.startY ? Number(m.startY) - 1 : Math.min(gridSize - 1, 3));
+      const cx = axisPad + mx * cellPx + cellPx / 2;
+      const cy = axisPad + my * cellPx + cellPx / 2;
+      const tok = { id: `draft-mon-${idx}`, name: m.name, type: 'monster', label: m.name.slice(0, 2).toUpperCase() };
+      drawTokenAvatar(ctx, tok, cx, cy, Math.max(7, Math.floor(cellPx * 0.4)), draftSelectedTool?.kind === 'monster' && draftSelectedTool.index === idx);
+    });
+
+    // Draw attached NPCs starting positions
+    stagedBeatNpcs.forEach((n, idx) => {
+      const nx = (n.startX ? Number(n.startX) - 1 : Math.min(gridSize - 1, 2 + idx * 2));
+      const ny = (n.startY ? Number(n.startY) - 1 : Math.min(gridSize - 1, Math.floor(gridSize / 2)));
+      const cx = axisPad + nx * cellPx + cellPx / 2;
+      const cy = axisPad + ny * cellPx + cellPx / 2;
+      const tok = { id: `draft-npc-${idx}`, name: n.name, type: 'npc', label: n.name.slice(0, 2).toUpperCase() };
+      drawTokenAvatar(ctx, tok, cx, cy, Math.max(7, Math.floor(cellPx * 0.4)), draftSelectedTool?.kind === 'npc' && draftSelectedTool.index === idx);
+    });
+  }
+
+  $('#beat-grid-size').addEventListener('change', renderBeatDraftDesigner);
+  $('#beat-draft-biome').addEventListener('change', (ev) => {
+    draftBiome = ev.target.value || 'obsidian';
+    renderBeatDraftDesigner();
+  });
+  $('#btn-draft-gen-terrain').addEventListener('click', () => {
+    const gridSize = Number($('#beat-grid-size')?.value || 20);
+    const prompt = $('#beat-draft-prompt').value.trim();
+    const occ = new Set();
+    Object.values(draftPlayerPositions).forEach((p) => { if (p) occ.add(`${p.x},${p.y}`); });
+    stagedBeatMonsters.forEach((m) => { if (m.startX && m.startY) occ.add(`${Number(m.startX) - 1},${Number(m.startY) - 1}`); });
+    draftChests.forEach((c) => occ.add(`${c.x},${c.y}`));
+    const gen = generateLocalDraftTerrain(prompt, gridSize, gridSize, draftBiome, occ);
+    draftBiome = gen.biome;
+    draftTerrain = gen.terrain;
+    $('#beat-draft-biome').value = draftBiome;
+    $('#beat-draft-hint').textContent = `Generated ${draftTerrain.length} terrain tiles (${draftBiome}).`;
+    renderBeatDraftDesigner();
+  });
+  $('#beat-map-designer-details').addEventListener('toggle', () => {
+    if ($('#beat-map-designer-details').open) renderBeatDraftDesigner();
+  });
+
+  $('#beat-draft-palette').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-draft-pick]');
+    if (!btn) return;
+    const kind = btn.dataset.draftPick;
+    if (kind === 'player') draftSelectedTool = { kind: 'player', id: btn.dataset.id };
+    else if (kind === 'monster') draftSelectedTool = { kind: 'monster', index: Number(btn.dataset.idx) };
+    else if (kind === 'npc') draftSelectedTool = { kind: 'npc', index: Number(btn.dataset.idx) };
+    else draftSelectedTool = { kind };
+    renderBeatDraftDesigner();
+  });
+
+  $('#beat-draft-canvas').addEventListener('mousemove', (ev) => {
+    const gridSize = Number($('#beat-grid-size')?.value || 20);
+    const cellPx = getDraftCellPx(gridSize);
+    const cell = getScaledCanvasCell(ev.currentTarget, ev.clientX, ev.clientY, 22, cellPx);
+    if (cell.x >= 0 && cell.x < gridSize && cell.y >= 0 && cell.y < gridSize) {
+      if (!draftHoverCell || draftHoverCell.x !== cell.x || draftHoverCell.y !== cell.y) {
+        draftHoverCell = cell;
+        renderBeatDraftDesigner();
+      }
+    } else if (draftHoverCell) {
+      draftHoverCell = null;
+      renderBeatDraftDesigner();
+    }
+  });
+
+  $('#beat-draft-canvas').addEventListener('mouseleave', () => {
+    if (draftHoverCell) {
+      draftHoverCell = null;
+      renderBeatDraftDesigner();
+    }
+  });
+
+  $('#beat-draft-canvas').addEventListener('click', (ev) => {
+    const gridSize = Number($('#beat-grid-size')?.value || 20);
+    const cellPx = getDraftCellPx(gridSize);
+    const { x, y } = getScaledCanvasCell(ev.currentTarget, ev.clientX, ev.clientY, 22, cellPx);
+    if (x < 0 || x >= gridSize || y < 0 || y >= gridSize || !draftSelectedTool) return;
+
+    if (draftSelectedTool.kind === 'player') {
+      draftPlayerPositions[draftSelectedTool.id] = { x, y };
+      $('#beat-draft-hint').textContent = `Set player start to (${x + 1}, ${y + 1}).`;
+    } else if (draftSelectedTool.kind === 'monster') {
+      const m = stagedBeatMonsters[draftSelectedTool.index];
+      if (m) {
+        m.startX = x + 1;
+        m.startY = y + 1;
+        $('#beat-draft-hint').textContent = `Set ${m.name} start to (${x + 1}, ${y + 1}).`;
+      }
+    } else if (draftSelectedTool.kind === 'npc') {
+      const n = stagedBeatNpcs[draftSelectedTool.index];
+      if (n) {
+        n.startX = x + 1;
+        n.startY = y + 1;
+        $('#beat-draft-hint').textContent = `Set NPC ${n.name} start to (${x + 1}, ${y + 1}).`;
+      }
+    } else if (draftSelectedTool.kind === 'tree' || draftSelectedTool.kind === 'rock' || draftSelectedTool.kind === 'water') {
+      const idx = draftTerrain.findIndex((t) => t.x === x && t.y === y);
+      if (idx >= 0 && draftTerrain[idx].type === draftSelectedTool.kind) {
+        draftTerrain.splice(idx, 1);
+        $('#beat-draft-hint').textContent = `Cleared ${draftSelectedTool.kind} at (${x + 1}, ${y + 1}).`;
+      } else if (idx >= 0) {
+        draftTerrain[idx].type = draftSelectedTool.kind;
+        $('#beat-draft-hint').textContent = `Set ${draftSelectedTool.kind} at (${x + 1}, ${y + 1}).`;
+      } else {
+        draftTerrain.push({ x, y, type: draftSelectedTool.kind });
+        $('#beat-draft-hint').textContent = `Placed ${draftSelectedTool.kind} at (${x + 1}, ${y + 1}).`;
+      }
+    } else if (draftSelectedTool.kind === 'chest') {
+      const existingIdx = draftChests.findIndex((c) => c.x === x && c.y === y);
+      if (existingIdx >= 0) {
+        draftChests.splice(existingIdx, 1);
+        $('#beat-draft-hint').textContent = `Removed chest at (${x + 1}, ${y + 1}).`;
+      } else {
+        draftChests.push({
+          name: $('#draft-chest-name').value.trim() || 'Treasure Chest',
+          gold: Number($('#draft-chest-gold').value || 0),
+          manaStones: 1,
+          itemName: $('#draft-chest-item').value.trim(),
+          x,
+          y,
+        });
+        $('#beat-draft-hint').textContent = `Placed Treasure Chest at (${x + 1}, ${y + 1}). Click again to remove.`;
+      }
+    }
+    renderBeatDraftDesigner();
+  });
 
   function renderStagedBeatAttachments() {
     const monEl = $('#beat-encounters-staged');
+    const npcEl = $('#beat-npcs-staged');
     const trEl = $('#beat-treasures-staged');
     if (monEl) {
       monEl.innerHTML = stagedBeatMonsters.map((m, i) => `
@@ -1288,6 +2002,17 @@
             <strong>${esc(m.name)}</strong>
             <span>HP ${m.maxHp} • AC ${m.ac} • DR ${m.dr} • ${esc(m.damageFormula)}</span>
             <button type="button" class="btn btn-xs btn-danger-outline" data-unstage-mon="${i}">Remove</button>
+          </div>
+        </div>
+      `).join('');
+    }
+    if (npcEl) {
+      npcEl.innerHTML = stagedBeatNpcs.map((n, i) => `
+        <div class="item-card">
+          <div class="item-card-top">
+            <strong>${esc(n.name)} <span class="tag tag-green">${esc(n.npcRole || 'NPC')}</span></strong>
+            <span>${n.startX && n.startY ? `Start (${n.startX}, ${n.startY})` : 'Auto Start'}</span>
+            <button type="button" class="btn btn-xs btn-danger-outline" data-unstage-npc="${i}">Remove</button>
           </div>
         </div>
       `).join('');
@@ -1305,6 +2030,29 @@
     }
   }
 
+  $('#btn-stage-beat-npc')?.addEventListener('click', () => {
+    const name = $('#beat-npc-name').value.trim();
+    if (!name) return showToast({ title: 'NPC NAME NEEDED', message: 'Enter an NPC name before adding.', category: 'warning' });
+    stagedBeatNpcs.push({
+      name,
+      npcRole: $('#beat-npc-role').value.trim() || 'NPC',
+      startX: $('#beat-npc-x').value ? Number($('#beat-npc-x').value) : null,
+      startY: $('#beat-npc-y').value ? Number($('#beat-npc-y').value) : null,
+      dialogue: $('#beat-npc-dialogue')?.value.trim() || '',
+      rewardType: $('#beat-npc-reward-type')?.value || 'none',
+      rewardItemName: $('#beat-npc-reward-name')?.value.trim() || '',
+      rewardXp: Number($('#beat-npc-reward-xp')?.value || 0),
+    });
+    $('#beat-npc-name').value = '';
+    $('#beat-npc-role').value = '';
+    $('#beat-npc-x').value = '';
+    $('#beat-npc-y').value = '';
+    if ($('#beat-npc-dialogue')) $('#beat-npc-dialogue').value = '';
+    if ($('#beat-npc-reward-name')) $('#beat-npc-reward-name').value = '';
+    renderStagedBeatAttachments();
+    renderBeatDraftDesigner();
+  });
+
   $('#btn-stage-beat-mon').addEventListener('click', () => {
     const name = $('#beat-mon-name').value.trim();
     if (!name) return showToast({ title: 'MONSTER NAME NEEDED', message: 'Enter a monster name before adding.', category: 'warning' });
@@ -1317,11 +2065,20 @@
       startX: $('#beat-mon-x').value ? Number($('#beat-mon-x').value) : null,
       startY: $('#beat-mon-y').value ? Number($('#beat-mon-y').value) : null,
       hiddenFromPlayers: false,
+      loot: {
+        itemName: $('#beat-mon-loot-item')?.value.trim() || '',
+        gold: Number($('#beat-mon-loot-gold')?.value || 0),
+        manaStones: Number($('#beat-mon-loot-stones')?.value || 0),
+      },
     });
     $('#beat-mon-name').value = '';
     $('#beat-mon-x').value = '';
     $('#beat-mon-y').value = '';
+    if ($('#beat-mon-loot-item')) $('#beat-mon-loot-item').value = '';
+    if ($('#beat-mon-loot-gold')) $('#beat-mon-loot-gold').value = '0';
+    if ($('#beat-mon-loot-stones')) $('#beat-mon-loot-stones').value = '0';
     renderStagedBeatAttachments();
+    renderBeatDraftDesigner();
   });
 
   $('#btn-stage-beat-tr').addEventListener('click', () => {
@@ -1358,6 +2115,11 @@
         startX: $('#beat-mon-x').value ? Number($('#beat-mon-x').value) : null,
         startY: $('#beat-mon-y').value ? Number($('#beat-mon-y').value) : null,
         hiddenFromPlayers: false,
+        loot: {
+          itemName: $('#beat-mon-loot-item')?.value.trim() || '',
+          gold: Number($('#beat-mon-loot-gold')?.value || 0),
+          manaStones: Number($('#beat-mon-loot-stones')?.value || 0),
+        },
       });
     }
 
@@ -1376,6 +2138,21 @@
       });
     }
 
+    const npcs = [...stagedBeatNpcs];
+    const npcName = $('#beat-npc-name')?.value.trim();
+    if (npcName) {
+      npcs.push({
+        name: npcName,
+        npcRole: $('#beat-npc-role')?.value.trim() || 'NPC',
+        startX: $('#beat-npc-x')?.value ? Number($('#beat-npc-x').value) : null,
+        startY: $('#beat-npc-y')?.value ? Number($('#beat-npc-y').value) : null,
+        dialogue: $('#beat-npc-dialogue')?.value.trim() || '',
+        rewardType: $('#beat-npc-reward-type')?.value || 'none',
+        rewardItemName: $('#beat-npc-reward-name')?.value.trim() || '',
+        rewardXp: Number($('#beat-npc-reward-xp')?.value || 0),
+      });
+    }
+
     await sendAction('story_action', {
       subAction: 'add_beat',
       title: $('#beat-title').value.trim(),
@@ -1386,12 +2163,25 @@
       dmSecret: $('#beat-secret').value.trim(),
       presentNow: $('#beat-present-now').checked,
       encounters,
+      npcs,
       treasures,
+      playerPositions: draftPlayerPositions,
+      chests: draftChests,
+      biome: draftBiome,
+      terrain: draftTerrain,
+      arenaPrompt: $('#beat-draft-prompt')?.value.trim() || '',
     });
     stagedBeatMonsters = [];
+    stagedBeatNpcs = [];
     stagedBeatTreasures = [];
+    draftPlayerPositions = {};
+    draftChests = [];
+    draftBiome = 'obsidian';
+    draftTerrain = [];
     ev.target.reset();
+    if ($('#beat-draft-biome')) $('#beat-draft-biome').value = 'obsidian';
     renderStagedBeatAttachments();
+    renderBeatDraftDesigner();
   });
 
   $('#dm-bestiary-select').addEventListener('change', (ev) => {
@@ -1418,6 +2208,11 @@
       attackFormula: $('#dm-mon-atk').value.trim(),
       damageFormula: $('#dm-mon-dmg').value.trim(),
       hiddenFromPlayers: $('#dm-mon-hidden').checked,
+      loot: {
+        itemName: $('#dm-mon-loot-item')?.value.trim() || '',
+        gold: Number($('#dm-mon-loot-gold')?.value || 0),
+        xp: Number($('#dm-mon-loot-xp')?.value || 0),
+      },
     });
   });
 
@@ -1434,22 +2229,32 @@
   $('#btn-dm-roll-init').addEventListener('click', () => sendAction('initiative_action', { subAction: 'roll_all' }));
 
   $('#btn-dm-toggle-session').addEventListener('click', () => {
-    const nextAction = state?.session?.status === 'active' ? 'stop' : 'start';
-    sendAction('session_control', { action: nextAction });
+    if ($('#dm-sess-title')) $('#dm-sess-title').value = state?.session?.title || '';
+    if ($('#dm-sess-pause-msg')) $('#dm-sess-pause-msg').value = state?.session?.pausedMessage || '';
+    $('#dm-session-modal')?.classList.remove('hidden');
   });
-  $('#btn-dm-start-session').addEventListener('click', () => sendAction('session_control', {
-    action: 'start',
-    title: $('#dm-sess-title').value,
-    pausedMessage: $('#dm-sess-pause-msg').value,
-  }));
-  $('#btn-dm-stop-session').addEventListener('click', () => sendAction('session_control', {
-    action: 'stop',
-    title: $('#dm-sess-title').value,
-    pausedMessage: $('#dm-sess-pause-msg').value,
-  }));
+  $('#btn-close-session-modal')?.addEventListener('click', () => {
+    $('#dm-session-modal')?.classList.add('hidden');
+  });
+  $('#btn-dm-start-session').addEventListener('click', async () => {
+    await sendAction('session_control', {
+      action: 'start',
+      title: $('#dm-sess-title').value,
+      pausedMessage: $('#dm-sess-pause-msg').value,
+    });
+    $('#dm-session-modal')?.classList.add('hidden');
+  });
+  $('#btn-dm-stop-session').addEventListener('click', async () => {
+    await sendAction('session_control', {
+      action: 'stop',
+      title: $('#dm-sess-title').value,
+      pausedMessage: $('#dm-sess-pause-msg').value,
+    });
+    $('#dm-session-modal')?.classList.add('hidden');
+  });
   $('#btn-dm-reset').addEventListener('click', () => sendAction('reset_campaign', {}));
 
-  $('#dm-toast-form').addEventListener('submit', async (ev) => {
+  $('#dm-toast-form')?.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const msg = $('#dm-toast-msg').value.trim();
     if (!msg) return;
@@ -1475,9 +2280,45 @@
     $('#dm-invite-email').value = '';
   });
 
-  $('#btn-dm-add-floor').addEventListener('click', () => sendAction('update_map', { subAction: 'add_floor', startFogged: true }));
+  $('#btn-dm-add-floor').addEventListener('click', () => {
+    const theme = $('#dm-new-floor-theme')?.value || 'auto';
+    sendAction('update_map', {
+      subAction: 'add_floor',
+      theme: theme === 'auto' ? '' : theme,
+      startFogged: true,
+    });
+  });
+
+  $('#btn-dm-apply-tower-preset')?.addEventListener('click', () => {
+    const preset = $('#dm-tower-preset')?.value || 'classic';
+    sendAction('update_map', {
+      subAction: 'apply_tower_themes',
+      preset,
+      ensureFloors: preset === 'classic' ? 3 : undefined,
+    });
+  });
+
+  $('#dm-floor-theme-rows')?.addEventListener('change', (ev) => {
+    const sel = ev.target.closest('[data-floor-theme-pick]');
+    if (!sel) return;
+    sendAction('update_map', {
+      subAction: 'set_floor_theme',
+      floorNumber: Number(sel.dataset.floorThemePick),
+      theme: sel.value,
+    });
+  });
+
+  $('#dm-tower-floors-beats')?.addEventListener('click', (ev) => {
+    const delBtn = ev.target.closest('[data-dm-delete-floor]');
+    if (!delBtn) return;
+    const floorNum = Number(delBtn.dataset.dmDeleteFloor);
+    const floorTitle = delBtn.dataset.floorTitle || `${floorNum}F`;
+    const ok = window.confirm(`Delete "${floorTitle}" (${floorNum}F) and all story beats/monsters on this floor? Players on this floor will be moved safely to another floor.`);
+    if (!ok) return;
+    sendAction('update_map', { subAction: 'delete_floor', floorNumber: floorNum });
+  });
   $('#btn-dm-reveal-all').addEventListener('click', () => sendAction('update_map', { subAction: 'set_fog_bulk', mode: 'reveal_all' }));
-  $('#btn-dm-cover-all').addEventListener('click', () => sendAction('update_map', { subAction: 'set_fog_bulk', mode: 'cover_all' }));
+  $('#btn-dm-cover-all')?.addEventListener('click', () => sendAction('update_map', { subAction: 'set_fog_bulk', mode: 'cover_all' }));
 
   $('#btn-add-custom-stat').addEventListener('click', () => {
     const ed = $('#mech-stats-editor');
@@ -1499,6 +2340,18 @@
       name: row.querySelector('.mech-st-name').value,
       defaultValue: Number(row.querySelector('.mech-st-def').value || 10),
     }));
+    const prevMilestones = state?.mechanics?.statMilestones || [];
+    const statMilestones = $$('#mech-milestones-editor .mech-ms-row').map((row, idx) => {
+      const prev = prevMilestones[idx] || {};
+      return {
+        ...prev,
+        id: row.dataset.msId || prev.id || `ms-${idx}`,
+        statKey: row.querySelector('.mech-ms-key').value.trim().toUpperCase(),
+        threshold: Number(row.querySelector('.mech-ms-thresh').value || 20),
+        abilityName: row.querySelector('.mech-ms-name').value.trim(),
+        description: row.querySelector('.mech-ms-desc').value.trim(),
+      };
+    });
     await sendAction('update_mechanics', {
       presetName: $('#mech-name').value.trim(),
       combatMode: $('#mech-combat-mode').value,
@@ -1509,6 +2362,7 @@
       resourceName: $('#mech-resource-name').value.trim(),
       showExactMonsterHpToPlayers: $('#mech-show-hp').checked,
       stats,
+      statMilestones: statMilestones.length ? statMilestones : undefined,
     });
   });
 
@@ -1522,7 +2376,7 @@
     $('#dm-gdoc-text').value = '';
   });
 
-  $('#dm-notes-form').addEventListener('submit', async (ev) => {
+  $('#dm-notes-form')?.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     await sendAction('update_notes', {
       dmPrivate: $('#dm-private-notes').value,
@@ -1531,24 +2385,123 @@
     showToast({ title: 'NOTES SAVED', message: 'DM & Shared Quest notes saved.', category: 'info' });
   });
 
-  $('#dm-dice-form').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
+  async function rollDmDice(sides) {
     const res = await sendAction('roll_dice', {
       count: Number($('#dm-dice-count').value || 1),
-      sides: Number($('#dm-dice-sides').value || 20),
+      sides,
       modifier: Number($('#dm-dice-mod').value || 0),
-      label: $('#dm-dice-label').value.trim() || 'DM Roll',
+      label: $('#dm-dice-label').value.trim() || `DM d${sides} Roll`,
       rollerName: 'Dungeon Master',
       isSecret: $('#dm-dice-secret').checked,
     });
+    simulateDiceTray('dm-dice-sim-stage', sides, res.roll);
     showToast({
       title: res.roll.isSecret ? 'SECRET DM ROLL' : 'DM ROLL',
       message: `${res.roll.formula} = ${res.roll.total}`,
       category: 'warning',
     });
+  }
+
+  $$('#dm-dice-buttons [data-dm-sides]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const sides = Number(btn.dataset.dmSides || 20);
+      if ($('#dm-dice-sides')) $('#dm-dice-sides').value = sides;
+      rollDmDice(sides);
+    });
+  });
+
+  $('#dm-dice-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const sides = Math.max(1, Math.min(100, Number($('#dm-dice-sides').value || 20)));
+    await rollDmDice(sides);
+  });
+
+  let activeDmCharModalId = null;
+
+  function renderDmCharModal(charId) {
+    const ch = state?.characters?.[charId];
+    if (!ch) return;
+    $('#dm-char-modal-name').textContent = ch.name;
+    $('#dm-char-modal-sub').textContent = `Lv ${ch.level} ${ch.race || ''} ${ch.className || ''} • HP ${ch.hp}/${ch.maxHp} • MP ${ch.mp}/${ch.maxMp} • AC ${ch.ac} • DR ${ch.dr || 0}`;
+
+    const statPills = Object.entries(ch.stats || {}).map(([k, v]) => {
+      const mod = evalLocalFormula(state.mechanics?.statFormula || 'floor((SCORE - 10) / 2)', { ...ch.stats, SCORE: Number(v), LEVEL: ch.level });
+      const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+      return `<span class="stat-pill">${esc(k)}: <b>${v}</b> (${modStr})</span>`;
+    }).join('');
+
+    const equipEntries = Object.entries(ch.equipment || {}).filter(([, item]) => Boolean(item));
+    const equipHtml = equipEntries.length
+      ? equipEntries.map(([slot, item]) => {
+          const label = typeof item === 'string' ? item : (item.name || 'Equipped');
+          return `<div class="item-card"><div class="item-card-top"><strong>${esc(slot)}</strong><span>${esc(label)}</span></div></div>`;
+        }).join('')
+      : '<div class="muted small">No equipment equipped.</div>';
+
+    const invList = ch.inventory || [];
+    const invHtml = invList.length
+      ? invList.map((it) => `
+          <div class="item-card">
+            <div class="item-card-top">
+              <strong>${esc(it.name)} <span class="tag tag-cyan">${esc(it.category || 'item')}</span></strong>
+              <span>Qty ${it.qty || 1}${it.damageDice ? ` • ${esc(it.damageDice)}` : ''}</span>
+            </div>
+            ${it.notes ? `<div class="muted small">${esc(it.notes)}</div>` : ''}
+          </div>
+        `).join('')
+      : '<div class="muted small">Empty inventory.</div>';
+
+    const artHistory = (ch.artHistory || []).map((a) => `<img class="art-thumb" src="${esc(a.url)}" title="${esc(a.prompt || '')}" />`).join('');
+    const histList = (ch.history || (state.playerHistory || []).filter((h) => h.characterId === ch.id));
+    const histHtml = histList.length
+      ? histList.map((h) => `<div class="feed-entry"><span class="tag tag-cyan">${esc((h.category || 'event').toUpperCase())}</span> ${esc(h.summary)} <span class="muted small">(${new Date(h.timestamp).toLocaleTimeString()})</span></div>`).join('')
+      : '<div class="muted small">No activity recorded yet.</div>';
+
+    $('#dm-char-modal-body').innerHTML = `
+      <div class="two-col">
+        <div class="col stack">
+          <div class="panel" style="text-align:center;">
+            <div class="panel-header"><h4>AI Character Art</h4></div>
+            ${ch.portraitUrl ? `<img src="${esc(ch.portraitUrl)}" alt="${esc(ch.name)}" style="max-width:100%; max-height:260px; border-radius:10px; border:1px solid var(--border); object-fit:cover;" />` : '<div class="muted small">No portrait generated yet.</div>'}
+            ${artHistory ? `<div class="art-history mt-xs">${artHistory}</div>` : ''}
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h4>Stats &amp; Currencies</h4></div>
+            <div class="muted small">Gold: <b>${ch.currency?.gold || 0}G</b> • Mana Stones: <b>${ch.currency?.manaStones || 0}</b> • Favor: <b>${ch.favor || 0}</b></div>
+            <div class="stat-pills mt-xs">${statPills}</div>
+          </div>
+        </div>
+        <div class="col stack">
+          <div class="panel">
+            <div class="panel-header"><h4>Equipment</h4></div>
+            <div class="list-stack">${equipHtml}</div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h4>Inventory (${invList.length})</h4></div>
+            <div class="list-stack" style="max-height:220px; overflow-y:auto;">${invHtml}</div>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><h4>Character Log History</h4></div>
+        <div class="feed-list" style="max-height:180px;">${histHtml}</div>
+      </div>
+    `;
+  }
+
+  $('#btn-close-char-modal')?.addEventListener('click', () => {
+    $('#dm-char-modal')?.classList.add('hidden');
+    activeDmCharModalId = null;
   });
 
   $('#dm-view').addEventListener('click', async (ev) => {
+    const viewCharBtn = ev.target.closest('[data-view-char]');
+    if (viewCharBtn) {
+      activeDmCharModalId = viewCharBtn.dataset.viewChar;
+      renderDmCharModal(activeDmCharModalId);
+      $('#dm-char-modal')?.classList.remove('hidden');
+      return;
+    }
     const monHp = ev.target.closest('[data-mon-hp]');
     if (monHp) return sendAction('update_monster', { monsterId: monHp.dataset.monHp, hpDelta: Number(monHp.dataset.delta) });
 
@@ -1626,6 +2579,14 @@
     const unMon = ev.target.closest('[data-unstage-mon]');
     if (unMon) {
       stagedBeatMonsters.splice(Number(unMon.dataset.unstageMon), 1);
+      renderBeatDraftDesigner();
+      return renderStagedBeatAttachments();
+    }
+
+    const unNpc = ev.target.closest('[data-unstage-npc]');
+    if (unNpc) {
+      stagedBeatNpcs.splice(Number(unNpc.dataset.unstageNpc), 1);
+      renderBeatDraftDesigner();
       return renderStagedBeatAttachments();
     }
 
@@ -1644,6 +2605,53 @@
     return cols >= 50 ? 30 : cols >= 40 ? 36 : cols >= 30 ? 42 : cols >= 25 ? 48 : 54;
   }
 
+  function drawBeatArenaCanvas(canvas, beat, cellPx, selectedTokenId) {
+    if (!canvas || !beat) return;
+    const arena = beat.arena || { cols: 20, rows: 20, tokens: [] };
+    const cols = arena.cols || 20;
+    const rows = arena.rows || 20;
+    const axisPad = 24;
+    const w = axisPad + cols * cellPx;
+    const h = axisPad + rows * cellPx;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+
+    const ctx = canvas.getContext('2d');
+    const biome = arena.biome || 'obsidian';
+    drawArenaBackground(ctx, biome, axisPad, cols, rows, cellPx, w, h);
+
+    for (const tile of arena.terrain || []) {
+      const cx = axisPad + tile.x * cellPx + cellPx / 2;
+      const cy = axisPad + tile.y * cellPx + cellPx / 2;
+      drawTerrainTile(ctx, tile, cx, cy, cellPx, biome);
+    }
+
+    for (const chest of arena.chests || []) {
+      const cx = axisPad + chest.x * cellPx + cellPx / 2;
+      const cy = axisPad + chest.y * cellPx + cellPx / 2;
+      drawChestIcon(ctx, chest, cx, cy, cellPx);
+    }
+
+    for (const tok of arena.tokens || []) {
+      const cx = axisPad + tok.x * cellPx + cellPx / 2;
+      const cy = axisPad + tok.y * cellPx + cellPx / 2;
+      const r = Math.max(9, Math.floor(cellPx * 0.4));
+
+      drawTokenAvatar(ctx, tok, cx, cy, r, selectedTokenId === tok.id);
+
+      if (tok.maxHp > 0 && tok.hp !== null) {
+        const bw = cellPx - 6;
+        const pct = Math.max(0, Math.min(1, tok.hp / tok.maxHp));
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(cx - bw / 2, cy + r + 2, bw, 4);
+        ctx.fillStyle = tok.type === 'monster' ? '#ef4444' : '#22c55e';
+        ctx.fillRect(cx - bw / 2, cy + r + 2, bw * pct, 4);
+      }
+    }
+  }
+
   function renderBeatMapModal() {
     const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatMapId);
     if (!beat) return;
@@ -1658,6 +2666,9 @@
     if (isDm && document.activeElement?.id !== 'beat-custom-cols' && document.activeElement?.id !== 'beat-custom-rows') {
       $('#beat-custom-cols').value = cols;
       $('#beat-custom-rows').value = rows;
+    }
+    if (isDm && $('#arena-biome-select') && document.activeElement?.id !== 'arena-biome-select') {
+      $('#arena-biome-select').value = arena.biome || 'obsidian';
     }
 
     $$('[data-beat-grid]').forEach((btn) => {
@@ -1674,62 +2685,9 @@
 
     const canvas = $('#beat-map-canvas');
     const cellPx = getCellPxForGrid(cols);
-    const axisPad = 24;
-    const w = axisPad + cols * cellPx;
-    const h = axisPad + rows * cellPx;
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w;
-      canvas.height = h;
-    }
-
+    drawBeatArenaCanvas(canvas, beat, cellPx, arenaSelectedTokenId);
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#070b14';
-    ctx.fillRect(0, 0, w, h);
-
-    // Coordinate Axis Labels (1..cols, 1..rows)
-    ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 10px Segoe UI, sans-serif';
-    ctx.textAlign = 'center';
-    for (let x = 0; x < cols; x++) {
-      ctx.fillText(String(x + 1), axisPad + x * cellPx + cellPx / 2, 15);
-    }
-    for (let y = 0; y < rows; y++) {
-      ctx.fillText(String(y + 1), 12, axisPad + y * cellPx + cellPx / 2 + 3);
-    }
-
-    // Draw clean tactical grid spaces
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.2)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x <= cols; x++) {
-      ctx.beginPath();
-      ctx.moveTo(axisPad + x * cellPx, axisPad);
-      ctx.lineTo(axisPad + x * cellPx, h);
-      ctx.stroke();
-    }
-    for (let y = 0; y <= rows; y++) {
-      ctx.beginPath();
-      ctx.moveTo(axisPad, axisPad + y * cellPx);
-      ctx.lineTo(w, axisPad + y * cellPx);
-      ctx.stroke();
-    }
-
-    // Draw ONLY players in fight & spawned monsters for this story beat
-    for (const tok of arena.tokens || []) {
-      const cx = axisPad + tok.x * cellPx + cellPx / 2;
-      const cy = axisPad + tok.y * cellPx + cellPx / 2;
-      const r = Math.max(11, Math.floor(cellPx * 0.4));
-
-      drawTokenAvatar(ctx, tok, cx, cy, r, arenaSelectedTokenId === tok.id);
-
-      if (tok.maxHp > 0 && tok.hp !== null) {
-        const bw = cellPx - 6;
-        const pct = Math.max(0, Math.min(1, tok.hp / tok.maxHp));
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(cx - bw / 2, cy + r + 2, bw, 4);
-        ctx.fillStyle = tok.type === 'monster' ? '#ef4444' : '#22c55e';
-        ctx.fillRect(cx - bw / 2, cy + r + 2, bw * pct, 4);
-      }
-    }
+    const axisPad = 24;
 
     if (arenaMeasureStart && arenaMeasureEnd) {
       const sx = axisPad + arenaMeasureStart.x * cellPx + cellPx / 2;
@@ -1749,7 +2707,261 @@
     }
   }
 
+  function getDetailCellPx(cols) {
+    return cols >= 50 ? 22 : cols >= 40 ? 24 : cols >= 30 ? 28 : 34;
+  }
+
+  function renderBeatDetailModal() {
+    const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatDetailId);
+    if (!beat) return;
+    const isDm = session?.role === 'dm';
+    const arena = beat.arena || { cols: 20, rows: 20, tokens: [], chests: [] };
+    const cols = arena.cols || 20;
+
+    $('#beat-detail-title').textContent = beat.title;
+    $('#beat-detail-floor').textContent = `${beat.floor}F`;
+    $('#btn-beat-detail-edit')?.classList.toggle('hidden', !isDm);
+    if (!isDm) $('#beat-detail-edit-panel')?.classList.add('hidden');
+    const statusEl = $('#beat-detail-status');
+    statusEl.textContent = beat.presented ? 'PRESENTED' : beat.status.toUpperCase();
+    statusEl.className = `tag ${beat.presented ? 'tag-cyan' : 'tag-gold'}`;
+    const xpEl = $('#beat-detail-xp');
+    if (beat.xpReward) {
+      xpEl.textContent = `+${beat.xpReward} XP`;
+      xpEl.classList.remove('hidden');
+    } else {
+      xpEl.classList.add('hidden');
+    }
+
+    const narrEl = $('#beat-detail-narration');
+    narrEl.textContent = beat.narration || '';
+    narrEl.classList.toggle('hidden', !beat.narration);
+
+    const secEl = $('#beat-detail-secret');
+    if (isDm && beat.dmSecret) {
+      secEl.innerHTML = `<strong>DM Secret:</strong> ${esc(beat.dmSecret)}`;
+      secEl.classList.remove('hidden');
+    } else {
+      secEl.classList.add('hidden');
+    }
+
+    // Real-time Arena Map
+    drawBeatArenaCanvas($('#beat-detail-canvas'), beat, getDetailCellPx(cols), arenaSelectedTokenId);
+
+    // Stat-Based Initiative & Turn Order below the map
+    const combat = state.combat || { round: 1, turnIndex: 0, combatants: [] };
+    if ($('#beat-detail-round-pill')) $('#beat-detail-round-pill').textContent = `ROUND ${combat.round || 1}`;
+    $('#btn-beat-init-prev')?.classList.toggle('hidden', !isDm);
+    $('#btn-beat-init-next')?.classList.toggle('hidden', !isDm);
+    $('#btn-beat-init-roll-all')?.classList.toggle('hidden', !isDm);
+    $('#btn-beat-init-roll-self')?.classList.toggle('hidden', isDm || !session?.characterId);
+
+    const initListEl = $('#beat-detail-initiative-list');
+    if (initListEl) {
+      const activeCombatant = combat.combatants?.[combat.turnIndex];
+      const arenaIds = new Set((arena.tokens || []).map((t) => t.id));
+      const relevant = (combat.combatants || []).filter((c) => c.type === 'player' || arenaIds.has(c.id));
+      initListEl.innerHTML = relevant.map((c) => {
+        const isCurrent = activeCombatant && activeCombatant.id === c.id;
+        let mod = 0;
+        let statLabel = 'Stat';
+        if (c.type === 'player' && state.characters?.[c.id]) {
+          const ch = state.characters[c.id];
+          const agiScore = ch.stats?.AGI ?? ch.stats?.DEX ?? 10;
+          mod = Math.floor((Number(agiScore) - 10) / 2);
+          statLabel = `AGI ${agiScore}`;
+        } else if (c.type === 'monster') {
+          const mon = (state.monsters || []).find((m) => m.id === c.id);
+          const acVal = mon ? (mon.agi ?? mon.ac ?? 12) : 12;
+          mod = Math.floor((Number(acVal) - 10) / 2);
+          statLabel = mon ? `AC ${mon.ac}` : 'Monster';
+        }
+        const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+        return `
+          <div class="item-card ${isCurrent ? 'card-glow-cyan' : ''}">
+            <div class="item-card-top">
+              <strong>${esc(c.name)} <span class="tag ${c.type === 'monster' ? 'tag-crimson' : 'tag-cyan'}">${c.type === 'monster' ? 'MONSTER' : 'PLAYER'}</span> ${isCurrent ? '<span class="tag tag-gold">ACTIVE TURN</span>' : ''}</strong>
+              <span>Init: <b>${c.initiative ?? '—'}</b> <span class="muted small">(${statLabel} • ${modStr})</span></span>
+            </div>
+          </div>
+        `;
+      }).join('') || '<div class="muted small">No combatants in initiative order yet.</div>';
+    }
+
+    // Players & Live Stats
+    const chars = Object.values(state.characters || {});
+    const tokenIds = new Set((arena.tokens || []).map((t) => t.id));
+    $('#beat-detail-players').innerHTML = chars.map((ch) => {
+      const hpPct = ch.maxHp ? Math.max(0, Math.min(100, (ch.hp / ch.maxHp) * 100)) : 0;
+      const inArena = tokenIds.has(ch.id);
+      const statEntries = Object.entries(ch.stats || {})
+        .map(([k, v]) => `<span class="stat-pill">${esc(k)}: <b>${v}</b></span>`)
+        .join('');
+      return `
+        <div class="item-card">
+          <div class="item-card-top">
+            <strong>${esc(ch.name)} <span class="tag tag-cyan">Lv ${ch.level} ${esc(ch.className || '')}</span> ${inArena ? '' : '<span class="muted small">(Off-map)</span>'}</strong>
+            <span>HP <b>${ch.hp}/${ch.maxHp}</b> • MP <b>${ch.mp}/${ch.maxMp}</b> • AC ${ch.ac} • DR ${ch.dr || 0}</span>
+          </div>
+          <div class="progress"><div class="progress-fill hp" style="width:${hpPct}%"></div></div>
+          <div class="stat-pills">${statEntries}</div>
+        </div>
+      `;
+    }).join('') || '<div class="muted small">No players in session.</div>';
+
+    // Spawned Monsters + Unspawned Encounters
+    const spawnBtn = $('#btn-beat-detail-spawn');
+    spawnBtn.classList.toggle('hidden', !(isDm && (beat.encounters || []).length > 0));
+    const arenaMons = (arena.tokens || []).filter((t) => t.type === 'monster');
+    const monCards = arenaMons.map((tok) => {
+      const liveMon = (state.monsters || []).find((m) => m.id === tok.id);
+      const hp = liveMon ? liveMon.hp : tok.hp;
+      const maxHp = liveMon ? liveMon.maxHp : tok.maxHp;
+      const pct = maxHp ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0;
+      const lootInfo = liveMon?.loot && (liveMon.loot.itemName || liveMon.loot.gold || liveMon.loot.manaStones)
+        ? `<div class="muted small">Loot: ${[liveMon.loot.itemName, liveMon.loot.gold ? `${liveMon.loot.gold}G` : '', liveMon.loot.manaStones ? `${liveMon.loot.manaStones} Stones` : ''].filter(Boolean).join(', ')}${liveMon.loot.dropped ? ' (Dropped!)' : ''}</div>`
+        : '';
+      return `
+        <div class="item-card">
+          <div class="item-card-top">
+            <strong>${esc(tok.name)} ${hp <= 0 ? '<span class="tag tag-gold">DEFEATED</span>' : ''}</strong>
+            <span>${hp !== null && maxHp ? `HP <b>${hp}/${maxHp}</b>` : ''}${liveMon ? ` • AC ${liveMon.ac} • DR ${liveMon.dr}` : ''}</span>
+          </div>
+          ${maxHp ? `<div class="progress"><div class="progress-fill monster" style="width:${pct}%"></div></div>` : ''}
+          ${lootInfo}
+          ${isDm && liveMon ? `<div class="btn-row mt-xs"><button type="button" class="btn btn-xs btn-outline" data-mon-hp="${esc(liveMon.id)}" data-delta="-5">-5 HP</button><button type="button" class="btn btn-xs btn-outline" data-mon-hp="${esc(liveMon.id)}" data-delta="5">+5 HP</button></div>` : ''}
+        </div>
+      `;
+    });
+    if (arenaMons.length === 0 && (beat.encounters || []).length > 0) {
+      monCards.push(...beat.encounters.map((e) => `
+        <div class="item-card">
+          <div class="item-card-top">
+            <strong>${esc(e.name)} <span class="tag tag-crimson">READY TO SPAWN</span></strong>
+            <span>HP ${e.maxHp} • AC ${e.ac} • DR ${e.dr} • ${esc(e.damageFormula || '')}</span>
+          </div>
+        </div>
+      `));
+    }
+    $('#beat-detail-monsters').innerHTML = monCards.join('') || '<div class="muted small">No monsters in this story beat.</div>';
+
+    // Treasure & Arena Chests
+    const trCards = (beat.treasures || []).map((t) => `
+      <div class="item-card">
+        <div class="item-card-top">
+          <strong>${esc(t.name)} <span class="tag tag-gold">${esc(t.category || 'treasure')}</span></strong>
+          <span>${[t.gold ? `${t.gold}G` : '', t.manaStones ? `${t.manaStones} Stones` : '', t.damageDice || ''].filter(Boolean).join(' • ') || 'Story Reward'}</span>
+        </div>
+      </div>
+    `);
+    const chestCards = (arena.chests || []).map((c) => `
+      <div class="item-card">
+        <div class="item-card-top">
+          <strong>${esc(c.name)} <span class="tag ${c.opened ? 'tag-cyan' : 'tag-gold'}">${c.opened ? 'OPENED' : 'CHEST'}</span></strong>
+          <span>${[c.gold ? `${c.gold}G` : '', c.manaStones ? `${c.manaStones} Stones` : '', c.itemName || ''].filter(Boolean).join(', ') || 'Empty'}</span>
+        </div>
+      </div>
+    `);
+    $('#beat-detail-treasure').innerHTML = [...trCards, ...chestCards].join('') || '<div class="muted small">No treasure or chests attached.</div>';
+
+    // NPCs
+    const npcTokens = (arena.tokens || []).filter((t) => t.type === 'npc');
+    $('#beat-detail-npcs').innerHTML = npcTokens.map((n) => `
+      <div class="item-card">
+        <div class="item-card-top">
+          <strong>${esc(n.name)} <span class="tag tag-green">${esc(n.npcRole || 'NPC')}</span></strong>
+          <span>${n.rewardType && n.rewardType !== 'none' ? (n.rewardClaimed ? 'Reward Claimed' : esc(n.rewardType === 'xp' ? `+${n.rewardXp} XP` : n.rewardItemName || n.rewardType)) : 'Dialogue'}</span>
+        </div>
+        ${n.dialogue ? `<div class="muted small">"${esc(n.dialogue)}"</div>` : ''}
+      </div>
+    `).join('') || '<div class="muted small">No NPCs placed in this scene.</div>';
+
+    if (!$('#beat-detail-edit-panel')?.classList.contains('hidden')) {
+      renderBeatEditLists(beat);
+    }
+
+    const toastPanel = $('#beat-detail-toast-panel');
+    if (toastPanel) {
+      toastPanel.classList.toggle('hidden', !isDm);
+      if (isDm && $('#beat-toast-target')) {
+        const prev = $('#beat-toast-target').value || 'all';
+        $('#beat-toast-target').innerHTML = '<option value="all">All Players</option>' +
+          chars.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+        $('#beat-toast-target').value = prev;
+      }
+    }
+  }
+
+  function renderBeatEditLists(beat) {
+    const monEl = $('#edit-beat-encounters-list');
+    if (monEl) {
+      monEl.innerHTML = editBeatEncounters.map((m, i) => `
+        <div class="item-card">
+          <div class="item-card-top">
+            <strong>${esc(m.name)}</strong>
+            <span>HP ${m.maxHp} • AC ${m.ac} • DR ${m.dr}</span>
+            <button type="button" class="btn btn-xs btn-danger-outline" data-edit-remove-mon="${i}">Remove</button>
+          </div>
+        </div>
+      `).join('');
+    }
+    const trEl = $('#edit-beat-treasures-list');
+    if (trEl) {
+      trEl.innerHTML = editBeatTreasures.map((t, i) => `
+        <div class="item-card">
+          <div class="item-card-top">
+            <strong>${esc(t.name)} <span class="tag tag-cyan">${esc(t.category || 'relic')}</span></strong>
+            <span>${t.gold ? `${t.gold}G ` : ''}${t.manaStones ? `${t.manaStones} Stones` : ''}</span>
+            <button type="button" class="btn btn-xs btn-danger-outline" data-edit-remove-tr="${i}">Remove</button>
+          </div>
+        </div>
+      `).join('');
+    }
+    const npcEl = $('#edit-beat-npcs-list');
+    if (npcEl && beat) {
+      const npcs = (beat.arena?.tokens || []).filter((t) => t.type === 'npc');
+      npcEl.innerHTML = npcs.map((n) => `
+        <div class="item-card">
+          <div class="item-card-top">
+            <strong>${esc(n.name)} <span class="tag tag-green">${esc(n.npcRole || 'NPC')}</span></strong>
+            <button type="button" class="btn btn-xs btn-danger-outline" data-edit-remove-npc="${esc(n.id)}">Remove</button>
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
+  function populateBeatEditForm(beat) {
+    if (!beat) return;
+    $('#edit-beat-title').value = beat.title || '';
+    $('#edit-beat-floor').value = beat.floor || 1;
+    $('#edit-beat-xp').value = beat.xpReward || 0;
+    $('#edit-beat-grid-size').value = String(beat.arena?.cols || 20);
+    $('#edit-beat-status').value = beat.status || 'upcoming';
+    $('#edit-beat-narration').value = beat.narration || '';
+    $('#edit-beat-secret').value = beat.dmSecret || '';
+    $('#edit-beat-present-now').checked = Boolean(beat.presented);
+    editBeatEncounters = JSON.parse(JSON.stringify(beat.encounters || []));
+    editBeatTreasures = JSON.parse(JSON.stringify(beat.treasures || []));
+    renderBeatEditLists(beat);
+  }
+
   document.addEventListener('click', (ev) => {
+    const openBeatBtn = ev.target.closest('[data-beat-open]');
+    if (openBeatBtn) {
+      lastVisitedViewId = $('#dm-view').classList.contains('active')
+        ? 'dm-view'
+        : ($('#player-view').classList.contains('active') ? 'player-view' : (session?.role === 'dm' ? 'dm-view' : 'player-view'));
+      lastScrollY = window.scrollY || 0;
+      activeBeatDetailId = openBeatBtn.dataset.beatOpen;
+      arenaSelectedTokenId = session?.role === 'player' ? session.characterId : null;
+      $('#player-view').classList.remove('active');
+      $('#dm-view').classList.remove('active');
+      $('#beat-detail-view').classList.add('active');
+      window.scrollTo(0, 0);
+      renderBeatDetailModal();
+      return;
+    }
     const viewBtn = ev.target.closest('[data-beat-view-map]');
     if (viewBtn) {
       activeBeatMapId = viewBtn.dataset.beatViewMap;
@@ -1764,6 +2976,222 @@
   $('#btn-close-beat-map').addEventListener('click', () => {
     $('#beat-map-modal').classList.add('hidden');
     activeBeatMapId = null;
+  });
+
+  $('#btn-close-beat-detail')?.addEventListener('click', () => {
+    $('#beat-detail-view').classList.remove('active');
+    $('#beat-detail-edit-panel')?.classList.add('hidden');
+    activeBeatDetailId = null;
+    const returnId = lastVisitedViewId || (session?.role === 'dm' ? 'dm-view' : 'player-view');
+    document.getElementById(returnId)?.classList.add('active');
+    window.scrollTo(0, lastScrollY || 0);
+  });
+
+  $('#btn-beat-detail-edit')?.addEventListener('click', () => {
+    const panel = $('#beat-detail-edit-panel');
+    if (!panel || !activeBeatDetailId) return;
+    const opening = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !opening);
+    if (opening) {
+      const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatDetailId);
+      populateBeatEditForm(beat);
+    }
+  });
+
+  $('#btn-cancel-beat-edit')?.addEventListener('click', () => {
+    $('#beat-detail-edit-panel')?.classList.add('hidden');
+  });
+
+  $('#btn-edit-add-mon')?.addEventListener('click', () => {
+    const name = $('#edit-beat-mon-name').value.trim();
+    if (!name) return showToast({ title: 'MONSTER NAME NEEDED', message: 'Enter a monster name.', category: 'warning' });
+    editBeatEncounters.push({
+      name,
+      maxHp: Number($('#edit-beat-mon-hp').value || 35),
+      ac: Number($('#edit-beat-mon-ac').value || 14),
+      dr: Number($('#edit-beat-mon-dr').value || 1),
+      damageFormula: $('#edit-beat-mon-dmg').value.trim() || '2d6+3',
+      hiddenFromPlayers: false,
+      loot: {
+        itemName: $('#edit-beat-mon-loot-item')?.value.trim() || '',
+        gold: Number($('#edit-beat-mon-loot-gold')?.value || 0),
+        manaStones: Number($('#edit-beat-mon-loot-stones')?.value || 0),
+      },
+    });
+    $('#edit-beat-mon-name').value = '';
+    if ($('#edit-beat-mon-loot-item')) $('#edit-beat-mon-loot-item').value = '';
+    const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatDetailId);
+    renderBeatEditLists(beat);
+  });
+
+  $('#btn-edit-add-tr')?.addEventListener('click', () => {
+    const name = $('#edit-beat-tr-name').value.trim();
+    const gold = Number($('#edit-beat-tr-gold').value || 0);
+    const manaStones = Number($('#edit-beat-tr-stones').value || 0);
+    if (!name && gold <= 0 && manaStones <= 0) {
+      return showToast({ title: 'TREASURE NEEDED', message: 'Enter an item name, Gold, or Mana Stones.', category: 'warning' });
+    }
+    editBeatTreasures.push({
+      name: name || 'Tower Gold Cache',
+      category: $('#edit-beat-tr-cat').value,
+      qty: 1,
+      gold,
+      manaStones,
+      damageDice: $('#edit-beat-tr-dmg').value.trim(),
+    });
+    $('#edit-beat-tr-name').value = '';
+    $('#edit-beat-tr-dmg').value = '';
+    const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatDetailId);
+    renderBeatEditLists(beat);
+  });
+
+  $('#btn-edit-add-npc')?.addEventListener('click', async () => {
+    if (!activeBeatDetailId) return;
+    const name = $('#edit-beat-npc-name').value.trim();
+    if (!name) return showToast({ title: 'NPC NAME NEEDED', message: 'Enter an NPC name.', category: 'warning' });
+    await sendAction('story_action', {
+      subAction: 'add_beat_npc',
+      beatId: activeBeatDetailId,
+      name,
+      npcRole: $('#edit-beat-npc-role').value.trim() || 'NPC',
+      x: Math.max(0, Number($('#edit-beat-npc-x').value || 5) - 1),
+      y: Math.max(0, Number($('#edit-beat-npc-y').value || 5) - 1),
+      dialogue: $('#edit-beat-npc-dialogue').value.trim(),
+      rewardType: $('#edit-beat-npc-reward-type').value || 'none',
+      rewardItemName: $('#edit-beat-npc-reward-name').value.trim(),
+      rewardXp: Number($('#edit-beat-npc-reward-xp').value || 0),
+    });
+    $('#edit-beat-npc-name').value = '';
+    $('#edit-beat-npc-role').value = '';
+    $('#edit-beat-npc-dialogue').value = '';
+    $('#edit-beat-npc-reward-name').value = '';
+  });
+
+  $('#beat-edit-form')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!activeBeatDetailId) return;
+    await sendAction('story_action', {
+      subAction: 'update_beat',
+      beatId: activeBeatDetailId,
+      title: $('#edit-beat-title').value.trim(),
+      floor: Number($('#edit-beat-floor').value || 1),
+      xpReward: Number($('#edit-beat-xp').value || 0),
+      gridSize: Number($('#edit-beat-grid-size').value || 20),
+      status: $('#edit-beat-status').value,
+      narration: $('#edit-beat-narration').value.trim(),
+      dmSecret: $('#edit-beat-secret').value.trim(),
+      presented: $('#edit-beat-present-now').checked,
+      encounters: editBeatEncounters,
+      treasures: editBeatTreasures,
+    });
+    $('#beat-detail-edit-panel')?.classList.add('hidden');
+    showToast({ title: 'STORY BEAT UPDATED', message: 'Story beat changes saved!', category: 'info' });
+  });
+
+  $('#btn-beat-detail-open-map')?.addEventListener('click', () => {
+    if (!activeBeatDetailId) return;
+    activeBeatMapId = activeBeatDetailId;
+    $('#beat-map-modal').classList.remove('hidden');
+    renderBeatMapModal();
+  });
+
+  $('#btn-beat-detail-spawn')?.addEventListener('click', async () => {
+    if (!activeBeatDetailId) return;
+    await sendAction('story_action', { subAction: 'spawn_beat_monsters', beatId: activeBeatDetailId });
+  });
+
+  $('#btn-beat-init-prev')?.addEventListener('click', () => sendAction('combat_action', { subAction: 'prev_turn' }));
+  $('#btn-beat-init-next')?.addEventListener('click', () => sendAction('combat_action', { subAction: 'next_turn' }));
+  $('#btn-beat-init-roll-all')?.addEventListener('click', () => sendAction('combat_action', { subAction: 'roll_all' }));
+  $('#btn-beat-init-roll-self')?.addEventListener('click', async () => {
+    if (!session?.characterId) return;
+    await sendAction('combat_action', { subAction: 'player_roll_initiative', characterId: session.characterId });
+  });
+
+  $('#beat-toast-form')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const message = $('#beat-toast-msg').value.trim();
+    if (!message) return;
+    await sendAction('broadcast_toast', {
+      title: 'SYSTEM NOTICE',
+      category: $('#beat-toast-cat').value || 'info',
+      target: $('#beat-toast-target').value || 'all',
+      message,
+    });
+    $('#beat-toast-msg').value = '';
+  });
+
+  $('#beat-detail-view')?.addEventListener('click', async (ev) => {
+    const monHp = ev.target.closest('[data-mon-hp]');
+    if (monHp) {
+      await sendAction('update_monster', { monsterId: monHp.dataset.monHp, hpDelta: Number(monHp.dataset.delta) });
+      return;
+    }
+    const rmMon = ev.target.closest('[data-edit-remove-mon]');
+    if (rmMon) {
+      editBeatEncounters.splice(Number(rmMon.dataset.editRemoveMon), 1);
+      const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatDetailId);
+      renderBeatEditLists(beat);
+      return;
+    }
+    const rmTr = ev.target.closest('[data-edit-remove-tr]');
+    if (rmTr) {
+      editBeatTreasures.splice(Number(rmTr.dataset.editRemoveTr), 1);
+      const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatDetailId);
+      renderBeatEditLists(beat);
+      return;
+    }
+    const rmNpc = ev.target.closest('[data-edit-remove-npc]');
+    if (rmNpc && activeBeatDetailId) {
+      await sendAction('story_action', { subAction: 'remove_beat_npc', beatId: activeBeatDetailId, tokenId: rmNpc.dataset.editRemoveNpc });
+    }
+  });
+
+  $('#beat-detail-canvas')?.addEventListener('click', async (ev) => {
+    if (!activeBeatDetailId) return;
+    const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatDetailId);
+    if (!beat?.arena) return;
+    const arena = beat.arena;
+    const cols = arena.cols || 20;
+    const rows = arena.rows || 20;
+    const cellPx = getDetailCellPx(cols);
+    const { x, y } = getScaledCanvasCell(ev.currentTarget, ev.clientX, ev.clientY, 24, cellPx);
+    if (x < 0 || x >= cols || y < 0 || y >= rows) return;
+
+    const clickedChest = (arena.chests || []).find((c) => c.x === x && c.y === y && !c.opened);
+    if (clickedChest && !((arena.tokens || []).some((t) => t.x === x && t.y === y))) {
+      await sendAction('story_action', {
+        subAction: 'open_beat_chest',
+        beatId: activeBeatDetailId,
+        chestId: clickedChest.id,
+        characterId: session?.characterId || null,
+      });
+      return;
+    }
+
+    const npcHit = (arena.tokens || []).find((t) => t.x === x && t.y === y && t.type === 'npc');
+    if (npcHit && session?.role !== 'dm') {
+      await sendAction('story_action', {
+        subAction: 'talk_beat_npc',
+        beatId: activeBeatDetailId,
+        tokenId: npcHit.id,
+        characterId: session?.characterId || null,
+      });
+      return;
+    }
+
+    if (session?.role === 'dm') {
+      const hit = (arena.tokens || []).find((t) => t.x === x && t.y === y);
+      if (hit) {
+        arenaSelectedTokenId = hit.id;
+        $('#beat-detail-map-hint').textContent = `Selected ${hit.name}. Tap a destination space.`;
+        renderBeatDetailModal();
+      } else if (arenaSelectedTokenId) {
+        await sendAction('story_action', { subAction: 'move_beat_token', beatId: activeBeatDetailId, tokenId: arenaSelectedTokenId, x, y });
+      }
+    } else if (session?.characterId) {
+      await sendAction('story_action', { subAction: 'move_beat_token', beatId: activeBeatDetailId, tokenId: session.characterId, x, y });
+    }
   });
 
   $$('[data-arena-tool]').forEach((btn) => {
@@ -1790,6 +3218,12 @@
       const rows = Math.max(5, Math.min(100, Number($('#beat-custom-rows').value || 20)));
       arenaCellOverride = null;
       await sendAction('story_action', { subAction: 'set_beat_grid', beatId: activeBeatMapId, cols, rows });
+      return;
+    }
+    if (ev.target.id === 'btn-arena-gen-terrain' && activeBeatMapId) {
+      const prompt = $('#arena-gen-prompt')?.value.trim() || '';
+      const biome = $('#arena-biome-select')?.value || 'obsidian';
+      await sendAction('story_action', { subAction: 'generate_beat_terrain', beatId: activeBeatMapId, prompt, biome });
       return;
     }
     if (ev.target.id === 'btn-beat-save-starts' && activeBeatMapId) {
@@ -1819,6 +3253,11 @@
     }
   });
 
+  $('#arena-biome-select').addEventListener('change', async (ev) => {
+    if (!activeBeatMapId) return;
+    await sendAction('story_action', { subAction: 'set_beat_biome', beatId: activeBeatMapId, biome: ev.target.value });
+  });
+
   $('#beat-map-canvas').addEventListener('click', async (ev) => {
     const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatMapId);
     if (!beat) return;
@@ -1826,10 +3265,7 @@
     const cols = arena.cols || 20;
     const rows = arena.rows || 20;
     const cellPx = getCellPxForGrid(cols);
-    const axisPad = 24;
-    const rect = ev.currentTarget.getBoundingClientRect();
-    const x = Math.floor((ev.clientX - rect.left - axisPad) / cellPx);
-    const y = Math.floor((ev.clientY - rect.top - axisPad) / cellPx);
+    const { x, y } = getScaledCanvasCell(ev.currentTarget, ev.clientX, ev.clientY, 24, cellPx);
     if (x < 0 || x >= cols || y < 0 || y >= rows) return;
 
     if (arenaTool === 'measure') {
@@ -1846,6 +3282,72 @@
       return;
     }
 
+    if (arenaTool === 'chest' && session?.role === 'dm') {
+      const existingChest = (arena.chests || []).find((c) => c.x === x && c.y === y);
+      if (existingChest) {
+        await sendAction('story_action', { subAction: 'remove_beat_chest', beatId: activeBeatMapId, chestId: existingChest.id });
+      } else {
+        await sendAction('story_action', {
+          subAction: 'add_beat_chest',
+          beatId: activeBeatMapId,
+          name: $('#arena-chest-name').value.trim() || 'Treasure Chest',
+          gold: Number($('#arena-chest-gold').value || 0),
+          itemName: $('#arena-chest-item').value.trim(),
+          x,
+          y,
+        });
+      }
+      return;
+    }
+
+    if (session?.role === 'dm' && arenaTool === 'npc') {
+      const rType = $('#arena-npc-reward-type')?.value || 'none';
+      const rVal = $('#arena-npc-reward-value')?.value.trim() || '';
+      await sendAction('story_action', {
+        subAction: 'add_beat_npc',
+        beatId: activeBeatMapId,
+        name: $('#arena-npc-name')?.value.trim() || 'Tower Guide',
+        npcRole: $('#arena-npc-role')?.value.trim() || 'NPC',
+        dialogue: $('#arena-npc-dialogue')?.value.trim() || '',
+        rewardType: rType,
+        rewardItemName: (rType === 'item' || rType === 'skill_book') ? rVal : '',
+        rewardXp: rType === 'xp' ? Number(rVal || 50) : 0,
+        x,
+        y,
+      });
+      return;
+    }
+
+    if (session?.role === 'dm' && arenaTool === 'talk') {
+      const npcHit = (arena.tokens || []).find((t) => t.x === x && t.y === y && t.type === 'npc');
+      if (npcHit) {
+        await sendAction('story_action', { subAction: 'talk_beat_npc', beatId: activeBeatMapId, tokenId: npcHit.id });
+      }
+      return;
+    }
+
+    if (session?.role === 'dm' && (arenaTool === 'tree' || arenaTool === 'rock' || arenaTool === 'water')) {
+      await sendAction('story_action', {
+        subAction: 'toggle_beat_terrain',
+        beatId: activeBeatMapId,
+        x,
+        y,
+        terrainType: arenaTool,
+      });
+      return;
+    }
+
+    const clickedChest = (arena.chests || []).find((c) => c.x === x && c.y === y && !c.opened);
+    if (clickedChest && !((arena.tokens || []).some((t) => t.x === x && t.y === y))) {
+      await sendAction('story_action', {
+        subAction: 'open_beat_chest',
+        beatId: activeBeatMapId,
+        chestId: clickedChest.id,
+        characterId: session?.characterId || null,
+      });
+      return;
+    }
+
     if (session?.role === 'dm') {
       const hit = (arena.tokens || []).find((t) => t.x === x && t.y === y);
       if (hit) {
@@ -1856,6 +3358,11 @@
         await sendAction('story_action', { subAction: 'move_beat_token', beatId: activeBeatMapId, tokenId: arenaSelectedTokenId, x, y });
       }
     } else if (session?.characterId) {
+      const npcHit = (arena.tokens || []).find((t) => t.x === x && t.y === y && t.type === 'npc');
+      if (npcHit) {
+        await sendAction('story_action', { subAction: 'talk_beat_npc', beatId: activeBeatMapId, tokenId: npcHit.id, characterId: session.characterId });
+        return;
+      }
       await sendAction('story_action', { subAction: 'move_beat_token', beatId: activeBeatMapId, tokenId: session.characterId, x, y });
     }
   });
@@ -1870,8 +3377,11 @@
     if (!tok || !tokenTooltip) return;
     const ch = tok.type === 'player' ? state?.characters?.[tok.id] : null;
     const displayName = ch?.name || tok.name;
+    const roleTag = tok.type === 'npc'
+      ? ` (${tok.npcRole || 'NPC'})${tok.rewardClaimed ? ' — Talked' : ' — Tap to Talk'}`
+      : '';
     const hpText = tok.hp !== null && tok.maxHp ? ` • ${tok.hp}/${tok.maxHp} HP` : '';
-    tokenTooltip.textContent = `${displayName}${hpText}`;
+    tokenTooltip.textContent = `${displayName}${roleTag}${hpText}`;
     tokenTooltip.className = `token-tooltip ${tok.type === 'monster' ? 'monster' : ''}`;
     tokenTooltip.style.left = `${clientX}px`;
     tokenTooltip.style.top = `${clientY}px`;
@@ -1916,19 +3426,35 @@
   }
 
   function findBeatTokenAt(canvas, clientX, clientY) {
-    const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatMapId);
-    if (!beat?.arena?.tokens) return null;
+    const targetBeatId = canvas?.id === 'beat-detail-canvas' ? activeBeatDetailId : activeBeatMapId;
+    const beat = (state?.storyBeats || []).find((b) => b.id === targetBeatId);
+    if (!beat?.arena) return null;
     const cols = beat.arena.cols || 20;
-    const cellPx = getCellPxForGrid(cols);
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((clientX - rect.left - 24) / cellPx);
-    const y = Math.floor((clientY - rect.top - 24) / cellPx);
-    return beat.arena.tokens.find((t) => t.x === x && t.y === y) || null;
+    const cellPx = canvas?.id === 'beat-detail-canvas' ? getDetailCellPx(cols) : getCellPxForGrid(cols);
+    const { x, y } = getScaledCanvasCell(canvas, clientX, clientY, 24, cellPx);
+    const tok = (beat.arena.tokens || []).find((t) => t.x === x && t.y === y);
+    if (tok) return tok;
+    const chest = (beat.arena.chests || []).find((c) => c.x === x && c.y === y);
+    if (chest) {
+      return {
+        id: chest.id,
+        type: 'chest',
+        name: chest.opened ? `${chest.name} (Opened)` : `${chest.name}${session?.role === 'dm' && chest.gold ? ` (${chest.gold}G)` : ' — Tap to Open'}`,
+        hp: null,
+      };
+    }
+    const tile = (beat.arena.terrain || []).find((t) => t.x === x && t.y === y);
+    if (tile) {
+      const labels = { tree: 'Tree (Impassable)', rock: 'Boulder / Rock (Impassable)', water: 'Deep Water (Impassable)' };
+      return { id: `terrain-${x}-${y}`, type: 'terrain', name: labels[tile.type] || 'Impassable Terrain', hp: null };
+    }
+    return null;
   }
 
   attachTokenTooltip('player-tower-canvas', findTowerTokenAt);
   attachTokenTooltip('dm-tower-canvas', findTowerTokenAt);
   attachTokenTooltip('beat-map-canvas', findBeatTokenAt);
+  attachTokenTooltip('beat-detail-canvas', findBeatTokenAt);
 
   // Restore saved session if present
   try {

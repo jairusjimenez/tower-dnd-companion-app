@@ -172,6 +172,45 @@ function getEquippedTotals(character) {
   return { attackBonus, armorAc, armorDr, mainWeapon };
 }
 
+const DEFAULT_STAT_MILESTONES = [
+  // STR (20, 40, 60, 80, 100)
+  { id: 'ms-str-20', statKey: 'STR', threshold: 20, abilityName: 'Titan Cleave', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+4 melee damage & ignores 2 DR on heavy strikes.' },
+  { id: 'ms-str-40', statKey: 'STR', threshold: 40, abilityName: 'Earthshaker Blow', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+8 melee damage & shockwave knockback.' },
+  { id: 'ms-str-60', statKey: 'STR', threshold: 60, abilityName: 'Mountain Splitter', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+14 melee damage & ignores 5 DR.' },
+  { id: 'ms-str-80', statKey: 'STR', threshold: 80, abilityName: 'Sovereign Might', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+22 melee damage & crushes shields/barriers.' },
+  { id: 'ms-str-100', statKey: 'STR', threshold: 100, abilityName: 'Worldbreaker Apex', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+35 melee damage & guaranteed guard-crush.' },
+  // AGI (20, 40, 60, 80, 100)
+  { id: 'ms-agi-20', statKey: 'AGI', threshold: 20, abilityName: 'Phantom Step', bonusHp: 0, bonusMp: 0, bonusAc: 2, bonusDr: 0, description: '+2 AC, +3 Initiative, and evasive dash.' },
+  { id: 'ms-agi-40', statKey: 'AGI', threshold: 40, abilityName: 'Shadow Afterimage', bonusHp: 0, bonusMp: 0, bonusAc: 3, bonusDr: 0, description: '+3 AC, +2 Spaces speed, auto-evade 1/round.' },
+  { id: 'ms-agi-60', statKey: 'AGI', threshold: 60, abilityName: 'Flashstep Mirage', bonusHp: 0, bonusMp: 0, bonusAc: 4, bonusDr: 0, description: '+4 AC, +5 Initiative, counter-dash.' },
+  { id: 'ms-agi-80', statKey: 'AGI', threshold: 80, abilityName: 'Temporal Blur', bonusHp: 0, bonusMp: 0, bonusAc: 5, bonusDr: 0, description: '+5 AC, +3 Spaces speed, double reaction.' },
+  { id: 'ms-agi-100', statKey: 'AGI', threshold: 100, abilityName: 'Godspeed Ascension', bonusHp: 0, bonusMp: 0, bonusAc: 7, bonusDr: 0, description: '+7 AC, +10 Initiative, untargetable dash.' },
+  // VIT (20, 40, 60, 80, 100)
+  { id: 'ms-vit-20', statKey: 'VIT', threshold: 20, abilityName: 'Immortal Vessel', bonusHp: 20, bonusMp: 0, bonusAc: 0, bonusDr: 2, description: '+20 Max HP & +2 Damage Reduction (DR).' },
+  { id: 'ms-vit-40', statKey: 'VIT', threshold: 40, abilityName: 'Adamantine Flesh', bonusHp: 40, bonusMp: 0, bonusAc: 0, bonusDr: 3, description: '+40 Max HP & +3 DR.' },
+  { id: 'ms-vit-60', statKey: 'VIT', threshold: 60, abilityName: 'Undying Core', bonusHp: 70, bonusMp: 0, bonusAc: 0, bonusDr: 4, description: '+70 Max HP, +4 DR, survive lethal hit at 1 HP (1/battle).' },
+  { id: 'ms-vit-80', statKey: 'VIT', threshold: 80, abilityName: 'Regenerating Titan', bonusHp: 110, bonusMp: 0, bonusAc: 0, bonusDr: 6, description: '+110 Max HP, +6 DR, heal 10 HP per turn.' },
+  { id: 'ms-vit-100', statKey: 'VIT', threshold: 100, abilityName: 'Eternal Sovereign Body', bonusHp: 160, bonusMp: 0, bonusAc: 0, bonusDr: 10, description: '+160 Max HP, +10 DR, status immunity.' },
+  // INT (20, 40, 60, 80, 100)
+  { id: 'ms-int-20', statKey: 'INT', threshold: 20, abilityName: 'Archmage Resonance', bonusHp: 0, bonusMp: 15, bonusAc: 0, bonusDr: 0, description: '+15 Max MP & +4 spell power.' },
+  { id: 'ms-int-40', statKey: 'INT', threshold: 40, abilityName: 'Shinsu Overdrive', bonusHp: 0, bonusMp: 30, bonusAc: 0, bonusDr: 0, description: '+30 Max MP & +8 spell power.' },
+  { id: 'ms-int-60', statKey: 'INT', threshold: 60, abilityName: 'Astral Domain', bonusHp: 0, bonusMp: 50, bonusAc: 0, bonusDr: 0, description: '+50 Max MP, +14 spell power, -2 MP spell cost.' },
+  { id: 'ms-int-80', statKey: 'INT', threshold: 80, abilityName: 'Grand Sovereign Grimoire', bonusHp: 0, bonusMp: 80, bonusAc: 0, bonusDr: 0, description: '+80 Max MP, +22 spell power, dual-cast spells.' },
+  { id: 'ms-int-100', statKey: 'INT', threshold: 100, abilityName: 'Omniscient Origin', bonusHp: 0, bonusMp: 120, bonusAc: 0, bonusDr: 0, description: '+120 Max MP, +35 spell power, half MP costs.' },
+  // PER (20, 40, 60, 80, 100)
+  { id: 'ms-per-20', statKey: 'PER', threshold: 20, abilityName: 'True Sight', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+3 Accuracy & +2 Range Spaces to spot weakpoints.' },
+  { id: 'ms-per-40', statKey: 'PER', threshold: 40, abilityName: 'Weakpoint Lock', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+5 Accuracy & +3 Range Spaces.' },
+  { id: 'ms-per-60', statKey: 'PER', threshold: 60, abilityName: 'Eagle Horizon', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+7 Accuracy, +5 Range Spaces, pierces stealth.' },
+  { id: 'ms-per-80', statKey: 'PER', threshold: 80, abilityName: 'Fatal Foresight', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+10 Accuracy & +2 reaction parry.' },
+  { id: 'ms-per-100', statKey: 'PER', threshold: 100, abilityName: 'All-Seeing Eye', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: '+14 Accuracy, ignores cover & stealth.' },
+  // LUCK (20, 40, 60, 80, 100)
+  { id: 'ms-luck-20', statKey: 'LUCK', threshold: 20, abilityName: 'Fatebreaker', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: 'Critical hits trigger on 18-20 & +25% treasure luck.' },
+  { id: 'ms-luck-40', statKey: 'LUCK', threshold: 40, abilityName: "Gambler's Miracle", bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: 'Reroll any d20 or d100 roll (1/battle).' },
+  { id: 'ms-luck-60', statKey: 'LUCK', threshold: 60, abilityName: 'Golden Providence', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: 'Crits on 17-20 & +50% gold/loot luck.' },
+  { id: 'ms-luck-80', statKey: 'LUCK', threshold: 80, abilityName: 'Karma Reversal', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: 'Turn an incoming crit into a miss (1/battle).' },
+  { id: 'ms-luck-100', statKey: 'LUCK', threshold: 100, abilityName: 'Sovereign of Fortune', bonusHp: 0, bonusMp: 0, bonusAc: 0, bonusDr: 0, description: 'Crits on 15-20 & guaranteed rare treasure drops.' },
+];
+
 function buildCharacterVarScope(character, mechanics, extra = {}) {
   const totals = getEquippedTotals(character);
   const vars = {
@@ -549,20 +588,10 @@ function parseDeityTextIntoEntries(rawText, sourceDocUrl = '') {
 // ---------------------------------------------------------------------------
 function getInitialState() {
   const floors = [
-    { number: 5, title: '5F • Crimson Sovereign Throne (BOSS)', rowStart: 0, rowEnd: 4, safeZone: false, portalRow: 4, portalCol: 5, description: 'Apex boss chamber shrouded in dense crimson mana.' },
-    { number: 4, title: '4F • Shadow Guardian Sanctum', rowStart: 5, rowEnd: 9, safeZone: false, portalRow: 9, portalCol: 2, description: 'Silent obsidian pillars hiding elite tower sentinels.' },
-    { number: 3, title: '3F • Shinsu Mana Conduit', rowStart: 10, rowEnd: 14, safeZone: false, portalRow: 14, portalCol: 7, description: 'Glowing mana rivers boost spellcasters and guard relics.' },
-    { number: 2, title: '2F • Goblin Vanguard Corridor', rowStart: 15, rowEnd: 19, safeZone: false, portalRow: 19, portalCol: 4, description: 'First combat trial floor against tower gatekeepers.' },
-    { number: 1, title: '1F • Gate of Trials (Safe Zone)', rowStart: 20, rowEnd: 24, safeZone: true, portalRow: 20, portalCol: 5, description: 'Base camp for newly awakened tower climbers.' },
+    { number: 1, title: '1F • Gate of Trials (Safe Zone)', theme: 'forest', rowStart: 0, rowEnd: 4, safeZone: true, portalRow: 0, portalCol: 5, description: 'Base camp for newly awakened tower climbers.' },
   ];
 
-  // Fog covers Floors 4 and 5 by default (rows 0..9)
   const defaultFog = [];
-  for (let y = 0; y < 10; y++) {
-    for (let x = 0; x < 10; x++) {
-      defaultFog.push(`${x},${y}`);
-    }
-  }
 
   const defaultMechanics = {
     presetName: 'Tower System Reactive Hybrid',
@@ -584,6 +613,7 @@ function getInitialState() {
     critThreshold: 20,
     resourceName: 'Mana (MP)',
     showExactMonsterHpToPlayers: true,
+    statMilestones: DEFAULT_STAT_MILESTONES.map((m) => ({ ...m })),
   };
 
   // Free-Flow Tower Grimoire (available for any player to freely learn or adapt!)
@@ -932,30 +962,20 @@ function getInitialState() {
     'bramwell@tower.gg': { id: 'acc-4', email: 'bramwell@tower.gg', username: 'bramwell', characterId: 'char-4', activated: false, salt: null, passwordHash: null, invitedAt: new Date().toISOString(), lastLoginAt: null },
   };
 
-  const monsters = [
-    { id: 'mon-1', name: 'Goblin Gatekeeper', floor: 2, hp: 26, maxHp: 26, ac: 14, dr: 1, attackFormula: '1d20+5', damageFormula: '1d8+3', rangeSpaces: 2, hiddenFromPlayers: false, conditions: [], notes: 'Guards the 2F Warp Gate' },
-    { id: 'mon-2', name: 'Iron Bone Sentinel', floor: 3, hp: 42, maxHp: 42, ac: 15, dr: 2, attackFormula: '1d20+6', damageFormula: '2d6+3', rangeSpaces: 2, hiddenFromPlayers: false, conditions: [], notes: 'Patrols the 3F Shinsu Conduit' },
-    { id: 'mon-3', name: 'Crimson Tower Wyrm (Boss)', floor: 5, hp: 150, maxHp: 150, ac: 18, dr: 4, attackFormula: '1d20+9', damageFormula: '3d10+5', rangeSpaces: 4, hiddenFromPlayers: true, conditions: [], notes: 'Apex 5F Floor Guardian' },
-  ];
+  const monsters = [];
 
   const tokens = [
-    { id: 'char-1', name: 'Thalindra', x: 2, y: 22, color: '#38bdf8', type: 'player', hp: 34, maxHp: 34, hiddenFromPlayers: false, label: 'TH' },
-    { id: 'char-2', name: 'Kaelen', x: 4, y: 18, color: '#f59e0b', type: 'player', hp: 52, maxHp: 52, hiddenFromPlayers: false, label: 'KA' },
-    { id: 'char-3', name: "Vex'ahlia", x: 6, y: 17, color: '#a855f7', type: 'player', hp: 40, maxHp: 40, hiddenFromPlayers: false, label: 'VX' },
-    { id: 'char-4', name: 'Bramwell', x: 5, y: 21, color: '#10b981', type: 'player', hp: 46, maxHp: 46, hiddenFromPlayers: false, label: 'BR' },
-    { id: 'mon-1', name: 'Goblin Gatekeeper', x: 5, y: 16, color: '#ef4444', type: 'monster', hp: 26, maxHp: 26, hiddenFromPlayers: false, label: 'GG' },
-    { id: 'mon-2', name: 'Iron Bone Sentinel', x: 4, y: 12, color: '#f97316', type: 'monster', hp: 42, maxHp: 42, hiddenFromPlayers: false, label: 'IB' },
-    { id: 'mon-3', name: 'Crimson Tower Wyrm', x: 5, y: 2, color: '#dc2626', type: 'monster', hp: 150, maxHp: 150, hiddenFromPlayers: true, label: 'WY' },
+    { id: 'char-1', name: 'Thalindra', x: 2, y: 2, color: '#38bdf8', type: 'player', hp: 34, maxHp: 34, hiddenFromPlayers: false, label: 'TH' },
+    { id: 'char-2', name: 'Kaelen', x: 4, y: 3, color: '#f59e0b', type: 'player', hp: 52, maxHp: 52, hiddenFromPlayers: false, label: 'KA' },
+    { id: 'char-3', name: "Vex'ahlia", x: 6, y: 2, color: '#a855f7', type: 'player', hp: 40, maxHp: 40, hiddenFromPlayers: false, label: 'VX' },
+    { id: 'char-4', name: 'Bramwell', x: 8, y: 3, color: '#10b981', type: 'player', hp: 46, maxHp: 46, hiddenFromPlayers: false, label: 'BR' },
   ];
 
   const combatants = [
     { id: 'char-3', name: "Vex'ahlia Shadowstep", type: 'player', initiative: 21, hp: 40, maxHp: 40, ac: 16, hiddenFromPlayers: false },
-    { id: 'mon-1', name: 'Goblin Gatekeeper', type: 'monster', initiative: 17, hp: 26, maxHp: 26, ac: 14, hiddenFromPlayers: false },
     { id: 'char-2', name: 'Kaelen Ironheart', type: 'player', initiative: 15, hp: 52, maxHp: 52, ac: 18, hiddenFromPlayers: false },
     { id: 'char-1', name: 'Thalindra Moonwhisper', type: 'player', initiative: 14, hp: 34, maxHp: 34, ac: 14, hiddenFromPlayers: false },
-    { id: 'mon-2', name: 'Iron Bone Sentinel', type: 'monster', initiative: 12, hp: 42, maxHp: 42, ac: 15, hiddenFromPlayers: false },
     { id: 'char-4', name: 'Bramwell Oakshield', type: 'player', initiative: 10, hp: 46, maxHp: 46, ac: 17, hiddenFromPlayers: false },
-    { id: 'mon-3', name: 'Crimson Tower Wyrm (Boss)', type: 'monster', initiative: 19, hp: 150, maxHp: 150, ac: 18, hiddenFromPlayers: true },
   ].sort((a, b) => b.initiative - a.initiative);
 
   return {
@@ -984,8 +1004,8 @@ function getInitialState() {
     ],
     map: {
       cols: 10,
-      rows: 25,
-      theme: 'obsidian-spire',
+      rows: 5,
+      theme: 'forest',
       floors,
       fog: defaultFog,
       tokens,
@@ -1080,6 +1100,7 @@ function getInitialState() {
         summary: 'Trial Tower generated. Floor 2 & 3 Guardians spotted!',
       },
     ],
+    playerHistory: [],
     rollLog: [
       {
         id: 'roll-init-1',
@@ -1111,6 +1132,10 @@ function loadState() {
       const raw = fs.readFileSync(STATE_FILE, 'utf8');
       const parsed = JSON.parse(raw);
       if (parsed && parsed.characters && parsed.map && parsed.deities && parsed.grimoire) {
+        if (parsed.mechanics && (!Array.isArray(parsed.mechanics.statMilestones) || parsed.mechanics.statMilestones.length <= 6)) {
+          parsed.mechanics.statMilestones = DEFAULT_STAT_MILESTONES.map((m) => ({ ...m }));
+        }
+        if (!Array.isArray(parsed.playerHistory)) parsed.playerHistory = [];
         return parsed;
       }
     }
@@ -1215,6 +1240,7 @@ function filterStateForRole(srcState, role, characterId = null) {
       }),
     systemMessages: filteredMessages,
     combatLog: srcState.combatLog || [],
+    playerHistory: srcState.playerHistory || [],
     rollLog: (srcState.rollLog || []).filter((r) => isDm || !r.isSecret),
   };
 }
@@ -1253,6 +1279,74 @@ setInterval(() => {
 // ---------------------------------------------------------------------------
 // Sync Helpers
 // ---------------------------------------------------------------------------
+function generateArenaTerrainFromPrompt(promptText, cols = 20, rows = 20, explicitBiome = '', occupiedSet = new Set()) {
+  const lower = String(promptText || '').toLowerCase();
+  let biome = explicitBiome && ['forest', 'plains', 'desert'].includes(explicitBiome) ? explicitBiome : '';
+  if (!biome) {
+    if (/forest|woods|grove|jungle|timber|canopy|tree/.test(lower)) biome = 'forest';
+    else if (/desert|dune|sand|canyon|oasis|arid|wasteland/.test(lower)) biome = 'desert';
+    else if (/plain|meadow|grass|field|steppe|valley|pasture/.test(lower)) biome = 'plains';
+    else biome = 'obsidian';
+  }
+
+  const seedBuf = crypto.createHash('md5').update(`${lower}|${cols}x${rows}|${biome}`).digest();
+  let seedIdx = 0;
+  const nextByte = () => seedBuf[(seedIdx++) % seedBuf.length];
+
+  const terrainMap = new Map();
+  const addTile = (x, y, type) => {
+    if (x < 0 || x >= cols || y < 0 || y >= rows) return;
+    const key = `${x},${y}`;
+    if (occupiedSet.has(key)) return;
+    terrainMap.set(key, { x, y, type });
+  };
+
+  const wantsWater = /water|river|stream|creek|flow|brook|oasis|canal|moat|lagoon|flood/.test(lower);
+  const wantsTrees = /tree|forest|woods|grove|timber|canopy|bush|thicket/.test(lower) || biome === 'forest';
+  const wantsRocks = /rock|boulder|stone|pillar|cliff|ruin|crag|canyon|spire|ridge/.test(lower) || biome === 'desert' || biome === 'obsidian';
+
+  // Winding flow of water across the arena
+  if (wantsWater) {
+    let wy = Math.floor(rows * 0.45);
+    const fordX1 = Math.floor(cols * 0.3);
+    const fordX2 = Math.floor(cols * 0.72);
+    for (let x = 0; x < cols; x++) {
+      const drift = (nextByte() % 3) - 1;
+      wy = Math.max(2, Math.min(rows - 3, wy + drift));
+      // Leave narrow walkable crossings unless explicitly impassable chasm
+      const isCrossing = Math.abs(x - fordX1) <= 0 || Math.abs(x - fordX2) <= 0;
+      if (!isCrossing) {
+        addTile(x, wy, 'water');
+        if (nextByte() % 4 === 0) addTile(x, wy + 1, 'water');
+      }
+    }
+  }
+
+  // Trees
+  if (wantsTrees) {
+    const treeCount = Math.max(6, Math.floor((cols * rows) / 28));
+    for (let i = 0; i < treeCount; i++) {
+      const tx = (nextByte() + i * 7) % cols;
+      const ty = (nextByte() + i * 11) % rows;
+      addTile(tx, ty, 'tree');
+      if (nextByte() % 3 === 0) addTile(tx + 1, ty, 'tree');
+    }
+  }
+
+  // Rocks & boulders
+  if (wantsRocks) {
+    const rockCount = Math.max(5, Math.floor((cols * rows) / 34));
+    for (let i = 0; i < rockCount; i++) {
+      const rx = (nextByte() * 3 + i * 5) % cols;
+      const ry = (nextByte() * 5 + i * 9) % rows;
+      addTile(rx, ry, 'rock');
+      if (nextByte() % 4 === 0) addTile(rx, ry + 1, 'rock');
+    }
+  }
+
+  return { biome, terrain: Array.from(terrainMap.values()) };
+}
+
 function createDefaultBeatArena(cols = 20, rows = 20, charsMap = {}) {
   const safeCols = Math.max(5, Math.min(100, Number(cols) || 20));
   const safeRows = Math.max(5, Math.min(100, Number(rows) || 20));
@@ -1271,19 +1365,59 @@ function createDefaultBeatArena(cols = 20, rows = 20, charsMap = {}) {
     hiddenFromPlayers: false,
     label: ch.name.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2) || 'PL',
   }));
-  return { cols: safeCols, rows: safeRows, tokens };
+  return { cols: safeCols, rows: safeRows, biome: 'obsidian', terrain: [], tokens, chests: [] };
 }
 
 function ensureBeatArena(beat) {
   if (!beat.arena) {
     beat.arena = createDefaultBeatArena(20, 20, state?.characters || {});
   }
+  beat.arena.chests = beat.arena.chests || [];
+  beat.arena.terrain = beat.arena.terrain || [];
+  beat.arena.biome = beat.arena.biome || 'obsidian';
   return beat.arena;
 }
 
 function syncCharacterDerived(charId) {
   const ch = state.characters[charId];
   if (!ch) return;
+  const milestones = state.mechanics?.statMilestones || DEFAULT_STAT_MILESTONES;
+  ch.awakenings = ch.awakenings || [];
+  ch.skills = ch.skills || [];
+  for (const ms of milestones) {
+    const score = Number(ch.stats?.[ms.statKey] || 0);
+    if (score >= Number(ms.threshold || 20) && !ch.awakenings.includes(ms.id)) {
+      ch.awakenings.push(ms.id);
+      if (ms.bonusHp) {
+        ch.maxHp = Number(ch.maxHp || 0) + Number(ms.bonusHp);
+        ch.hp = Number(ch.hp || 0) + Number(ms.bonusHp);
+      }
+      if (ms.bonusMp) {
+        ch.maxMp = Number(ch.maxMp || 0) + Number(ms.bonusMp);
+        ch.mp = Number(ch.mp || 0) + Number(ms.bonusMp);
+      }
+      if (ms.bonusAc) ch.ac = Number(ch.ac || 10) + Number(ms.bonusAc);
+      if (ms.bonusDr) ch.dr = Number(ch.dr || 0) + Number(ms.bonusDr);
+      if (!ch.skills.some((s) => s.name === ms.abilityName)) {
+        ch.skills.push({
+          id: `awk-${ms.id}`,
+          name: ms.abilityName,
+          rank: 'Awakened',
+          mpCost: 0,
+          cooldown: 'Passive / 1/Turn',
+          description: ms.description,
+          unlockedByStat: `${ms.statKey} ${ms.threshold}`,
+        });
+      }
+      pushSystemToast({
+        title: `STAT AWAKENING: ${ms.abilityName.toUpperCase()}`,
+        message: `${ch.name} reached ${ms.statKey} ${ms.threshold} and unlocked ${ms.abilityName}! (${ms.description})`,
+        category: 'loot',
+        target: ch.id,
+      });
+      logPlayerHistory(ch.id, 'awakening', `Unlocked ${ms.abilityName} (${ms.statKey} ${ms.threshold})`);
+    }
+  }
   const tok = state.map.tokens.find((t) => t.id === charId);
   if (tok) {
     tok.name = ch.name.split(' ')[0];
@@ -1334,6 +1468,73 @@ function syncMonsterDerived(monsterId) {
     cb.ac = mon.ac;
     cb.hiddenFromPlayers = Boolean(mon.hiddenFromPlayers);
   }
+  if (mon.hp <= 0 && mon.loot && !mon.loot.dropped) {
+    const hasDrop = Boolean(mon.loot.itemName || mon.loot.gold > 0 || mon.loot.manaStones > 0 || mon.loot.xp > 0);
+    if (hasDrop) {
+      mon.loot.dropped = true;
+      if (mon.loot.xp > 0) {
+        for (const ch of Object.values(state.characters)) {
+          grantXpToCharacter(ch, mon.loot.xp);
+        }
+      }
+      let droppedOnArena = false;
+      for (const beat of state.storyBeats || []) {
+        const btok = beat.arena?.tokens?.find((t) => t.id === monsterId);
+        if (btok && (mon.loot.itemName || mon.loot.gold > 0 || mon.loot.manaStones > 0)) {
+          beat.arena.chests = beat.arena.chests || [];
+          beat.arena.chests.push({
+            id: `loot-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+            name: `${mon.name} Loot`,
+            x: btok.x,
+            y: btok.y,
+            gold: Number(mon.loot.gold || 0),
+            manaStones: Number(mon.loot.manaStones || 0),
+            itemName: mon.loot.itemName || '',
+            itemCategory: mon.loot.itemCategory || 'relic',
+            opened: false,
+          });
+          droppedOnArena = true;
+        }
+      }
+      if (!droppedOnArena && (mon.loot.itemName || mon.loot.gold > 0 || mon.loot.manaStones > 0)) {
+        for (const ch of Object.values(state.characters)) {
+          ch.currency = ch.currency || { gold: 0, manaStones: 0 };
+          ch.currency.gold = Number(ch.currency.gold || 0) + Number(mon.loot.gold || 0);
+          ch.currency.manaStones = Number(ch.currency.manaStones || 0) + Number(mon.loot.manaStones || 0);
+          if (mon.loot.itemName) {
+            ch.inventory = ch.inventory || [];
+            ch.inventory.push({
+              id: `inv-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+              name: mon.loot.itemName,
+              category: mon.loot.itemCategory || 'relic',
+              qty: 1,
+              healHp: 0,
+              healMp: 0,
+              slot: mon.loot.itemCategory === 'weapon' ? 'mainHand' : mon.loot.itemCategory === 'armor' ? 'body' : 'relic',
+              attackBonus: 0,
+              damageDice: '',
+              damageType: 'Physical',
+              rangeSpaces: 2,
+              drBonus: 0,
+              acBonus: 0,
+              notes: `Dropped by ${mon.name}`,
+            });
+          }
+        }
+      }
+      const dropParts = [
+        mon.loot.itemName || '',
+        mon.loot.gold ? `${mon.loot.gold}G` : '',
+        mon.loot.manaStones ? `${mon.loot.manaStones} Stones` : '',
+        mon.loot.xp ? `+${mon.loot.xp} XP` : '',
+      ].filter(Boolean).join(', ');
+      pushSystemToast({
+        title: 'MONSTER LOOT DROPPED!',
+        message: `${mon.name} was defeated and dropped: ${dropParts}${droppedOnArena ? ' (Tap loot chest on arena!)' : ''}`,
+        category: 'loot',
+      });
+    }
+  }
 }
 
 function getFloorCenterRow(floorNum) {
@@ -1343,18 +1544,41 @@ function getFloorCenterRow(floorNum) {
 }
 
 function pushSystemToast({ title, message, category = 'info', target = 'all', sender = 'SYSTEM / DM' }) {
+  const rawMsg = String(message || '').trim();
+  const formattedMsg = /^SYSTEM:/i.test(rawMsg) ? rawMsg : `SYSTEM: ${rawMsg}`;
   const entry = {
     id: `sys-${Date.now()}-${crypto.randomInt(100, 999)}`,
     timestamp: new Date().toISOString(),
     category,
     title: String(title || 'SYSTEM NOTICE').slice(0, 80),
-    message: String(message || '').slice(0, 500),
+    message: formattedMsg.slice(0, 500),
     target: target || 'all',
     sender,
   };
   state.systemMessages.unshift(entry);
   state.systemMessages = state.systemMessages.slice(0, 40);
   broadcastEvent('toast', entry);
+  return entry;
+}
+
+function logPlayerHistory(charId, category, summary) {
+  state.playerHistory = state.playerHistory || [];
+  const ch = charId ? state.characters[charId] : null;
+  const entry = {
+    id: `ph-${Date.now()}-${crypto.randomInt(100, 999)}`,
+    timestamp: new Date().toISOString(),
+    characterId: charId || null,
+    characterName: ch ? ch.name : 'Party',
+    category: String(category || 'event'),
+    summary: String(summary || '').slice(0, 260),
+  };
+  state.playerHistory.unshift(entry);
+  state.playerHistory = state.playerHistory.slice(0, 200);
+  if (ch) {
+    ch.history = ch.history || [];
+    ch.history.unshift(entry);
+    ch.history = ch.history.slice(0, 60);
+  }
   return entry;
 }
 
@@ -1372,6 +1596,9 @@ function grantXpToCharacter(ch, xpAmount) {
     ch.xpToNext = ch.level * 100;
     ch.unspentStatPoints += 2;
     levelsGained += 1;
+  }
+  if (gained > 0) {
+    logPlayerHistory(ch.id, 'xp', `Gained +${gained} XP${levelsGained > 0 ? ` and reached Level ${ch.level}!` : ''}`);
   }
   return { gained, levelsGained, level: ch.level, xp: ch.xp, xpToNext: ch.xpToNext, unspentStatPoints: ch.unspentStatPoints };
 }
@@ -1583,6 +1810,22 @@ async function handleAction(body) {
       if (m.reactionRule !== undefined) state.mechanics.reactionRule = String(m.reactionRule).slice(0, 140);
       if (m.distanceUnit !== undefined) state.mechanics.distanceUnit = String(m.distanceUnit).slice(0, 24);
       if (m.statFormula !== undefined) state.mechanics.statFormula = String(m.statFormula).slice(0, 160);
+      if (Array.isArray(m.statMilestones)) {
+        state.mechanics.statMilestones = m.statMilestones.map((ms, i) => ({
+          id: String(ms.id || `ms-${i}`),
+          statKey: String(ms.statKey || 'STR').toUpperCase().slice(0, 12),
+          threshold: Math.max(1, Number(ms.threshold || 20)),
+          abilityName: String(ms.abilityName || 'Awakened Power').slice(0, 50),
+          bonusHp: Number(ms.bonusHp || 0),
+          bonusMp: Number(ms.bonusMp || 0),
+          bonusAc: Number(ms.bonusAc || 0),
+          bonusDr: Number(ms.bonusDr || 0),
+          description: String(ms.description || '').slice(0, 160),
+        }));
+      }
+      for (const cid of Object.keys(state.characters)) {
+        syncCharacterDerived(cid);
+      }
       if (m.hitFormula !== undefined) state.mechanics.hitFormula = String(m.hitFormula).slice(0, 160);
       if (m.damageFormula !== undefined) state.mechanics.damageFormula = String(m.damageFormula).slice(0, 160);
       if (m.critMultiplier !== undefined) state.mechanics.critMultiplier = Math.max(1, Number(m.critMultiplier) || 2);
@@ -1612,6 +1855,7 @@ async function handleAction(body) {
       const hidden = Boolean(payload.hiddenFromPlayers);
       const name = String(payload.name || 'Tower Monster').trim().slice(0, 50);
 
+      const lootSrc = payload.loot || {};
       const monster = {
         id,
         name,
@@ -1626,6 +1870,14 @@ async function handleAction(body) {
         hiddenFromPlayers: hidden,
         conditions: [],
         notes: String(payload.notes || ''),
+        loot: {
+          itemName: String(lootSrc.itemName ?? payload.lootItemName ?? '').slice(0, 50),
+          itemCategory: String(lootSrc.itemCategory ?? payload.lootCategory ?? 'relic'),
+          gold: Math.max(0, Number(lootSrc.gold ?? payload.lootGold ?? 0)),
+          manaStones: Math.max(0, Number(lootSrc.manaStones ?? payload.lootManaStones ?? 0)),
+          xp: Math.max(0, Number(lootSrc.xp ?? payload.lootXp ?? 0)),
+          dropped: false,
+        },
       };
       state.monsters.push(monster);
 
@@ -1924,6 +2176,9 @@ async function handleAction(body) {
 
       const prevHp = monster.hp;
       monster.hp = Math.max(0, monster.hp - finalDamage);
+      if (attackerChar) {
+        logPlayerHistory(attackerChar.id, 'combat', `Dealt ${finalDamage} ${damageType} damage to ${monster.name} (${monster.hp}/${monster.maxHp} HP left)`);
+      }
       syncMonsterDerived(monster.id);
 
       const logEntry = {
@@ -2485,9 +2740,13 @@ async function handleAction(body) {
           return `${x},${y + 5}`;
         });
         state.map.rows += 5;
+        const defaultThemeForFloor = (n) => (n === 1 ? 'forest' : n === 2 ? 'desert' : n === 3 ? 'underworld' : n === 4 ? 'frost' : 'obsidian');
+        const validThemes = ['forest', 'desert', 'underworld', 'plains', 'frost', 'obsidian'];
+        const floorTheme = validThemes.includes(payload.theme) ? payload.theme : defaultThemeForFloor(nextNum);
         const newFloor = {
           number: nextNum,
-          title: String(payload.title || `${nextNum}F • Higher Spire Chamber`).slice(0, 60),
+          title: String(payload.title || `${nextNum}F • ${floorTheme.charAt(0).toUpperCase() + floorTheme.slice(1)} Realm`).slice(0, 60),
+          theme: floorTheme,
           rowStart: 0,
           rowEnd: 4,
           safeZone: Boolean(payload.safeZone),
@@ -2506,6 +2765,102 @@ async function handleAction(body) {
           message: `The Tower expanded vertically! ${newFloor.title} awaits above.`,
           category: 'info',
         });
+      } else if (sub === 'set_floor_theme') {
+        const validThemes = ['forest', 'desert', 'underworld', 'plains', 'frost', 'obsidian'];
+        const fl = state.map.floors.find((f) => Number(f.number) === Number(payload.floorNumber));
+        if (!fl) return { status: 404, error: 'Tower floor not found.' };
+        if (validThemes.includes(payload.theme)) fl.theme = payload.theme;
+        if (payload.title) fl.title = String(payload.title).slice(0, 60);
+      } else if (sub === 'apply_tower_themes') {
+        const validThemes = ['forest', 'desert', 'underworld', 'plains', 'frost', 'obsidian'];
+        const targetCount = Math.max(state.map.floors.length, Math.min(20, Number(payload.ensureFloors || state.map.floors.length)));
+        while (state.map.floors.length < targetCount) {
+          const nextNum = state.map.floors.reduce((m, f) => Math.max(m, f.number), 0) + 1;
+          for (const f of state.map.floors) {
+            f.rowStart += 5;
+            f.rowEnd += 5;
+            f.portalRow += 5;
+          }
+          for (const t of state.map.tokens) t.y += 5;
+          state.map.fog = state.map.fog.map((k) => {
+            const [x, y] = k.split(',').map(Number);
+            return `${x},${y + 5}`;
+          });
+          state.map.rows += 5;
+          const defTheme = nextNum === 1 ? 'forest' : nextNum === 2 ? 'desert' : nextNum === 3 ? 'underworld' : nextNum === 4 ? 'frost' : 'obsidian';
+          state.map.floors.unshift({
+            number: nextNum,
+            title: `${nextNum}F • ${defTheme.charAt(0).toUpperCase() + defTheme.slice(1)} Realm`,
+            theme: defTheme,
+            rowStart: 0,
+            rowEnd: 4,
+            safeZone: false,
+            portalRow: 4,
+            portalCol: 5,
+            description: `Floor ${nextNum} of the Tower.`,
+          });
+        }
+        if (Array.isArray(payload.floors)) {
+          for (const item of payload.floors) {
+            const fl = state.map.floors.find((f) => Number(f.number) === Number(item.number));
+            if (fl && validThemes.includes(item.theme)) {
+              fl.theme = item.theme;
+              if (item.title) fl.title = String(item.title).slice(0, 60);
+            }
+          }
+        } else if (payload.preset) {
+          const presetMap = {
+            classic: (n) => (n === 1 ? 'forest' : n === 2 ? 'desert' : n === 3 ? 'underworld' : n === 4 ? 'frost' : 'obsidian'),
+            all_forest: () => 'forest',
+            all_desert: () => 'desert',
+            all_underworld: () => 'underworld',
+            all_obsidian: () => 'obsidian',
+          };
+          const pick = presetMap[payload.preset] || presetMap.classic;
+          for (const fl of state.map.floors) {
+            fl.theme = pick(fl.number);
+          }
+        }
+      } else if (sub === 'delete_floor') {
+        const floorNum = Number(payload.floorNumber);
+        if (state.map.floors.length <= 1) {
+          return { status: 400, error: 'Cannot delete the only remaining floor in the Tower.' };
+        }
+        const fl = state.map.floors.find((f) => Number(f.number) === floorNum);
+        if (!fl) return { status: 404, error: 'Tower floor not found.' };
+        const span = Math.max(1, fl.rowEnd - fl.rowStart + 1);
+        state.map.floors = state.map.floors.filter((f) => Number(f.number) !== floorNum);
+        for (const f of state.map.floors) {
+          if (f.rowStart > fl.rowStart) {
+            f.rowStart -= span;
+            f.rowEnd -= span;
+            f.portalRow -= span;
+          }
+        }
+        state.map.rows = Math.max(5, state.map.rows - span);
+        const fallbackFloor = state.map.floors[state.map.floors.length - 1];
+        const nextTokens = [];
+        for (const t of state.map.tokens) {
+          if (t.y >= fl.rowStart && t.y <= fl.rowEnd) {
+            if (t.type === 'player' && fallbackFloor) {
+              t.y = fallbackFloor.portalRow;
+              nextTokens.push(t);
+            }
+          } else {
+            if (t.y > fl.rowEnd) t.y -= span;
+            nextTokens.push(t);
+          }
+        }
+        state.map.tokens = nextTokens;
+        state.map.fog = (state.map.fog || []).filter((k) => {
+          const [, y] = k.split(',').map(Number);
+          return y < fl.rowStart || y > fl.rowEnd;
+        }).map((k) => {
+          const [x, y] = k.split(',').map(Number);
+          return y > fl.rowEnd ? `${x},${y - span}` : k;
+        });
+        state.storyBeats = (state.storyBeats || []).filter((b) => Number(b.floor) !== floorNum);
+        state.monsters = (state.monsters || []).filter((m) => Number(m.floor) !== floorNum);
       } else if (sub === 'set_theme') {
         state.map.theme = String(payload.theme || 'obsidian-spire');
       }
@@ -2535,7 +2890,19 @@ async function handleAction(body) {
           }
         }
       } else if (sub === 'roll_all') {
-        for (const c of state.combat.combatants) c.initiative = rollSingleDie(20) + 2;
+        for (const c of state.combat.combatants) {
+          let mod = 2;
+          if (c.type === 'player' && state.characters[c.id]) {
+            const ch = state.characters[c.id];
+            const agiScore = ch.stats?.AGI ?? ch.stats?.DEX ?? 10;
+            mod = computeStatModifier(agiScore, state.mechanics, ch);
+          } else if (c.type === 'monster') {
+            const mon = state.monsters.find((m) => m.id === c.id);
+            mod = mon ? Math.floor(((mon.agi ?? mon.ac ?? 12) - 10) / 2) : 2;
+          }
+          c.initMod = mod;
+          c.initiative = rollSingleDie(20) + mod;
+        }
         state.combat.combatants.sort((a, b) => b.initiative - a.initiative);
         state.combat.turnIndex = 0;
         state.combat.round = 1;
@@ -2546,7 +2913,10 @@ async function handleAction(body) {
           const mod = computeStatModifier(agiScore, state.mechanics, ch);
           const init = rollSingleDie(20) + mod;
           const cb = state.combat.combatants.find((c) => c.id === ch.id);
-          if (cb) cb.initiative = init;
+          if (cb) {
+            cb.initMod = mod;
+            cb.initiative = init;
+          }
           state.combat.combatants.sort((a, b) => b.initiative - a.initiative);
         }
       }
@@ -2571,7 +2941,7 @@ async function handleAction(body) {
     case 'story_action': {
       state.storyBeats = state.storyBeats || [];
       const sub = payload.subAction;
-      if (!isDm && sub !== 'move_beat_token') {
+      if (!isDm && sub !== 'move_beat_token' && sub !== 'open_beat_chest' && sub !== 'talk_beat_npc') {
         return { status: 403, error: 'Only the Dungeon Master can orchestrate story beats.' };
       }
 
@@ -2580,7 +2950,89 @@ async function handleAction(body) {
         if (!title) return { status: 400, error: 'Story beat title is required.' };
         const encounters = Array.isArray(payload.encounters) ? payload.encounters : [];
         const treasures = Array.isArray(payload.treasures) ? payload.treasures : [];
-        const gridSize = Math.max(5, Math.min(100, Number(payload.gridSize || 20)));
+        const npcs = Array.isArray(payload.npcs) ? payload.npcs : [];
+        const gridCols = Math.max(5, Math.min(100, Number(payload.gridCols || payload.gridSize || 20)));
+        const gridRows = Math.max(5, Math.min(100, Number(payload.gridRows || payload.gridSize || 20)));
+        const arena = createDefaultBeatArena(gridCols, gridRows, state.characters);
+        if (payload.biome && ['forest', 'plains', 'desert', 'obsidian'].includes(payload.biome)) {
+          arena.biome = payload.biome;
+        }
+        if (payload.playerPositions && typeof payload.playerPositions === 'object') {
+          arena.startPositions = {};
+          for (const tok of arena.tokens) {
+            const pos = payload.playerPositions[tok.id];
+            if (pos && pos.x !== undefined && pos.y !== undefined) {
+              tok.x = Math.max(0, Math.min(gridCols - 1, Math.trunc(Number(pos.x))));
+              tok.y = Math.max(0, Math.min(gridRows - 1, Math.trunc(Number(pos.y))));
+            }
+            arena.startPositions[tok.id] = { x: tok.x, y: tok.y };
+          }
+        }
+        if (npcs.length > 0) {
+          arena.startPositions = arena.startPositions || {};
+          npcs.forEach((n, idx) => {
+            const npcName = String(n.name || 'NPC').trim().slice(0, 50) || 'NPC';
+            const npcId = `npc-${Date.now().toString(36)}-${idx}-${crypto.randomInt(10, 99)}`;
+            const nx = n.startX !== undefined && n.startX !== '' && n.startX !== null
+              ? Math.max(0, Math.min(gridCols - 1, Math.trunc(Number(n.startX)) - 1))
+              : Math.min(gridCols - 1, 2 + idx * 2);
+            const ny = n.startY !== undefined && n.startY !== '' && n.startY !== null
+              ? Math.max(0, Math.min(gridRows - 1, Math.trunc(Number(n.startY)) - 1))
+              : Math.min(gridRows - 1, Math.floor(gridRows / 2));
+            arena.tokens.push({
+              id: npcId,
+              name: npcName,
+              npcRole: String(n.npcRole || n.role || 'NPC').slice(0, 40),
+              dialogue: String(n.dialogue || `Greetings, Climber. Speak with ${npcName}.`).slice(0, 300),
+              rewardType: ['none', 'item', 'skill_book', 'xp'].includes(n.rewardType) ? n.rewardType : 'none',
+              rewardItemName: String(n.rewardItemName || '').slice(0, 60),
+              rewardItemCategory: String(n.rewardItemCategory || 'relic'),
+              rewardSkillDesc: String(n.rewardSkillDesc || '').slice(0, 160),
+              rewardXp: Math.max(0, Number(n.rewardXp || 0)),
+              rewardGold: Math.max(0, Number(n.rewardGold || 0)),
+              rewardClaimed: false,
+              type: 'npc',
+              x: nx,
+              y: ny,
+              color: '#10b981',
+              hp: null,
+              maxHp: null,
+              hiddenFromPlayers: Boolean(n.hiddenFromPlayers),
+              label: npcName.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2) || 'NP',
+            });
+            arena.startPositions[npcId] = { x: nx, y: ny };
+          });
+        }
+        if (Array.isArray(payload.chests)) {
+          arena.chests = payload.chests.map((c, i) => ({
+            id: `chest-${Date.now().toString(36)}-${i}-${crypto.randomInt(10, 99)}`,
+            name: String(c.name || 'Treasure Chest').slice(0, 50),
+            x: Math.max(0, Math.min(gridCols - 1, Math.trunc(Number(c.x || 0)))),
+            y: Math.max(0, Math.min(gridRows - 1, Math.trunc(Number(c.y || 0)))),
+            gold: Math.max(0, Number(c.gold || 0)),
+            manaStones: Math.max(0, Number(c.manaStones || 0)),
+            itemName: String(c.itemName || '').slice(0, 50),
+            itemCategory: String(c.itemCategory || 'relic'),
+            opened: false,
+          }));
+        }
+        if (Array.isArray(payload.terrain)) {
+          arena.terrain = payload.terrain
+            .filter((t) => ['tree', 'rock', 'water'].includes(t.type))
+            .map((t) => ({
+              x: Math.max(0, Math.min(gridCols - 1, Math.trunc(Number(t.x || 0)))),
+              y: Math.max(0, Math.min(gridRows - 1, Math.trunc(Number(t.y || 0)))),
+              type: t.type,
+            }));
+        } else if (payload.arenaPrompt) {
+          const occ = new Set([
+            ...arena.tokens.map((t) => `${t.x},${t.y}`),
+            ...arena.chests.map((c) => `${c.x},${c.y}`),
+          ]);
+          const gen = generateArenaTerrainFromPrompt(payload.arenaPrompt, gridCols, gridRows, arena.biome, occ);
+          arena.biome = gen.biome;
+          arena.terrain = gen.terrain;
+        }
         const beat = {
           id: `beat-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
           order: state.storyBeats.length + 1,
@@ -2591,7 +3043,7 @@ async function handleAction(body) {
           presented: Boolean(payload.presentNow),
           status: payload.presentNow ? 'active' : 'upcoming',
           xpReward: Math.max(0, Number(payload.xpReward ?? 0)),
-          arena: createDefaultBeatArena(gridSize, gridSize, state.characters),
+          arena,
           encounters,
           treasures,
         };
@@ -2634,6 +3086,208 @@ async function handleAction(body) {
           tok.x = Math.max(0, Math.min(cols - 1, tok.x));
           tok.y = Math.max(0, Math.min(rows - 1, tok.y));
         }
+        for (const ch of arena.chests || []) {
+          ch.x = Math.max(0, Math.min(cols - 1, ch.x));
+          ch.y = Math.max(0, Math.min(rows - 1, ch.y));
+        }
+        arena.terrain = (arena.terrain || []).filter((t) => t.x < cols && t.y < rows);
+      } else if (sub === 'set_beat_biome') {
+        if (['forest', 'plains', 'desert', 'obsidian'].includes(payload.biome)) {
+          arena.biome = payload.biome;
+        }
+      } else if (sub === 'toggle_beat_terrain') {
+        const tx = Math.max(0, Math.min(arena.cols - 1, Math.trunc(Number(payload.x || 0))));
+        const ty = Math.max(0, Math.min(arena.rows - 1, Math.trunc(Number(payload.y || 0))));
+        const tType = ['tree', 'rock', 'water'].includes(payload.terrainType) ? payload.terrainType : 'rock';
+        arena.terrain = arena.terrain || [];
+        const existingIdx = arena.terrain.findIndex((t) => t.x === tx && t.y === ty);
+        if (existingIdx >= 0 && arena.terrain[existingIdx].type === tType) {
+          arena.terrain.splice(existingIdx, 1);
+        } else if (existingIdx >= 0) {
+          arena.terrain[existingIdx].type = tType;
+        } else {
+          arena.terrain.push({ x: tx, y: ty, type: tType });
+        }
+      } else if (sub === 'generate_beat_terrain') {
+        const occ = new Set([
+          ...(arena.tokens || []).map((t) => `${t.x},${t.y}`),
+          ...(arena.chests || []).map((c) => `${c.x},${c.y}`),
+        ]);
+        const gen = generateArenaTerrainFromPrompt(payload.prompt || beat.narration || beat.title, arena.cols, arena.rows, payload.biome || '', occ);
+        arena.biome = gen.biome;
+        arena.terrain = gen.terrain;
+      } else if (sub === 'add_beat_chest') {
+        arena.chests.push({
+          id: `chest-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+          name: String(payload.name || 'Treasure Chest').slice(0, 50),
+          x: Math.max(0, Math.min(arena.cols - 1, Math.trunc(Number(payload.x || 0)))),
+          y: Math.max(0, Math.min(arena.rows - 1, Math.trunc(Number(payload.y || 0)))),
+          gold: Math.max(0, Number(payload.gold || 50)),
+          manaStones: Math.max(0, Number(payload.manaStones || 1)),
+          itemName: String(payload.itemName || '').slice(0, 50),
+          itemCategory: String(payload.itemCategory || 'relic'),
+          opened: false,
+        });
+      } else if (sub === 'remove_beat_chest') {
+        arena.chests = arena.chests.filter((c) => c.id !== payload.chestId);
+      } else if (sub === 'add_beat_npc') {
+        const npcName = String(payload.name || 'NPC').trim().slice(0, 50) || 'NPC';
+        const npcId = `npc-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`;
+        const nx = Math.max(0, Math.min(arena.cols - 1, Math.trunc(Number(payload.x || 0))));
+        const ny = Math.max(0, Math.min(arena.rows - 1, Math.trunc(Number(payload.y || 0))));
+        arena.tokens.push({
+          id: npcId,
+          name: npcName,
+          npcRole: String(payload.npcRole || 'NPC').slice(0, 40),
+          dialogue: String(payload.dialogue || `Greetings, Climber. Speak with ${npcName}.`).slice(0, 300),
+          rewardType: ['none', 'item', 'skill_book', 'xp'].includes(payload.rewardType) ? payload.rewardType : 'none',
+          rewardItemName: String(payload.rewardItemName || '').slice(0, 60),
+          rewardItemCategory: String(payload.rewardItemCategory || 'relic'),
+          rewardSkillDesc: String(payload.rewardSkillDesc || '').slice(0, 160),
+          rewardXp: Math.max(0, Number(payload.rewardXp || 0)),
+          rewardGold: Math.max(0, Number(payload.rewardGold || 0)),
+          rewardClaimed: false,
+          type: 'npc',
+          x: nx,
+          y: ny,
+          color: '#10b981',
+          hp: null,
+          maxHp: null,
+          hiddenFromPlayers: Boolean(payload.hiddenFromPlayers),
+          label: npcName.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2) || 'NP',
+        });
+        arena.startPositions = arena.startPositions || {};
+        arena.startPositions[npcId] = { x: nx, y: ny };
+      } else if (sub === 'talk_beat_npc') {
+        const tok = (arena.tokens || []).find((t) => t.id === payload.tokenId && t.type === 'npc');
+        if (!tok) return { status: 404, error: 'NPC not found in this arena.' };
+        const cid = (payload.characterId && state.characters[payload.characterId])
+          ? payload.characterId
+          : (characterId && state.characters[characterId] ? characterId : Object.keys(state.characters)[0]);
+        const ch = cid ? state.characters[cid] : null;
+        const rewardNotes = [];
+        if (ch && !tok.rewardClaimed && tok.rewardType && tok.rewardType !== 'none') {
+          tok.rewardClaimed = true;
+          if (tok.rewardType === 'xp' && tok.rewardXp > 0) {
+            const xpRes = grantXpToCharacter(ch, tok.rewardXp);
+            rewardNotes.push(`+${tok.rewardXp} XP${xpRes.levelsGained > 0 ? ` (Level ${xpRes.level}!)` : ''}`);
+          } else if (tok.rewardType === 'item' && tok.rewardItemName) {
+            ch.inventory = ch.inventory || [];
+            ch.inventory.push({
+              id: `inv-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+              name: tok.rewardItemName,
+              category: tok.rewardItemCategory || 'relic',
+              qty: 1,
+              healHp: 0,
+              healMp: 0,
+              slot: tok.rewardItemCategory === 'weapon' ? 'mainHand' : tok.rewardItemCategory === 'armor' ? 'body' : 'relic',
+              attackBonus: 0,
+              damageDice: '',
+              damageType: 'Physical',
+              rangeSpaces: 2,
+              drBonus: 0,
+              acBonus: 0,
+              notes: `Gifted by ${tok.name}`,
+            });
+            rewardNotes.push(`Item: ${tok.rewardItemName}`);
+          } else if (tok.rewardType === 'skill_book' && tok.rewardItemName) {
+            const cleanSkillName = tok.rewardItemName.replace(/^skill\s*book:\s*/i, '').trim() || tok.rewardItemName;
+            ch.inventory = ch.inventory || [];
+            ch.inventory.push({
+              id: `inv-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+              name: `Skill Book: ${cleanSkillName}`,
+              category: 'skill_book',
+              qty: 1,
+              healHp: 0,
+              healMp: 0,
+              slot: 'relic',
+              attackBonus: 0,
+              damageDice: '',
+              damageType: 'Physical',
+              rangeSpaces: 2,
+              drBonus: 0,
+              acBonus: 0,
+              notes: tok.rewardSkillDesc || `Skill Book gifted by ${tok.name}`,
+            });
+            ch.skills = ch.skills || [];
+            if (!ch.skills.some((s) => s.name.toLowerCase() === cleanSkillName.toLowerCase())) {
+              ch.skills.push({
+                id: `sk-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+                name: cleanSkillName,
+                rank: 'E',
+                mpCost: 5,
+                cooldown: '1 turn',
+                description: tok.rewardSkillDesc || `Learned from ${tok.name}'s Skill Book.`,
+              });
+            }
+            rewardNotes.push(`Skill Book: ${cleanSkillName}`);
+          }
+          if (tok.rewardGold > 0) {
+            ch.currency = ch.currency || { gold: 0, manaStones: 0 };
+            ch.currency.gold = Number(ch.currency.gold || 0) + Number(tok.rewardGold);
+            rewardNotes.push(`${tok.rewardGold}G`);
+          }
+        }
+        const dialogue = tok.dialogue || `Greetings, Climber.`;
+        const rewardSummary = rewardNotes.join(', ');
+        pushSystemToast({
+          title: `${tok.name.toUpperCase()} (${tok.npcRole || 'NPC'})`,
+          message: rewardSummary ? `"${dialogue}" — Received: ${rewardSummary}` : `"${dialogue}"`,
+          category: rewardSummary ? 'loot' : 'info',
+          target: ch ? ch.id : 'all',
+        });
+        if (ch) {
+          logPlayerHistory(ch.id, 'npc', `Spoke with ${tok.name}${rewardSummary ? ` (Received: ${rewardSummary})` : ''}`);
+        }
+      } else if (sub === 'remove_beat_npc') {
+        arena.tokens = arena.tokens.filter((t) => !(t.type === 'npc' && t.id === payload.tokenId));
+      } else if (sub === 'open_beat_chest') {
+        const chest = (arena.chests || []).find((c) => c.id === payload.chestId);
+        if (!chest) return { status: 404, error: 'Treasure chest not found.' };
+        if (chest.opened) return { status: 400, error: 'Treasure chest already opened.' };
+        chest.opened = true;
+        const recipientIds = (payload.characterId && state.characters[payload.characterId])
+          ? [payload.characterId]
+          : (characterId && state.characters[characterId] ? [characterId] : Object.keys(state.characters));
+        for (const cid of recipientIds) {
+          const ch = state.characters[cid];
+          if (!ch) continue;
+          ch.currency = ch.currency || { gold: 0, manaStones: 0 };
+          ch.currency.gold = Number(ch.currency.gold || 0) + Number(chest.gold || 0);
+          ch.currency.manaStones = Number(ch.currency.manaStones || 0) + Number(chest.manaStones || 0);
+          if (chest.itemName) {
+            ch.inventory = ch.inventory || [];
+            ch.inventory.push({
+              id: `inv-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+              name: chest.itemName,
+              category: chest.itemCategory || 'relic',
+              qty: 1,
+              healHp: 0,
+              healMp: 0,
+              slot: chest.itemCategory === 'weapon' ? 'mainHand' : chest.itemCategory === 'armor' ? 'body' : 'relic',
+              attackBonus: 0,
+              damageDice: '',
+              damageType: 'Physical',
+              rangeSpaces: 2,
+              drBonus: 0,
+              acBonus: 0,
+              notes: `Found in ${chest.name}`,
+            });
+          }
+        }
+        const rewards = [
+          chest.gold ? `${chest.gold}G` : '',
+          chest.manaStones ? `${chest.manaStones} Stones` : '',
+          chest.itemName || '',
+        ].filter(Boolean).join(', ');
+        pushSystemToast({
+          title: 'TREASURE CHEST OPENED!',
+          message: `${chest.name} opened! Rewards: ${rewards || 'Empty'}`,
+          category: 'loot',
+        });
+        for (const cid of recipientIds) {
+          logPlayerHistory(cid, 'loot', `Opened ${chest.name}${rewards ? `: ${rewards}` : ''}`);
+        }
       } else if (sub === 'toggle_beat_player') {
         const cid = payload.characterId;
         const ch = state.characters[cid];
@@ -2662,8 +3316,14 @@ async function handleAction(body) {
         if (!isDm && characterId && tok.id !== characterId) {
           return { status: 403, error: 'Players can only move their own token.' };
         }
-        tok.x = Math.max(0, Math.min(arena.cols - 1, Math.trunc(Number(payload.x))));
-        tok.y = Math.max(0, Math.min(arena.rows - 1, Math.trunc(Number(payload.y))));
+        const nx = Math.max(0, Math.min(arena.cols - 1, Math.trunc(Number(payload.x))));
+        const ny = Math.max(0, Math.min(arena.rows - 1, Math.trunc(Number(payload.y))));
+        const blocked = (arena.terrain || []).find((t) => t.x === nx && t.y === ny);
+        if (blocked) {
+          return { status: 400, error: `Impassable terrain (${blocked.type}) blocks that space!` };
+        }
+        tok.x = nx;
+        tok.y = ny;
       } else if (sub === 'save_beat_starts') {
         arena.startPositions = arena.startPositions || {};
         for (const tok of arena.tokens) {
@@ -2778,6 +3438,38 @@ async function handleAction(body) {
           category: 'loot',
           target: payload.characterId && payload.characterId !== 'all' ? payload.characterId : 'all',
         });
+      } else if (sub === 'update_beat') {
+        if (payload.title !== undefined && String(payload.title).trim()) {
+          beat.title = String(payload.title).trim().slice(0, 80);
+        }
+        if (payload.floor !== undefined) beat.floor = Math.max(1, Number(payload.floor || 1));
+        if (payload.xpReward !== undefined) beat.xpReward = Math.max(0, Number(payload.xpReward || 0));
+        if (payload.narration !== undefined) beat.narration = String(payload.narration || '').slice(0, 800);
+        if (payload.dmSecret !== undefined) beat.dmSecret = String(payload.dmSecret || '').slice(0, 500);
+        if (payload.presented !== undefined) {
+          beat.presented = Boolean(payload.presented);
+          if (beat.presented && beat.status === 'upcoming') beat.status = 'active';
+        }
+        if (payload.status && ['upcoming', 'active', 'resolved'].includes(payload.status)) {
+          beat.status = payload.status;
+        }
+        if (payload.gridSize || payload.gridCols || payload.gridRows) {
+          const cols = Math.max(5, Math.min(100, Number(payload.gridCols || payload.gridSize || arena.cols)));
+          const rows = Math.max(5, Math.min(100, Number(payload.gridRows || payload.gridSize || arena.rows)));
+          arena.cols = cols;
+          arena.rows = rows;
+          for (const tok of arena.tokens) {
+            tok.x = Math.max(0, Math.min(cols - 1, tok.x));
+            tok.y = Math.max(0, Math.min(rows - 1, tok.y));
+          }
+          for (const ch of arena.chests || []) {
+            ch.x = Math.max(0, Math.min(cols - 1, ch.x));
+            ch.y = Math.max(0, Math.min(rows - 1, ch.y));
+          }
+          arena.terrain = (arena.terrain || []).filter((t) => t.x < cols && t.y < rows);
+        }
+        if (Array.isArray(payload.encounters)) beat.encounters = payload.encounters;
+        if (Array.isArray(payload.treasures)) beat.treasures = payload.treasures;
       } else if (sub === 'delete_beat') {
         state.storyBeats = state.storyBeats.filter((b) => b.id !== beat.id);
       }
@@ -2802,6 +3494,7 @@ async function handleAction(body) {
       ch.stats = ch.stats || {};
       ch.stats[statKey] = Number(ch.stats[statKey] || 0) + amount;
       ch.unspentStatPoints = available - amount;
+      logPlayerHistory(ch.id, 'stat', `Allocated +${amount} ${statKey} (now ${ch.stats[statKey]})`);
       syncCharacterDerived(ch.id);
       state.version++;
       saveState();

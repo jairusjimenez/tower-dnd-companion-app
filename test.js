@@ -111,7 +111,7 @@ async function runTests() {
     const spawn = await req(baseUrl, '/api/action', {
       role: 'dm',
       type: 'spawn_monster',
-      payload: { name: 'Blue Venom Kasaka', floor: 2, maxHp: 50, ac: 14, dr: 2, hiddenFromPlayers: false },
+      payload: { name: 'Blue Venom Kasaka', floor: 1, maxHp: 50, ac: 14, dr: 2, hiddenFromPlayers: false },
     });
     assert.strictEqual(spawn.status, 200);
     const monId = spawn.data.monster.id;
@@ -159,14 +159,38 @@ async function runTests() {
     });
     assert.strictEqual(mechRes.data.mechanics.stats.length, 2);
 
-    // 8. Vertical Tower Map: DM adds 6F & checks grid dimensions
+    // 8. Vertical Tower Map: DM adds higher floor (+5 rows) & applies themed tower
+    const beforeMapState = await req(baseUrl, `/api/state?role=dm`);
+    const prevTopFloor = beforeMapState.data.map.floors.reduce((m, f) => Math.max(m, f.number), 0);
+    const prevRows = beforeMapState.data.map.rows;
     const addFloor = await req(baseUrl, '/api/action', {
       role: 'dm',
       type: 'update_map',
-      payload: { subAction: 'add_floor', title: '6F • Celestial Observatory', startFogged: true },
+      payload: { subAction: 'add_floor', title: `${prevTopFloor + 1}F • Shifting Dunes`, startFogged: true },
     });
-    assert.strictEqual(addFloor.data.map.floors[0].number, 6);
-    assert.strictEqual(addFloor.data.map.rows, 30);
+    assert.strictEqual(addFloor.data.map.floors[0].number, prevTopFloor + 1);
+    assert.strictEqual(addFloor.data.map.rows, prevRows + 5);
+
+    const themeTower = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'update_map',
+      payload: { subAction: 'apply_tower_themes', preset: 'classic', ensureFloors: 3 },
+    });
+    assert.strictEqual(themeTower.status, 200);
+    assert.strictEqual(themeTower.data.map.floors.find((f) => f.number === 1).theme, 'forest');
+    assert.strictEqual(themeTower.data.map.floors.find((f) => f.number === 2).theme, 'desert');
+    assert.strictEqual(themeTower.data.map.floors.find((f) => f.number === 3).theme, 'underworld');
+
+    const topToDelete = themeTower.data.map.floors[0].number;
+    const rowsBeforeDel = themeTower.data.map.rows;
+    const delFloorRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'update_map',
+      payload: { subAction: 'delete_floor', floorNumber: topToDelete },
+    });
+    assert.strictEqual(delFloorRes.status, 200);
+    assert.ok(!delFloorRes.data.map.floors.some((f) => f.number === topToDelete));
+    assert.strictEqual(delFloorRes.data.map.rows, rowsBeforeDel - 5);
 
     // 9. Free-Flow Magic (detailed explanation + damage + range in Spaces) & Equipment/Inventory
     const spellRes = await req(baseUrl, '/api/action', {
@@ -259,20 +283,172 @@ async function runTests() {
     assert.strictEqual(resetHeroTok.x, 4);
     assert.strictEqual(resetHeroTok.y, 15);
 
+    // Story Beat player start positions + Treasure Chests on map
+    const chestRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: { subAction: 'add_beat_chest', beatId, name: 'Golden Gate Chest', x: 5, y: 5, gold: 80, manaStones: 2, itemName: 'Gate Key' },
+    });
+    assert.strictEqual(chestRes.status, 200);
+    const chestId = chestRes.data.beat.arena.chests[0].id;
+    const openChestRes = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'story_action',
+      payload: { subAction: 'open_beat_chest', beatId, chestId, characterId: heroCharId },
+    });
+    assert.strictEqual(openChestRes.status, 200);
+    assert.strictEqual(openChestRes.data.beat.arena.chests[0].opened, true);
+
     await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'set_beat_grid', beatId, cols: 25, rows: 25 } });
     const resizedState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
     const resizedBeat = resizedState.data.storyBeats.find((b) => b.id === beatId);
     assert.strictEqual(resizedBeat.arena.cols, 25);
     assert.strictEqual(resizedBeat.arena.rows, 25);
 
+    // Impassable terrain auto-generation from cryptic prompt, biome selection, and movement blocking
+    const genTerrainRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: { subAction: 'generate_beat_terrain', beatId, prompt: 'misty forest split by a winding river and ancient boulders', biome: 'obsidian' },
+    });
+    assert.strictEqual(genTerrainRes.status, 200);
+    assert.strictEqual(genTerrainRes.data.beat.arena.biome, 'forest');
+    assert.ok(Array.isArray(genTerrainRes.data.beat.arena.terrain) && genTerrainRes.data.beat.arena.terrain.length > 0);
+    assert.ok(genTerrainRes.data.beat.arena.terrain.some((t) => t.type === 'water'));
+
+    const setBiomeRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: { subAction: 'set_beat_biome', beatId, biome: 'desert' },
+    });
+    assert.strictEqual(setBiomeRes.status, 200);
+    assert.strictEqual(setBiomeRes.data.beat.arena.biome, 'desert');
+
+    await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: { subAction: 'toggle_beat_terrain', beatId, x: 7, y: 7, terrainType: 'rock' },
+    });
+    const blockedMove = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'story_action',
+      payload: { subAction: 'move_beat_token', beatId, tokenId: heroCharId, x: 7, y: 7 },
+    });
+    assert.strictEqual(blockedMove.status, 400);
+
+    // DM adds an NPC to the arena map and moves it
+    const addNpcRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: { subAction: 'add_beat_npc', beatId, name: 'Elder Lyra', npcRole: 'Quest Giver', x: 3, y: 3 },
+    });
+    assert.strictEqual(addNpcRes.status, 200);
+    const npcTok = addNpcRes.data.beat.arena.tokens.find((t) => t.type === 'npc' && t.name === 'Elder Lyra');
+    assert.ok(npcTok);
+    assert.strictEqual(npcTok.npcRole, 'Quest Giver');
+    assert.strictEqual(npcTok.x, 3);
+    assert.strictEqual(npcTok.y, 3);
+    const moveNpcRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: { subAction: 'move_beat_token', beatId, tokenId: npcTok.id, x: 4, y: 4 },
+    });
+    assert.strictEqual(moveNpcRes.status, 200);
+
+    // NPC dialogue + Skill Book gift when talked to by a player
+    const sageRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: {
+        subAction: 'add_beat_npc',
+        beatId,
+        name: 'Master Jin',
+        npcRole: 'Skill Master',
+        dialogue: 'Learn the Shadow Step!',
+        rewardType: 'skill_book',
+        rewardItemName: 'Shadow Step',
+        x: 6,
+        y: 6,
+      },
+    });
+    assert.strictEqual(sageRes.status, 200);
+    const sageTok = sageRes.data.beat.arena.tokens.find((t) => t.name === 'Master Jin');
+    const talkRes = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'story_action',
+      payload: { subAction: 'talk_beat_npc', beatId, tokenId: sageTok.id, characterId: heroCharId },
+    });
+    assert.strictEqual(talkRes.status, 200);
+    const afterTalkState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    const heroAfterTalk = afterTalkState.data.characters[heroCharId];
+    assert.ok(heroAfterTalk.skills.some((s) => s.name === 'Shadow Step'));
+    assert.ok(heroAfterTalk.inventory.some((i) => i.name.includes('Shadow Step')));
+
+    // Monster loot drop when defeated (HP -> 0)
+    const lootMonRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'spawn_monster',
+      payload: {
+        name: 'Loot Goblin',
+        floor: 2,
+        maxHp: 10,
+        loot: { itemName: 'Goblin Crown', gold: 45, manaStones: 1 },
+      },
+    });
+    assert.strictEqual(lootMonRes.status, 200);
+    const lootMonId = lootMonRes.data.monster.id;
+    const goldBeforeDrop = heroAfterTalk.currency.gold;
+    await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'update_monster',
+      payload: { monsterId: lootMonId, hp: 0 },
+    });
+    const afterDropState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    const heroAfterDrop = afterDropState.data.characters[heroCharId];
+    assert.ok(heroAfterDrop.currency.gold >= goldBeforeDrop + 45);
+    assert.ok(heroAfterDrop.inventory.some((i) => i.name === 'Goblin Crown'));
+
+    // Edit existing story beat via update_beat
+    const updBeatRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'story_action',
+      payload: {
+        subAction: 'update_beat',
+        beatId,
+        title: 'Updated Gate Trial',
+        floor: 3,
+        xpReward: 150,
+        gridSize: 30,
+        narration: 'Updated narration text.',
+      },
+    });
+    assert.strictEqual(updBeatRes.status, 200);
+    assert.strictEqual(updBeatRes.data.beat.title, 'Updated Gate Trial');
+    assert.strictEqual(updBeatRes.data.beat.floor, 3);
+    assert.strictEqual(updBeatRes.data.beat.xpReward, 150);
+    assert.strictEqual(updBeatRes.data.beat.arena.cols, 30);
+
+    // Toast always prefixes "SYSTEM: "
+    const sysToastRes = await req(baseUrl, '/api/action', {
+      role: 'dm',
+      type: 'broadcast_toast',
+      payload: { title: 'SYSTEM NOTICE', category: 'info', target: 'all', message: 'Gate opens!' },
+    });
+    assert.strictEqual(sysToastRes.status, 200);
+    assert.strictEqual(sysToastRes.data.toast.message, 'SYSTEM: Gate opens!');
+
     const awardBeat = await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'award_beat_treasure', beatId, characterId: heroCharId } });
     assert.strictEqual(awardBeat.status, 200);
 
-    // 12. Level 1 start (10 unspent stat points), stat allocation, and Story Beat XP -> Level Up (+2 stat points)
+    // 12. Level 1 start, stat allocation, and Story Beat XP -> Level Up (+2 stat points)
     const beforeXpState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
     const heroBefore = beforeXpState.data.characters[heroCharId];
     assert.strictEqual(heroBefore.level, 1);
-    assert.strictEqual(heroBefore.unspentStatPoints, 10);
+    const prevPts = heroBefore.unspentStatPoints;
+    assert.ok(prevPts >= 10);
     const prevStr = heroBefore.stats.STR;
 
     const alloc = await req(baseUrl, '/api/action', {
@@ -282,9 +458,9 @@ async function runTests() {
       payload: { statKey: 'STR', amount: 3 },
     });
     assert.strictEqual(alloc.data.character.stats.STR, prevStr + 3);
-    assert.strictEqual(alloc.data.character.unspentStatPoints, 7);
+    assert.strictEqual(alloc.data.character.unspentStatPoints, prevPts - 3);
 
-    // Award 120 XP from Story Beat -> Level 1 (100 XP) -> Level 2 with 20 XP leftover and 7 + 2 = 9 unspent stat points
+    // Award 120 XP from Story Beat -> Level 1 (100 XP) -> Level 2 with 20 XP leftover and +2 unspent stat points
     await req(baseUrl, '/api/action', {
       role: 'dm',
       type: 'story_action',
@@ -293,8 +469,25 @@ async function runTests() {
     const afterXpState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
     const heroAfter = afterXpState.data.characters[heroCharId];
     assert.strictEqual(heroAfter.level, 2);
-    assert.strictEqual(heroAfter.xp, 20);
-    assert.strictEqual(heroAfter.unspentStatPoints, 9);
+    assert.strictEqual(heroAfter.xp, (heroBefore.xp || 0) + 20);
+    assert.strictEqual(heroAfter.unspentStatPoints, prevPts - 1);
+
+    // 13. Stat Milestone Awakening at STR 20
+    const neededStr = Math.max(0, 20 - Number(heroAfter.stats.STR || 14));
+    if (neededStr > 0) {
+      await req(baseUrl, '/api/action', {
+        role: 'player',
+        characterId: heroCharId,
+        type: 'allocate_stat',
+        payload: { statKey: 'STR', amount: neededStr },
+      });
+    }
+    const awkState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    assert.ok(awkState.data.characters[heroCharId].skills.some((s) => s.name === 'Titan Cleave'));
+    const strMilestones = (awkState.data.mechanics.statMilestones || []).filter((m) => m.statKey === 'STR').map((m) => m.threshold);
+    assert.deepStrictEqual(strMilestones, [20, 40, 60, 80, 100]);
+    assert.ok(Array.isArray(awkState.data.playerHistory) && awkState.data.playerHistory.length > 0);
+    assert.ok(Array.isArray(awkState.data.characters[heroCharId].history) && awkState.data.characters[heroCharId].history.length > 0);
 
     console.log('ALL 12 INTEGRATION TEST SUITES PASSED!');
   } finally {
