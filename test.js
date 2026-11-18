@@ -213,6 +213,18 @@ async function runTests() {
     assert.strictEqual(spellRes.status, 200);
     assert.strictEqual(spellRes.data.spell.rangeSpaces, 4);
 
+    // Level 1 character is capped at 1 spell (next unlocks at Level 3)
+    const secondSpellRes = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'spell_action',
+      payload: {
+        subAction: 'learn_custom',
+        spell: { name: 'Second Spell Blocked', element: 'Fire', damageDice: '2d6', rangeSpaces: 6, mpCost: 3 },
+      },
+    });
+    assert.strictEqual(secondSpellRes.status, 400);
+
     // 10. AI Character Art prompt push & Deity Google Doc parser
     const artRes = await req(baseUrl, '/api/action', {
       role: 'player',
@@ -338,6 +350,45 @@ async function runTests() {
     });
     assert.strictEqual(blockedMove.status, 400);
 
+    // Fire Emblem Manhattan movement: diagonal (1,1) -> (6,6) is 10 spaces (>6) so blocked; (1,1) -> (4,4) is 6 spaces so allowed
+    const overMove = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'story_action',
+      payload: { subAction: 'move_beat_token', beatId, tokenId: heroCharId, x: 6, y: 6 },
+    });
+    assert.strictEqual(overMove.status, 400);
+    const arenaState = genTerrainRes.data.beat.arena;
+    const heroTokNow = arenaState.tokens.find((t) => t.id === heroCharId);
+    const blockedSet = new Set((arenaState.terrain || []).map((t) => `${t.x},${t.y}`));
+    let openCell = null;
+    for (let dy = -3; dy <= 3 && !openCell; dy++) {
+      for (let dx = -3; dx <= 3 && !openCell; dx++) {
+        const d = Math.abs(dx) + Math.abs(dy);
+        if (d < 1 || d > 6) continue;
+        const cx = heroTokNow.x + dx;
+        const cy = heroTokNow.y + dy;
+        if (cx >= 0 && cy >= 0 && cx < arenaState.cols && cy < arenaState.rows && !blockedSet.has(`${cx},${cy}`)) {
+          openCell = { x: cx, y: cy };
+        }
+      }
+    }
+    const validDiagMove = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'story_action',
+      payload: { subAction: 'move_beat_token', beatId, tokenId: heroCharId, x: openCell.x, y: openCell.y },
+    });
+    assert.strictEqual(validDiagMove.status, 200);
+    // Cannot move a second time on the same turn
+    const secondMoveSameTurn = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'story_action',
+      payload: { subAction: 'move_beat_token', beatId, tokenId: heroCharId, x: heroTokNow.x, y: heroTokNow.y },
+    });
+    assert.strictEqual(secondMoveSameTurn.status, 400);
+
     // DM adds an NPC to the arena map and moves it
     const addNpcRes = await req(baseUrl, '/api/action', {
       role: 'dm',
@@ -443,6 +494,25 @@ async function runTests() {
     const awardBeat = await req(baseUrl, '/api/action', { role: 'dm', type: 'story_action', payload: { subAction: 'award_beat_treasure', beatId, characterId: heroCharId } });
     assert.strictEqual(awardBeat.status, 200);
 
+    // 11b. Stats & Equipment are locked for players while session is active AND a story beat is active
+    const lockedStat = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'allocate_stat',
+      payload: { statKey: 'STR', amount: 1 },
+    });
+    assert.strictEqual(lockedStat.status, 403);
+    const lockedEquip = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'equipment_action',
+      payload: { subAction: 'unequip', slot: 'mainHand' },
+    });
+    assert.strictEqual(lockedEquip.status, 403);
+
+    // Pause session to unlock stat allocation for Suite 12 & 13
+    await req(baseUrl, '/api/action', { role: 'dm', type: 'session_control', payload: { action: 'stop' } });
+
     // 12. Level 1 start, stat allocation, and Story Beat XP -> Level Up (+2 stat points)
     const beforeXpState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
     const heroBefore = beforeXpState.data.characters[heroCharId];
@@ -460,17 +530,71 @@ async function runTests() {
     assert.strictEqual(alloc.data.character.stats.STR, prevStr + 3);
     assert.strictEqual(alloc.data.character.unspentStatPoints, prevPts - 3);
 
-    // Award 120 XP from Story Beat -> Level 1 (100 XP) -> Level 2 with 20 XP leftover and +2 unspent stat points
+    // Award 120 XP from Story Beat -> Level 1 (100 XP) -> Level Up button enabled -> Level 2 with 20 XP carried over and +2 unspent stat points
     await req(baseUrl, '/api/action', {
       role: 'dm',
       type: 'story_action',
       payload: { subAction: 'award_beat_xp', beatId, characterId: heroCharId, xpReward: 120 },
     });
+    const lvlUpRes = await req(baseUrl, '/api/action', { role: 'player', characterId: heroCharId, type: 'level_up', payload: {} });
+    assert.strictEqual(lvlUpRes.status, 200);
     const afterXpState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
     const heroAfter = afterXpState.data.characters[heroCharId];
     assert.strictEqual(heroAfter.level, 2);
     assert.strictEqual(heroAfter.xp, (heroBefore.xp || 0) + 20);
     assert.strictEqual(heroAfter.unspentStatPoints, prevPts - 1);
+    assert.strictEqual(heroAfter.passiveTickets, 1);
+
+    // 12b. Passive Skill Gacha Draw (1 ticket per level up)
+    const gachaDraw = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'roll_passive_gacha',
+      payload: {},
+    });
+    assert.strictEqual(gachaDraw.status, 200);
+    assert.ok(['Normal', 'Advanced', 'Rare', 'Super Rare', 'Super Super Rare', 'Legendary', 'Mythic'].includes(gachaDraw.data.tier));
+    assert.strictEqual(gachaDraw.data.character.passiveTickets, 0);
+    assert.ok(gachaDraw.data.declineGold > 0 && gachaDraw.data.declineXp > 0);
+
+    const acceptDraw = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'resolve_passive_gacha',
+      payload: { decision: 'accept' },
+    });
+    assert.strictEqual(acceptDraw.status, 200);
+    assert.strictEqual(acceptDraw.data.character.passives.length, 1);
+
+    // Cannot level up when XP < xpToNext; grant XP then level up and decline the draw for Gold + XP
+    const blockedLvlUp = await req(baseUrl, '/api/action', { role: 'player', characterId: heroCharId, type: 'level_up', payload: {} });
+    assert.strictEqual(blockedLvlUp.status, 400);
+    await req(baseUrl, '/api/action', { role: 'dm', type: 'grant_xp', payload: { characterId: heroCharId, xp: 200 } });
+    const lvlUp2 = await req(baseUrl, '/api/action', { role: 'player', characterId: heroCharId, type: 'level_up', payload: {} });
+    assert.strictEqual(lvlUp2.status, 200);
+    const gachaDraw2 = await req(baseUrl, '/api/action', { role: 'player', characterId: heroCharId, type: 'roll_passive_gacha', payload: {} });
+    assert.strictEqual(gachaDraw2.status, 200);
+    const goldBeforeDecline = Number(gachaDraw2.data.character.currency?.gold || 0);
+    const declineDraw = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'resolve_passive_gacha',
+      payload: { decision: 'decline' },
+    });
+    assert.strictEqual(declineDraw.status, 200);
+    assert.ok(declineDraw.data.character.currency.gold > goldBeforeDecline);
+    assert.strictEqual(declineDraw.data.character.passives.length, 1);
+
+    const poolState = await req(baseUrl, `/api/state?role=player&characterId=${heroCharId}`);
+    assert.strictEqual(poolState.data.passiveGacha.pool.length, 200);
+
+    const gachaEmpty = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'roll_passive_gacha',
+      payload: {},
+    });
+    assert.strictEqual(gachaEmpty.status, 400);
 
     // 13. Stat Milestone Awakening at STR 20
     const neededStr = Math.max(0, 20 - Number(heroAfter.stats.STR || 14));
@@ -512,6 +636,27 @@ async function runTests() {
     const dmGoodLogin = await req(baseUrl, '/api/auth/login', { identifier: 'jairus_dm', password: 'secret-dm-pass' });
     assert.strictEqual(dmGoodLogin.status, 200);
     assert.strictEqual(dmGoodLogin.data.session.role, 'dm');
+
+    // 15. Player-to-Player Item Trade
+    const addTradeItemRes = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'inventory_action',
+      payload: { subAction: 'add', characterId: heroCharId, item: { name: 'Trade Potion', category: 'consumable', qty: 3 } },
+    });
+    assert.strictEqual(addTradeItemRes.status, 200);
+    const tradeItemId = addTradeItemRes.data.character.inventory.find((i) => i.name === 'Trade Potion').id;
+    const recipientId = Object.keys(awkState.data.characters).find((id) => id !== heroCharId);
+    const tradeRes = await req(baseUrl, '/api/action', {
+      role: 'player',
+      characterId: heroCharId,
+      type: 'inventory_action',
+      payload: { subAction: 'trade', characterId: heroCharId, targetCharacterId: recipientId, itemId: tradeItemId, qty: 2 },
+    });
+    assert.strictEqual(tradeRes.status, 200);
+    const postTradeState = await req(baseUrl, `/api/state?role=dm`);
+    assert.strictEqual(postTradeState.data.characters[heroCharId].inventory.find((i) => i.name === 'Trade Potion').qty, 1);
+    assert.strictEqual(postTradeState.data.characters[recipientId].inventory.find((i) => i.name === 'Trade Potion').qty, 2);
 
     console.log('ALL 12 INTEGRATION TEST SUITES PASSED!');
   } finally {

@@ -155,6 +155,237 @@ function evaluateFormula(expression, variables = {}) {
   }
 }
 
+const SPELL_ELEMENTS = ['Fire', 'Earth', 'Wind', 'Water', 'Light', 'Dark'];
+function normalizeSpellElement(raw) {
+  const val = String(raw || '').trim().toLowerCase();
+  if (val.includes('fire') || val.includes('flame') || val.includes('crimson')) return 'Fire';
+  if (val.includes('earth') || val.includes('stone') || val.includes('barrier') || val.includes('force')) return 'Earth';
+  if (val.includes('wind') || val.includes('gale') || val.includes('air') || val.includes('lightning')) return 'Wind';
+  if (val.includes('water') || val.includes('ice') || val.includes('shinsu') || val.includes('aqua')) return 'Water';
+  if (val.includes('light') || val.includes('radiant') || val.includes('holy') || val.includes('dawn')) return 'Light';
+  if (val.includes('dark') || val.includes('shadow') || val.includes('necrotic') || val.includes('abyss')) return 'Dark';
+  return 'Fire';
+}
+
+const { PASSIVE_GACHA_ODDS, PASSIVE_SKILL_POOL } = require('./passiveSkills');
+
+const STARTER_WOODEN_WEAPONS = {
+  melee: [
+    {
+      id: 'wood-shortsword',
+      name: 'Wooden Shortsword',
+      damageDice: '1d6+1',
+      damageType: 'Slashing',
+      attackBonus: 3,
+      rangeSpaces: 1,
+      body: { name: 'Trainee Brigandine', acBonus: 2, drBonus: 1 },
+      offHand: { name: 'Wooden Buckler', acBonus: 1, drBonus: 1 },
+    },
+    {
+      id: 'wood-greatsword',
+      name: 'Wooden Greatsword',
+      damageDice: '1d8+2',
+      damageType: 'Slashing',
+      attackBonus: 2,
+      rangeSpaces: 1,
+      body: { name: 'Vanguard Scale Vest', acBonus: 2, drBonus: 2 },
+    },
+    {
+      id: 'wood-spear',
+      name: 'Wooden Spear',
+      damageDice: '1d6+2',
+      damageType: 'Piercing',
+      attackBonus: 3,
+      rangeSpaces: 1,
+      body: { name: 'Skirmisher Leather Armor', acBonus: 2, drBonus: 1 },
+      boots: { name: 'Traveler Boots', acBonus: 1, drBonus: 0 },
+    },
+    {
+      id: 'wood-mace',
+      name: 'Wooden Mace',
+      damageDice: '1d6+2',
+      damageType: 'Bludgeoning',
+      attackBonus: 3,
+      rangeSpaces: 1,
+      body: { name: 'Acolyte Padded Mail', acBonus: 2, drBonus: 2 },
+      offHand: { name: 'Wooden Buckler', acBonus: 1, drBonus: 0 },
+    },
+    {
+      id: 'wood-dagger',
+      name: 'Wooden Dagger',
+      damageDice: '1d4+2',
+      damageType: 'Piercing',
+      attackBonus: 4,
+      rangeSpaces: 1,
+      body: { name: 'Shadow Apprentice Cloak', acBonus: 2, drBonus: 1 },
+      boots: { name: 'Silent Cloth Boots', acBonus: 1, drBonus: 0 },
+    },
+  ],
+  ranged: [
+    {
+      id: 'wood-shortbow',
+      name: 'Wooden Shortbow',
+      damageDice: '1d6+1',
+      damageType: 'Piercing (Ranged)',
+      attackBonus: 3,
+      rangeSpaces: 3,
+      body: { name: 'Scout Leather Tunic', acBonus: 2, drBonus: 1 },
+      boots: { name: 'Agile Scout Boots', acBonus: 1, drBonus: 0 },
+    },
+    {
+      id: 'wood-longbow',
+      name: 'Wooden Longbow',
+      damageDice: '1d8+1',
+      damageType: 'Piercing (Ranged)',
+      attackBonus: 2,
+      rangeSpaces: 4,
+      body: { name: 'Ranger Hooded Jerkin', acBonus: 2, drBonus: 1 },
+      head: { name: 'Ranger Sight Hood', acBonus: 1, drBonus: 0 },
+    },
+    {
+      id: 'wood-crossbow',
+      name: 'Wooden Light Crossbow',
+      damageDice: '1d8+2',
+      damageType: 'Piercing (Ranged)',
+      attackBonus: 2,
+      rangeSpaces: 3,
+      body: { name: 'Marksman Studded Vest', acBonus: 2, drBonus: 1 },
+    },
+    {
+      id: 'wood-slingshot',
+      name: 'Wooden Slingshot',
+      damageDice: '1d4+2',
+      damageType: 'Bludgeoning (Ranged)',
+      attackBonus: 4,
+      rangeSpaces: 3,
+      body: { name: 'Nimble Climber Coat', acBonus: 2, drBonus: 1 },
+      boots: { name: 'Swift Stride Boots', acBonus: 1, drBonus: 0 },
+    },
+  ],
+};
+
+const STARTER_EQUIPMENT_KITS = {
+  archer: {
+    mainHand: { id: 'st-archer-bow', name: 'Oak Shortbow', slot: 'mainHand', type: 'weapon', attackBonus: 3, damageDice: '1d6+2', damageType: 'Piercing (Ranged)', rangeSpaces: 4, drBonus: 0, acBonus: 0 },
+    offHand: null,
+    head: null,
+    body: { id: 'st-archer-body', name: 'Scout Leather Tunic', slot: 'body', type: 'armor', attackBonus: 0, damageDice: '', damageType: '', rangeSpaces: 0, drBonus: 1, acBonus: 2 },
+    boots: null,
+    relic: null,
+  },
+  swordsman: {
+    mainHand: { id: 'st-swordsman-wep', name: 'Iron Longsword', slot: 'mainHand', type: 'weapon', attackBonus: 4, damageDice: '1d8+3', damageType: 'Slashing', rangeSpaces: 1, drBonus: 0, acBonus: 0 },
+    offHand: null,
+    head: null,
+    body: { id: 'st-swordsman-body', name: 'Trainee Brigandine', slot: 'body', type: 'armor', attackBonus: 0, damageDice: '', damageType: '', rangeSpaces: 0, drBonus: 1, acBonus: 2 },
+    boots: null,
+    relic: null,
+  },
+  sword_shield: {
+    mainHand: { id: 'st-sns-wep', name: 'Iron Broadsword', slot: 'mainHand', type: 'weapon', attackBonus: 3, damageDice: '1d8+2', damageType: 'Slashing', rangeSpaces: 1, drBonus: 0, acBonus: 0 },
+    offHand: { id: 'st-sns-shd', name: 'Oak Kite Shield', slot: 'offHand', type: 'armor', attackBonus: 0, damageDice: '', damageType: '', rangeSpaces: 0, drBonus: 1, acBonus: 2 },
+    head: null,
+    body: { id: 'st-sns-body', name: 'Initiate Leather Coat', slot: 'body', type: 'armor', attackBonus: 0, damageDice: '', damageType: '', rangeSpaces: 0, drBonus: 1, acBonus: 2 },
+    boots: null,
+    relic: null,
+  },
+  mage: {
+    mainHand: { id: 'st-mage-wep', name: 'Apprentice Mana Staff', slot: 'mainHand', type: 'weapon', attackBonus: 4, damageDice: '1d6+2', damageType: 'Arcane', rangeSpaces: 2, drBonus: 0, acBonus: 0 },
+    offHand: null,
+    head: null,
+    body: { id: 'st-mage-body', name: 'Scholar Mana Robes', slot: 'body', type: 'armor', attackBonus: 0, damageDice: '', damageType: '', rangeSpaces: 0, drBonus: 1, acBonus: 1 },
+    boots: null,
+    relic: { id: 'st-mage-rel', name: 'Cracked Shinsu Focus', slot: 'relic', type: 'relic', attackBonus: 1, damageDice: '', damageType: '', rangeSpaces: 0, drBonus: 0, acBonus: 1 },
+  },
+};
+
+function getMaxSpellsForLevel(level) {
+  const lv = Math.max(1, Number(level || 1));
+  return Math.min(10, 1 + Math.floor(lv / 3));
+}
+
+function getSpellCraftLimits(floorLevel) {
+  const fl = Math.max(1, Number(floorLevel || 1));
+  const maxDice = Math.min(8, 1 + Math.floor((fl + 1) / 2)); // Fl 1-2: 2, Fl 3-4: 3, Fl 5-6: 4...
+  const maxSides = Math.min(12, 8 + Math.floor((fl - 1) / 2) * 2); // Fl 1-2: d8, Fl 3-4: d10, Fl 5+: d12
+  const maxBonus = 2 + (fl - 1) * 2; // Fl 1: +2, Fl 2: +4, Fl 3: +6...
+  const maxRange = Math.min(16, 4 + (fl - 1) * 2); // Fl 1: 4, Fl 2: 6, Fl 3: 8...
+  return { floor: fl, maxDice, maxSides, maxBonus, maxRange };
+}
+
+function clampSpellToFloor(sp, floorLevel) {
+  const lim = getSpellCraftLimits(floorLevel);
+  const rawDice = String(sp.damageDice || '1d8+2').trim();
+  const m = rawDice.match(/^(\d+)\s*d\s*(\d+)(?:\s*([+-])\s*(\d+))?$/i);
+  let count = m ? Math.max(1, Number(m[1])) : 1;
+  let sides = m ? Math.max(4, Number(m[2])) : 8;
+  let bonus = m && m[4] ? (m[3] === '-' ? -Number(m[4]) : Number(m[4])) : 0;
+
+  count = Math.min(count, lim.maxDice);
+  sides = Math.min(sides, lim.maxSides);
+  bonus = Math.max(0, Math.min(bonus, lim.maxBonus));
+  const clampedDice = `${count}d${sides}${bonus > 0 ? `+${bonus}` : ''}`;
+  const avgDmg = count * ((sides + 1) / 2) + bonus;
+  const minMp = Math.max(2, Math.ceil(avgDmg / 3));
+  const rangeSpaces = Math.max(1, Math.min(lim.maxRange, Number(sp.rangeSpaces || lim.maxRange)));
+  const mpCost = Math.max(minMp, Number(sp.mpCost || minMp));
+  return { damageDice: clampedDice, rangeSpaces, mpCost, limits: lim, minMp };
+}
+
+function isStatsAndEquipmentLocked() {
+  return state.session?.status === 'active'
+    && (state.storyBeats || []).some((b) => b.presented && b.status === 'active');
+}
+
+function getMaxAttacksForFloor(floor) {
+  return 1 + Math.floor(Math.max(0, Number(floor || 1) - 1) / 4);
+}
+
+function removeMonsterTokensFromMaps(monsterId) {
+  if (!monsterId) return;
+  if (state.map?.tokens) {
+    state.map.tokens = state.map.tokens.filter((t) => t.id !== monsterId);
+  }
+  for (const b of state.storyBeats || []) {
+    if (b.arena?.tokens) {
+      b.arena.tokens = b.arena.tokens.filter((t) => t.id !== monsterId);
+    }
+  }
+}
+
+function getWeaponAttackInfo(character) {
+  const wep = character?.equipment?.mainHand;
+  const isRanged = Boolean(
+    wep && (
+      Number(wep.rangeSpaces || 1) >= 3
+      || /bow|crossbow|shortbow|longbow|arrow|gun|rifle/i.test(wep.name || '')
+      || /ranged/i.test(wep.damageType || '')
+    )
+  );
+  const maxRange = isRanged ? Math.max(3, Number(wep.rangeSpaces || 3)) : 1;
+  return { isRanged, maxRange };
+}
+
+function getGridLineCells(x0, y0, x1, y1) {
+  const cells = [];
+  let cx = x0;
+  let cy = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  while (cx !== x1 || cy !== y1) {
+    if (!(cx === x0 && cy === y0) && !(cx === x1 && cy === y1)) {
+      cells.push({ x: cx, y: cy });
+    }
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; cx += sx; }
+    if (e2 < dx) { err += dx; cy += sy; }
+  }
+  return cells;
+}
+
 function getEquippedTotals(character) {
   const eq = character?.equipment || {};
   let attackBonus = 0;
@@ -621,10 +852,10 @@ function getInitialState() {
     {
       id: 'sp-shinsu-lance',
       name: 'Azure Shinsu Lance',
-      element: 'Arcane / Shinsu',
+      element: 'Water',
       mpCost: 6,
       damageDice: '3d8+4',
-      damageType: 'Arcane',
+      damageType: 'Water',
       rangeSpaces: 8,
       areaText: 'Single Target (Line up to 8 Spaces)',
       actionType: 'Action',
@@ -645,34 +876,34 @@ function getInitialState() {
     {
       id: 'sp-shadow-riposte',
       name: 'Shadow Counter-Fang',
-      element: 'Shadow',
+      element: 'Dark',
       mpCost: 4,
       damageDice: '2d8+4',
-      damageType: 'Shadow',
+      damageType: 'Dark',
       rangeSpaces: 3,
       areaText: '1 Enemy within 3 Spaces (Reaction)',
       actionType: 'Reaction',
-      explanation: 'Triggered immediately when a monster strikes you! Blink through shadows up to 3 spaces and slash back with a necrotic blade before recovering stance.',
+      explanation: 'Triggered immediately when a monster strikes you! Blink through shadows up to 3 spaces and slash back with a dark blade before recovering stance.',
     },
     {
       id: 'sp-aegis-pulse',
       name: 'System Aegis Ward',
-      element: 'Barrier',
+      element: 'Earth',
       mpCost: 5,
       damageDice: '1d10+3',
-      damageType: 'Force',
+      damageType: 'Earth',
       rangeSpaces: 1,
       areaText: 'Self + Adjacent 1-Space Shockwave (Reaction)',
       actionType: 'Reaction',
-      explanation: 'Projects an emergency geometric System barrier that absorbs half incoming impact and blasts adjacent monsters 1 space back with Force damage.',
+      explanation: 'Projects an emergency geometric Earth barrier that absorbs half incoming impact and blasts adjacent monsters 1 space back.',
     },
     {
       id: 'sp-tempest-arrow',
       name: 'Gale Piercer Volley',
-      element: 'Wind / Lightning',
+      element: 'Wind',
       mpCost: 5,
       damageDice: '2d10+3',
-      damageType: 'Lightning',
+      damageType: 'Wind',
       rangeSpaces: 10,
       areaText: 'Long Range (Up to 10 Spaces)',
       actionType: 'Action',
@@ -681,10 +912,10 @@ function getInitialState() {
     {
       id: 'sp-sanctuary-ray',
       name: 'Constellation Dawn Ray',
-      element: 'Radiant',
+      element: 'Light',
       mpCost: 6,
       damageDice: '2d8+4',
-      damageType: 'Radiant',
+      damageType: 'Light',
       rangeSpaces: 6,
       areaText: '6 Spaces (Also restores 1d8 HP to caster)',
       actionType: 'Action',
@@ -763,6 +994,8 @@ function getInitialState() {
       xp: 0,
       xpToNext: 100,
       unspentStatPoints: 10,
+    passiveTickets: 0,
+    passives: [],
       hp: 34,
       maxHp: 34,
       tempHp: 0,
@@ -781,7 +1014,7 @@ function getInitialState() {
         { name: 'Mana Sense', stat: 'PER', bonus: 2 },
         { name: 'Tower Lore', stat: 'INT', bonus: 2 },
       ],
-      spells: [grimoire[0], grimoire[1], grimoire[3]],
+      spells: [grimoire[0]],
       equipment: {
         mainHand: { id: 'eq-t1', name: 'Azure Shinsu Staff', slot: 'mainHand', type: 'weapon', attackBonus: 6, damageDice: '2d8+4', damageType: 'Arcane', rangeSpaces: 6, drBonus: 0, acBonus: 0 },
         offHand: { id: 'eq-t2', name: 'Mana Prism Orb', slot: 'offHand', type: 'relic', attackBonus: 1, damageDice: '', damageType: '', rangeSpaces: 1, drBonus: 1, acBonus: 1 },
@@ -813,6 +1046,8 @@ function getInitialState() {
       xp: 0,
       xpToNext: 100,
       unspentStatPoints: 10,
+    passiveTickets: 0,
+    passives: [],
       hp: 52,
       maxHp: 52,
       tempHp: 4,
@@ -831,7 +1066,7 @@ function getInitialState() {
         { name: 'Boss Threat Aura', stat: 'VIT', bonus: 2 },
         { name: 'Trap Detection', stat: 'PER', bonus: 1 },
       ],
-      spells: [grimoire[3], grimoire[2]],
+      spells: [grimoire[3]],
       equipment: {
         mainHand: { id: 'eq-k1', name: 'Obsidian Greatsword', slot: 'mainHand', type: 'weapon', attackBonus: 7, damageDice: '2d6+4', damageType: 'Slashing', rangeSpaces: 2, drBonus: 0, acBonus: 0 },
         offHand: { id: 'eq-k2', name: 'Aegis Buckler', slot: 'offHand', type: 'armor', attackBonus: 0, damageDice: '', damageType: '', rangeSpaces: 1, drBonus: 2, acBonus: 2 },
@@ -862,6 +1097,8 @@ function getInitialState() {
       xp: 0,
       xpToNext: 100,
       unspentStatPoints: 10,
+    passiveTickets: 0,
+    passives: [],
       hp: 40,
       maxHp: 40,
       tempHp: 0,
@@ -880,7 +1117,7 @@ function getInitialState() {
         { name: 'Critical Ambush', stat: 'LUCK', bonus: 3 },
         { name: 'Lockpick / Disarm', stat: 'AGI', bonus: 3 },
       ],
-      spells: [grimoire[2], grimoire[4]],
+      spells: [grimoire[2]],
       equipment: {
         mainHand: { id: 'eq-v1', name: 'Twin Nightfang Daggers', slot: 'mainHand', type: 'weapon', attackBonus: 8, damageDice: '3d6+4', damageType: 'Shadow', rangeSpaces: 2, drBonus: 0, acBonus: 0 },
         offHand: null,
@@ -911,6 +1148,8 @@ function getInitialState() {
       xp: 0,
       xpToNext: 100,
       unspentStatPoints: 10,
+    passiveTickets: 0,
+    passives: [],
       hp: 46,
       maxHp: 46,
       tempHp: 0,
@@ -928,7 +1167,7 @@ function getInitialState() {
         { name: 'Divine Restoration', stat: 'PER', bonus: 4 },
         { name: 'Guardian Ward', stat: 'VIT', bonus: 3 },
       ],
-      spells: [grimoire[5], grimoire[3]],
+      spells: [grimoire[5]],
       equipment: {
         mainHand: { id: 'eq-b1', name: 'Sunfire Warhammer', slot: 'mainHand', type: 'weapon', attackBonus: 6, damageDice: '1d10+3', damageType: 'Radiant', rangeSpaces: 1, drBonus: 0, acBonus: 0 },
         offHand: { id: 'eq-b2', name: 'Tower Shield of Dawn', slot: 'offHand', type: 'armor', attackBonus: 0, damageDice: '', damageType: '', rangeSpaces: 1, drBonus: 2, acBonus: 2 },
@@ -1192,8 +1431,10 @@ function filterStateForRole(srcState, role, characterId = null) {
   const isDm = role === 'dm';
   const fogSet = new Set(srcState.map?.fog || []);
   const showExactHp = srcState.mechanics?.showExactMonsterHpToPlayers !== false;
+  const deadMonsterIds = new Set((srcState.monsters || []).filter((m) => Number(m.hp) <= 0).map((m) => m.id));
 
   const filteredTokens = (srcState.map?.tokens || []).filter((tok) => {
+    if (tok.type === 'monster' && deadMonsterIds.has(tok.id)) return false;
     if (isDm) return true;
     if (tok.hiddenFromPlayers) return false;
     if (tok.type !== 'player' && fogSet.has(`${tok.x},${tok.y}`)) return false;
@@ -1227,6 +1468,7 @@ function filterStateForRole(srcState, role, characterId = null) {
     version: srcState.version,
     session: srcState.session,
     mechanics: srcState.mechanics,
+    passiveGacha: { odds: PASSIVE_GACHA_ODDS, pool: PASSIVE_SKILL_POOL },
     grimoire: srcState.grimoire || [],
     deities: srcState.deities || [],
     characters: srcState.characters,
@@ -1250,7 +1492,10 @@ function filterStateForRole(srcState, role, characterId = null) {
       .filter((b) => isDm || b.presented)
       .map((b) => {
         const arena = b.arena || { cols: 20, rows: 20, tokens: [] };
-        const arenaTokens = (arena.tokens || []).filter((t) => isDm || !t.hiddenFromPlayers);
+        const arenaTokens = (arena.tokens || []).filter((t) => {
+          if (t.type === 'monster' && deadMonsterIds.has(t.id)) return false;
+          return isDm || !t.hiddenFromPlayers;
+        });
         const mapped = { ...b, arena: { ...arena, tokens: arenaTokens } };
         return isDm ? mapped : { ...mapped, dmSecret: null };
       }),
@@ -1604,19 +1849,12 @@ function grantXpToCharacter(ch, xpAmount) {
   ch.xp = Number(ch.xp || 0) + gained;
   ch.xpToNext = Number(ch.xpToNext || ch.level * 100);
   ch.unspentStatPoints = Number(ch.unspentStatPoints || 0);
+  ch.passiveTickets = Number(ch.passiveTickets || 0);
 
-  let levelsGained = 0;
-  while (ch.xp >= ch.xpToNext) {
-    ch.xp -= ch.xpToNext;
-    ch.level += 1;
-    ch.xpToNext = ch.level * 100;
-    ch.unspentStatPoints += 2;
-    levelsGained += 1;
-  }
   if (gained > 0) {
-    logPlayerHistory(ch.id, 'xp', `Gained +${gained} XP${levelsGained > 0 ? ` and reached Level ${ch.level}!` : ''}`);
+    logPlayerHistory(ch.id, 'xp', `Gained +${gained} XP (${ch.xp}/${ch.xpToNext} XP)`);
   }
-  return { gained, levelsGained, level: ch.level, xp: ch.xp, xpToNext: ch.xpToNext, unspentStatPoints: ch.unspentStatPoints };
+  return { gained, levelsGained: 0, level: ch.level, xp: ch.xp, xpToNext: ch.xpToNext, unspentStatPoints: ch.unspentStatPoints, passiveTickets: ch.passiveTickets };
 }
 
 function createNewCharacterRecord({ name, race, className, level = 1 }) {
@@ -1637,6 +1875,8 @@ function createNewCharacterRecord({ name, race, className, level = 1 }) {
     xp: 0,
     xpToNext: Math.max(1, Number(level) || 1) * 100,
     unspentStatPoints: 10,
+    passiveTickets: 0,
+    passives: [],
     hp: 30,
     maxHp: 30,
     tempHp: 0,
@@ -1651,7 +1891,7 @@ function createNewCharacterRecord({ name, race, className, level = 1 }) {
     inspiration: false,
     stats,
     skills: [{ name: 'Basic Combat', stat: state.mechanics.stats[0]?.key || 'STR', bonus: 2 }],
-    spells: state.grimoire.slice(0, 2),
+    spells: [],
     equipment: {
       mainHand: { id: `eq-${id}-1`, name: 'Iron Climber Blade', slot: 'mainHand', type: 'weapon', attackBonus: 4, damageDice: '1d8+2', damageType: 'Slashing', rangeSpaces: 1, drBonus: 0, acBonus: 0 },
       offHand: null,
@@ -1971,6 +2211,7 @@ async function handleAction(body) {
           if (tok) tok.y = getFloorCenterRow(mon.floor);
         }
         syncMonsterDerived(mon.id);
+        if (mon.hp <= 0) removeMonsterTokensFromMaps(mon.id);
       }
       state.version++;
       saveState();
@@ -2087,6 +2328,7 @@ async function handleAction(body) {
           counterDamageDealt = Math.max(1, Math.round(evaluateFormula(state.mechanics.damageFormula, scope)));
           mon.hp = Math.max(0, mon.hp - counterDamageDealt);
           syncMonsterDerived(mon.id);
+        if (mon.hp <= 0) removeMonsterTokensFromMaps(mon.id);
         }
         // Counter-parry mitigates 50% of incoming monster hit on successful roll >= 10
         if (hitRoll.total >= 12) {
@@ -2124,6 +2366,7 @@ async function handleAction(body) {
           counterDamageDealt = Math.max(1, Math.round(evaluateFormula(state.mechanics.damageFormula, scope)));
           mon.hp = Math.max(0, mon.hp - counterDamageDealt);
           syncMonsterDerived(mon.id);
+        if (mon.hp <= 0) removeMonsterTokensFromMaps(mon.id);
         }
         dmgTaken = Math.floor(dmgTaken / 2);
         ch.hp = Math.max(0, ch.hp - dmgTaken);
@@ -2164,6 +2407,42 @@ async function handleAction(body) {
       const damageType = String(payload.damageType || 'Physical').slice(0, 24);
       const isCrit = Boolean(payload.isCrit);
 
+      let friendlyAlly = null;
+      let atkTokForTurn = null;
+      if (!isDm && payload.beatId && attackerChar) {
+        const beat = (state.storyBeats || []).find((b) => b.id === payload.beatId);
+        const atkTok = beat?.arena?.tokens?.find((t) => t.id === attackerChar.id);
+        const monTok = beat?.arena?.tokens?.find((t) => t.id === monster.id);
+        if (atkTok) {
+          atkTokForTurn = atkTok;
+          const floor = Math.max(1, Number(beat?.floor || attackerChar?.currentFloor || state.map?.currentFloor || 1));
+          const maxAttacks = getMaxAttacksForFloor(floor);
+          const used = Number(atkTok.attacksUsedThisTurn || 0);
+          if (used >= maxAttacks) {
+            return { status: 400, error: `You have already used your attack (${used}/${maxAttacks}) this turn! Wait until your next turn.` };
+          }
+        }
+        if (atkTok && monTok) {
+          const dist = Math.max(Math.abs(monTok.x - atkTok.x), Math.abs(monTok.y - atkTok.y));
+          const { isRanged, maxRange } = getWeaponAttackInfo(attackerChar);
+          if (dist > maxRange) {
+            return {
+              status: 400,
+              error: `Out of attack range! (${isRanged ? 'Ranged' : 'Melee'} max ${maxRange} Space${maxRange > 1 ? 's' : ''}, target is ${dist} away).`,
+            };
+          }
+          if (isRanged) {
+            const lineCells = getGridLineCells(atkTok.x, atkTok.y, monTok.x, monTok.y);
+            const friendlyTok = lineCells
+              .map((c) => (beat.arena.tokens || []).find((t) => t.type === 'player' && t.id !== attackerChar.id && t.x === c.x && t.y === c.y))
+              .find(Boolean);
+            if (friendlyTok && state.characters[friendlyTok.id]) {
+              friendlyAlly = state.characters[friendlyTok.id];
+            }
+          }
+        }
+      }
+
       let rawDamage = Number(payload.rawDamage ?? 0);
       let rollDetails = null;
       if (payload.diceFormula) {
@@ -2190,12 +2469,103 @@ async function handleAction(body) {
         finalDamage = Math.max(0, Math.round(evaluateFormula(state.mechanics.damageFormula, scope)));
       }
 
+      const weakSpot = attackerChar?.observedWeakSpots?.[monster.id];
+      let weakSpotBonusApplied = 0;
+      if (weakSpot) {
+        weakSpotBonusApplied = Number(weakSpot.bonusDamage || 0) + (isCrit ? Number(weakSpot.bonusCritDamage || 0) : 0);
+        finalDamage += weakSpotBonusApplied;
+      }
+
+      if (atkTokForTurn) {
+        atkTokForTurn.attacksUsedThisTurn = Number(atkTokForTurn.attacksUsedThisTurn || 0) + 1;
+      }
+
+      if (friendlyAlly) {
+        const prevAllyHp = friendlyAlly.hp;
+        friendlyAlly.hp = Math.max(0, friendlyAlly.hp - finalDamage);
+        logPlayerHistory(attackerChar.id, 'combat', `FRIENDLY FIRE! Arrow struck ${friendlyAlly.name} for ${finalDamage} ${damageType} damage!`);
+        const ffEntry = {
+          id: `cblog-${Date.now()}-${crypto.randomInt(10, 99)}`,
+          timestamp: new Date().toISOString(),
+          attacker: attackerName,
+          target: friendlyAlly.name,
+          targetId: friendlyAlly.id,
+          rawDamage,
+          finalDamage,
+          damageType,
+          isCrit,
+          rollDetails,
+          remainingHp: friendlyAlly.hp,
+          maxHp: friendlyAlly.maxHp,
+          summary: `FRIENDLY FIRE! ${attackerName}'s ranged shot hit ${friendlyAlly.name} for ${finalDamage} ${damageType} damage (HP: ${prevAllyHp} -> ${friendlyAlly.hp}/${friendlyAlly.maxHp})!`,
+        };
+        state.combatLog.unshift(ffEntry);
+        state.combatLog = state.combatLog.slice(0, 60);
+        pushSystemToast({
+          title: 'FRIENDLY FIRE!',
+          message: ffEntry.summary,
+          category: 'combat',
+        });
+        state.version++;
+        saveState();
+        broadcastEvent('state');
+        return { ok: true, friendlyFire: true, finalDamage, ally: friendlyAlly, monster, logEntry: ffEntry };
+      }
+
       const prevHp = monster.hp;
       monster.hp = Math.max(0, monster.hp - finalDamage);
       if (attackerChar) {
         logPlayerHistory(attackerChar.id, 'combat', `Dealt ${finalDamage} ${damageType} damage to ${monster.name} (${monster.hp}/${monster.maxHp} HP left)`);
       }
       syncMonsterDerived(monster.id);
+
+      let manaStoneDrop = null;
+      if (prevHp > 0 && monster.hp <= 0) {
+        let dropBeat = payload.beatId ? (state.storyBeats || []).find((b) => b.id === payload.beatId) : null;
+        let monTokPos = dropBeat?.arena?.tokens?.find((t) => t.id === monster.id);
+        if (!monTokPos) {
+          for (const b of state.storyBeats || []) {
+            const foundTok = b.arena?.tokens?.find((t) => t.id === monster.id);
+            if (foundTok) {
+              dropBeat = b;
+              monTokPos = foundTok;
+              break;
+            }
+          }
+        }
+        removeMonsterTokensFromMaps(monster.id);
+        if (attackerChar) {
+          const isRangedKill = Boolean(payload.isRangedAttack) || getWeaponAttackInfo(attackerChar).isRanged;
+          if (!isRangedKill) {
+            attackerChar.currency = attackerChar.currency || { gold: 0, manaStones: 0 };
+            attackerChar.currency.manaStones = Number(attackerChar.currency.manaStones || 0) + 1;
+            manaStoneDrop = { mode: 'direct', qty: 1 };
+            logPlayerHistory(attackerChar.id, 'loot', `Claimed +1 Mana Stone from defeating ${monster.name}`);
+            pushSystemToast({
+              title: 'MANA STONE CLAIMED!',
+              message: `${attackerChar.name} slew ${monster.name} in melee and gained +1 Mana Stone!`,
+              category: 'loot',
+              target: attackerChar.id,
+            });
+          } else if (dropBeat?.arena && monTokPos) {
+            dropBeat.arena.manaStones = dropBeat.arena.manaStones || [];
+            const stone = {
+              id: `ms-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+              x: monTokPos.x,
+              y: monTokPos.y,
+              qty: 1,
+              droppedFrom: monster.name,
+            };
+            dropBeat.arena.manaStones.push(stone);
+            manaStoneDrop = { mode: 'ground', qty: 1, x: stone.x, y: stone.y };
+            pushSystemToast({
+              title: 'MANA STONE DROPPED!',
+              message: `${monster.name} dropped a Mana Stone at (${stone.x + 1}, ${stone.y + 1})!`,
+              category: 'loot',
+            });
+          }
+        }
+      }
 
       const logEntry = {
         id: `cblog-${Date.now()}-${crypto.randomInt(10, 99)}`,
@@ -2210,7 +2580,7 @@ async function handleAction(body) {
         rollDetails,
         remainingHp: monster.hp,
         maxHp: monster.maxHp,
-        summary: `${attackerName} inflicted ${finalDamage} ${damageType} damage to ${monster.name} (HP: ${prevHp} -> ${monster.hp}/${monster.maxHp})${monster.hp === 0 ? ' [DEFEATED!]' : ''}`,
+        summary: `${attackerName} inflicted ${finalDamage} ${damageType} damage to ${monster.name}${weakSpotBonusApplied ? ` [Weak Spot +${weakSpotBonusApplied}]` : ''} (HP: ${prevHp} -> ${monster.hp}/${monster.maxHp})${monster.hp === 0 ? ' [DEFEATED!]' : ''}`,
       };
       state.combatLog.unshift(logEntry);
       state.combatLog = state.combatLog.slice(0, 60);
@@ -2255,15 +2625,34 @@ async function handleAction(body) {
       if (sub === 'add_to_grimoire' || sub === 'learn_custom') {
         const sp = payload.spell || {};
         if (!sp.name) return { status: 400, error: 'Spell name is required.' };
+        if (ch && !isDm) {
+          const maxSpells = getMaxSpellsForLevel(ch.level);
+          if ((ch.spells || []).length >= maxSpells) {
+            const nextLv = (Math.floor(Math.max(1, Number(ch.level || 1)) / 3) + 1) * 3;
+            const msg = maxSpells >= 10
+              ? `Maximum spell limit reached (${ch.spells.length}/10).`
+              : `Spell limit reached (${ch.spells.length}/${maxSpells}). Next spell slot unlocks at Level ${nextLv}.`;
+            return { status: 400, error: msg };
+          }
+        }
+        const normElement = normalizeSpellElement(sp.element);
+        const floorLevel = Math.max(1, Number(ch?.currentFloor || state.map?.currentFloor || 1));
+        const balanced = !isDm
+          ? clampSpellToFloor(sp, floorLevel)
+          : {
+              damageDice: String(sp.damageDice || '2d6'),
+              rangeSpaces: Math.max(0, Number(sp.rangeSpaces || 6)),
+              mpCost: Math.max(0, Number(sp.mpCost || 0)),
+            };
         const newSpell = {
           id: `sp-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
           name: String(sp.name).trim().slice(0, 50),
-          element: String(sp.element || 'Arcane').slice(0, 30),
-          mpCost: Math.max(0, Number(sp.mpCost || 0)),
-          damageDice: String(sp.damageDice || '2d6'),
-          damageType: String(sp.damageType || sp.element || 'Arcane'),
-          rangeSpaces: Math.max(0, Number(sp.rangeSpaces || 6)),
-          areaText: String(sp.areaText || `${sp.rangeSpaces || 6} Spaces`).slice(0, 80),
+          element: normElement,
+          mpCost: balanced.mpCost,
+          damageDice: balanced.damageDice,
+          damageType: normElement,
+          rangeSpaces: balanced.rangeSpaces,
+          areaText: String(sp.areaText || `${balanced.rangeSpaces} Spaces`).slice(0, 80),
           actionType: sp.actionType === 'Reaction' ? 'Reaction' : 'Action',
           explanation: String(sp.explanation || 'Custom free-flow magic manifestation.').slice(0, 400),
         };
@@ -2288,6 +2677,14 @@ async function handleAction(body) {
         const sp = state.grimoire.find((g) => g.id === payload.spellId);
         if (!sp) return { status: 404, error: 'Grimoire spell not found.' };
         if (!ch.spells.some((s) => s.id === sp.id)) {
+          const maxSpells = getMaxSpellsForLevel(ch.level);
+          if (!isDm && ch.spells.length >= maxSpells) {
+            const nextLv = (Math.floor(Math.max(1, Number(ch.level || 1)) / 3) + 1) * 3;
+            const msg = maxSpells >= 10
+              ? `Maximum spell limit reached (${ch.spells.length}/10).`
+              : `Spell limit reached (${ch.spells.length}/${maxSpells}). Next spell slot unlocks at Level ${nextLv}.`;
+            return { status: 400, error: msg };
+          }
           ch.spells.push({ ...sp });
         }
       } else if (sub === 'forget') {
@@ -2295,6 +2692,10 @@ async function handleAction(body) {
       } else if (sub === 'cast') {
         const sp = ch.spells.find((s) => s.id === payload.spellId) || state.grimoire.find((g) => g.id === payload.spellId);
         if (!sp) return { status: 404, error: 'Spell not found.' };
+        const hasPendingReaction = (state.pendingReactions || []).some((r) => r.targetCharacterId === ch.id);
+        if (sp.actionType === 'Reaction' && !payload.reactionId && !hasPendingReaction) {
+          return { status: 400, error: 'Reaction spells can only be used when a monster attacks you.' };
+        }
         const cost = Number(sp.mpCost || 0);
         if (ch.mp < cost) return { status: 400, error: `Not enough ${state.mechanics.resourceName || 'Mana'} (needs ${cost}).` };
         ch.mp = Math.max(0, ch.mp - cost);
@@ -2540,15 +2941,62 @@ async function handleAction(body) {
       if (!isDm && characterId && characterId !== ch.id) {
         return { status: 403, error: 'Cannot modify another player equipment.' };
       }
+      if (!isDm && isStatsAndEquipmentLocked()) {
+        return { status: 403, error: 'Equipment is locked while a session and story beat are active.' };
+      }
       const { subAction, slot, itemId } = payload;
       ch.equipment = ch.equipment || {};
       ch.inventory = ch.inventory || [];
 
-      if (subAction === 'unequip' && slot && ch.equipment[slot]) {
+      if (subAction === 'choose_starter') {
+        const kitKey = String(payload.kit || 'swordsman');
+        if (kitKey === 'custom') {
+          const cat = payload.customCategory === 'ranged' ? 'ranged' : 'melee';
+          const list = STARTER_WOODEN_WEAPONS[cat];
+          const picked = list.find((w) => w.id === payload.customWeaponId) || list[0];
+          const makeArmor = (slot, spec) => (spec ? {
+            id: `st-custom-${slot}-${ch.id}`,
+            name: spec.name,
+            slot,
+            type: 'armor',
+            attackBonus: 0,
+            damageDice: '',
+            damageType: '',
+            rangeSpaces: 0,
+            drBonus: Number(spec.drBonus || 0),
+            acBonus: Number(spec.acBonus || 0),
+          } : null);
+          ch.equipment = {
+            mainHand: {
+              id: picked.id,
+              name: picked.name,
+              slot: 'mainHand',
+              type: 'weapon',
+              attackBonus: Number(picked.attackBonus || 0),
+              damageDice: picked.damageDice,
+              damageType: picked.damageType,
+              rangeSpaces: Number(picked.rangeSpaces || 1),
+              drBonus: 0,
+              acBonus: 0,
+            },
+            offHand: makeArmor('offHand', picked.offHand),
+            head: makeArmor('head', picked.head),
+            body: makeArmor('body', picked.body || { name: 'Initiate Leather Coat', acBonus: 2, drBonus: 1 }),
+            boots: makeArmor('boots', picked.boots),
+            relic: null,
+          };
+          logPlayerHistory(ch.id, 'equipment', `Selected custom starter weapon: ${picked.name} with fitted armor`);
+        } else {
+          const kit = STARTER_EQUIPMENT_KITS[kitKey] || STARTER_EQUIPMENT_KITS.swordsman;
+          ch.equipment = JSON.parse(JSON.stringify(kit));
+          logPlayerHistory(ch.id, 'equipment', `Selected ${kitKey} starter equipment`);
+        }
+      } else if (subAction === 'unequip' && slot && ch.equipment[slot]) {
         const old = ch.equipment[slot];
         ch.equipment[slot] = null;
         ch.inventory.push({
-          ...old,
+          ...(typeof old === 'object' ? old : { name: String(old), slot, type: slot === 'mainHand' ? 'weapon' : slot === 'relic' ? 'relic' : 'armor' }),
+          id: (typeof old === 'object' && old.id) ? old.id : `inv-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
           category: old.type === 'weapon' ? 'weapon' : old.type === 'armor' ? 'armor' : 'relic',
           qty: 1,
         });
@@ -2558,7 +3006,13 @@ async function handleAction(body) {
         const item = ch.inventory[idx];
         const targetSlot = slot || item.slot || (item.category === 'weapon' ? 'mainHand' : item.category === 'armor' ? 'body' : 'relic');
         if (ch.equipment[targetSlot]) {
-          ch.inventory.push({ ...ch.equipment[targetSlot], category: ch.equipment[targetSlot].type || 'relic', qty: 1 });
+          const prev = ch.equipment[targetSlot];
+          ch.inventory.push({
+            ...(typeof prev === 'object' ? prev : { name: String(prev), slot: targetSlot, type: targetSlot === 'mainHand' ? 'weapon' : targetSlot === 'relic' ? 'relic' : 'armor' }),
+            id: (typeof prev === 'object' && prev.id) ? prev.id : `inv-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+            category: prev.type || 'relic',
+            qty: 1,
+          });
         }
         ch.equipment[targetSlot] = {
           id: item.id,
@@ -2571,6 +3025,8 @@ async function handleAction(body) {
           rangeSpaces: Number(item.rangeSpaces || (item.category === 'weapon' ? 2 : 0)),
           drBonus: Number(item.drBonus || 0),
           acBonus: Number(item.acBonus || 0),
+          ...(item.artUrl ? { artUrl: item.artUrl } : {}),
+          ...(item.notes ? { notes: item.notes } : {}),
         };
         if (item.qty > 1) item.qty -= 1;
         else ch.inventory.splice(idx, 1);
@@ -2639,10 +3095,61 @@ async function handleAction(body) {
           remainingHp: ch.hp,
           summary: `${ch.name} used ${found.name}${hpGain ? ` (+${hpGain} HP)` : ''}${mpGain ? ` (+${mpGain} MP)` : ''}.`,
         });
+      } else if (subAction === 'trade' && itemId) {
+        const found = ch.inventory.find((i) => i.id === itemId);
+        if (!found) return { status: 404, error: 'Item not found in your inventory.' };
+        const toChar = state.characters[payload.targetCharacterId];
+        if (!toChar) return { status: 404, error: 'Recipient player not found.' };
+        if (toChar.id === ch.id) return { status: 400, error: 'Cannot trade an item to yourself.' };
+        const qty = Math.max(1, Math.min(Number(found.qty || 1), Math.trunc(Number(payload.qty || 1))));
+        found.qty = Number(found.qty || 1) - qty;
+        if (found.qty <= 0) ch.inventory = ch.inventory.filter((i) => i.id !== itemId);
+        toChar.inventory = toChar.inventory || [];
+        const existingTarget = toChar.inventory.find((i) => i.name === found.name && i.category === found.category);
+        if (existingTarget) {
+          existingTarget.qty = Number(existingTarget.qty || 1) + qty;
+        } else {
+          toChar.inventory.push({
+            ...found,
+            id: `inv-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+            qty,
+          });
+        }
+        logPlayerHistory(ch.id, 'trade', `Traded ${qty}× ${found.name} to ${toChar.name}`);
+        logPlayerHistory(toChar.id, 'trade', `Received ${qty}× ${found.name} from ${ch.name}`);
+        pushSystemToast({
+          title: 'ITEM TRADED!',
+          message: `${ch.name} traded ${qty}× ${found.name} to ${toChar.name}!`,
+          category: 'loot',
+          target: toChar.id,
+        });
       } else if (subAction === 'remove' && itemId) {
         ch.inventory = ch.inventory.filter((i) => i.id !== itemId);
       }
 
+      state.version++;
+      saveState();
+      broadcastEvent('state');
+      return { ok: true, character: ch };
+    }
+
+    case 'update_character_profile': {
+      const ch = state.characters[payload.characterId || characterId];
+      if (!ch) return { status: 404, error: 'Character not found.' };
+      if (!isDm && characterId && characterId !== ch.id) {
+        return { status: 403, error: 'Players can only customize their own character.' };
+      }
+      if (payload.name && String(payload.name).trim()) {
+        ch.name = String(payload.name).trim().slice(0, 48);
+      }
+      if (payload.race !== undefined && String(payload.race).trim()) {
+        ch.race = String(payload.race).trim().slice(0, 32);
+      }
+      if (payload.className !== undefined && String(payload.className).trim()) {
+        ch.className = String(payload.className).trim().slice(0, 40);
+      }
+      logPlayerHistory(ch.id, 'character', `Created character: ${ch.name} (${ch.race} ${ch.className})`);
+      syncCharacterDerived(ch.id);
       state.version++;
       saveState();
       broadcastEvent('state');
@@ -2655,23 +3162,46 @@ async function handleAction(body) {
       if (!isDm && characterId && characterId !== ch.id) {
         return { status: 403, error: 'Cannot generate art for another character.' };
       }
-      const prompt = String(payload.prompt || ch.portraitPrompt || ch.name).trim().slice(0, 400);
-      const style = String(payload.style || ch.portraitStyle || 'Korean Manhwa Webtoon');
-      const generated = await generateCharacterArt(prompt, style, ch);
+      if (payload.selectArtId) {
+        const chosen = (ch.artHistory || []).find((a) => a.id === payload.selectArtId);
+        if (!chosen) return { status: 404, error: 'Portrait entry not found.' };
+        ch.portraitUrl = chosen.url;
+        state.version++;
+        saveState();
+        broadcastEvent('state');
+        return { ok: true, portraitUrl: ch.portraitUrl, engine: chosen.engine || 'Selected', character: ch };
+      }
 
-      ch.portraitPrompt = prompt;
-      ch.portraitStyle = style;
+      const isUpload = typeof payload.uploadedImageDataUrl === 'string' && /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(payload.uploadedImageDataUrl) && payload.uploadedImageDataUrl.length <= 450000;
+      const prompt = isUpload
+        ? (ch.portraitPrompt || ch.name)
+        : String(payload.prompt || ch.portraitPrompt || ch.name).trim().slice(0, 400);
+      const style = isUpload
+        ? 'Custom Upload'
+        : String(payload.style || ch.portraitStyle || 'Korean Manhwa Webtoon');
+      let generated;
+      if (isUpload) {
+        generated = { url: payload.uploadedImageDataUrl, engine: 'Uploaded Portrait' };
+      } else {
+        generated = await generateCharacterArt(prompt, style, ch);
+      }
+
+      if (!isUpload) {
+        ch.portraitPrompt = prompt;
+        ch.portraitStyle = style;
+      }
       ch.portraitUrl = generated.url;
-      ch.artHistory = ch.artHistory || [];
+      ch.artHistory = (ch.artHistory || []).filter((a) => a.url !== generated.url);
       ch.artHistory.unshift({
         id: `art-${Date.now()}`,
-        prompt,
+        prompt: isUpload ? 'Uploaded Portrait' : prompt,
         style,
         engine: generated.engine,
         url: generated.url,
         createdAt: new Date().toISOString(),
       });
       ch.artHistory = ch.artHistory.slice(0, 8);
+      logPlayerHistory(ch.id, 'art', `Updated character portrait (${generated.engine})`);
 
       state.version++;
       saveState();
@@ -2889,13 +3419,51 @@ async function handleAction(body) {
 
     case 'initiative_action': {
       const sub = payload.subAction;
-      if (!isDm && sub !== 'player_roll_initiative') {
+      if (!isDm && sub !== 'player_roll_initiative' && sub !== 'end_turn') {
         return { status: 403, error: 'Only the DM can control turn progression.' };
       }
-      if (sub === 'next_turn') {
+      if (sub === 'end_turn') {
+        const cid = payload.characterId || characterId;
         if (state.combat.combatants.length > 0) {
           state.combat.turnIndex = (state.combat.turnIndex + 1) % state.combat.combatants.length;
           if (state.combat.turnIndex === 0) state.combat.round += 1;
+          const active = state.combat.combatants[state.combat.turnIndex];
+          for (const b of state.storyBeats || []) {
+            for (const t of b.arena?.tokens || []) {
+              if (t.id === cid || (active && t.id === active.id)) {
+                t.hasMovedThisTurn = false;
+                t.hasObservedThisTurn = false;
+                t.attacksUsedThisTurn = 0;
+              }
+            }
+          }
+        } else if (cid) {
+          for (const b of state.storyBeats || []) {
+            for (const t of b.arena?.tokens || []) {
+              if (t.id === cid) {
+                t.hasMovedThisTurn = false;
+                t.hasObservedThisTurn = false;
+                t.attacksUsedThisTurn = 0;
+              }
+            }
+          }
+        }
+      } else if (sub === 'next_turn') {
+        if (state.combat.combatants.length > 0) {
+          state.combat.turnIndex = (state.combat.turnIndex + 1) % state.combat.combatants.length;
+          if (state.combat.turnIndex === 0) state.combat.round += 1;
+          const active = state.combat.combatants[state.combat.turnIndex];
+          if (active) {
+            for (const b of state.storyBeats || []) {
+              for (const t of b.arena?.tokens || []) {
+                if (t.id === active.id) {
+                  t.hasMovedThisTurn = false;
+                  t.hasObservedThisTurn = false;
+                  t.attacksUsedThisTurn = 0;
+                }
+              }
+            }
+          }
         }
       } else if (sub === 'prev_turn') {
         if (state.combat.combatants.length > 0) {
@@ -2904,8 +3472,27 @@ async function handleAction(body) {
             state.combat.turnIndex = state.combat.combatants.length - 1;
             state.combat.round = Math.max(1, state.combat.round - 1);
           }
+          const active = state.combat.combatants[state.combat.turnIndex];
+          if (active) {
+            for (const b of state.storyBeats || []) {
+              for (const t of b.arena?.tokens || []) {
+                if (t.id === active.id) {
+                  t.hasMovedThisTurn = false;
+                  t.hasObservedThisTurn = false;
+                  t.attacksUsedThisTurn = 0;
+                }
+              }
+            }
+          }
         }
       } else if (sub === 'roll_all') {
+        for (const b of state.storyBeats || []) {
+          for (const t of b.arena?.tokens || []) {
+            t.hasMovedThisTurn = false;
+            t.hasObservedThisTurn = false;
+            t.attacksUsedThisTurn = 0;
+          }
+        }
         for (const c of state.combat.combatants) {
           let mod = 2;
           if (c.type === 'player' && state.characters[c.id]) {
@@ -2957,7 +3544,7 @@ async function handleAction(body) {
     case 'story_action': {
       state.storyBeats = state.storyBeats || [];
       const sub = payload.subAction;
-      if (!isDm && sub !== 'move_beat_token' && sub !== 'open_beat_chest' && sub !== 'talk_beat_npc') {
+      if (!isDm && sub !== 'move_beat_token' && sub !== 'open_beat_chest' && sub !== 'talk_beat_npc' && sub !== 'observe_beat_cell') {
         return { status: 403, error: 'Only the Dungeon Master can orchestrate story beats.' };
       }
 
@@ -3334,12 +3921,94 @@ async function handleAction(body) {
         }
         const nx = Math.max(0, Math.min(arena.cols - 1, Math.trunc(Number(payload.x))));
         const ny = Math.max(0, Math.min(arena.rows - 1, Math.trunc(Number(payload.y))));
+        if (!isDm) {
+          if (tok.hasMovedThisTurn) {
+            return { status: 400, error: 'You have already moved this turn! Wait until your next turn.' };
+          }
+          const ch = state.characters[tok.id];
+          const maxSpaces = Math.max(1, Number(ch?.speedSpaces || 6));
+          const dist = Math.abs(nx - Number(tok.x || 0)) + Math.abs(ny - Number(tok.y || 0));
+          if (dist === 0) {
+            return { status: 400, error: 'You are already on that space.' };
+          }
+          if (dist > maxSpaces) {
+            return { status: 400, error: `Out of movement range! You can move up to ${maxSpaces} Spaces (attempted ${dist}).` };
+          }
+        }
         const blocked = (arena.terrain || []).find((t) => t.x === nx && t.y === ny);
         if (blocked) {
           return { status: 400, error: `Impassable terrain (${blocked.type}) blocks that space!` };
         }
         tok.x = nx;
         tok.y = ny;
+        if (!isDm) tok.hasMovedThisTurn = true;
+        if (tok.type === 'player' && Array.isArray(arena.manaStones) && arena.manaStones.length > 0) {
+          const pickedIdx = arena.manaStones.findIndex((s) => s.x === nx && s.y === ny);
+          if (pickedIdx !== -1) {
+            const [stone] = arena.manaStones.splice(pickedIdx, 1);
+            const ch = state.characters[tok.id];
+            if (ch) {
+              const qty = Number(stone.qty || 1);
+              ch.currency = ch.currency || { gold: 0, manaStones: 0 };
+              ch.currency.manaStones = Number(ch.currency.manaStones || 0) + qty;
+              logPlayerHistory(ch.id, 'loot', `Picked up +${qty} Mana Stone from the arena`);
+              pushSystemToast({
+                title: 'MANA STONE PICKED UP!',
+                message: `${ch.name} collected +${qty} Mana Stone!`,
+                category: 'loot',
+                target: ch.id,
+              });
+            }
+          }
+        }
+      } else if (sub === 'observe_beat_cell') {
+        const tok = arena.tokens.find((t) => t.id === (payload.tokenId || characterId));
+        if (!tok) return { status: 404, error: 'Arena token not found.' };
+        if (!isDm && tok.hasObservedThisTurn) {
+          return { status: 400, error: 'You have already used Observe this turn! Wait until your next turn.' };
+        }
+        const ox = Math.max(0, Math.min(arena.cols - 1, Math.trunc(Number(payload.x))));
+        const oy = Math.max(0, Math.min(arena.rows - 1, Math.trunc(Number(payload.y))));
+        const dist = Math.max(Math.abs(ox - Number(tok.x || 0)), Math.abs(oy - Number(tok.y || 0)));
+        if (!isDm && dist > 3) {
+          return { status: 400, error: `Out of Observe range! Max 3 Spaces (selected ${dist}).` };
+        }
+        if (!isDm) tok.hasObservedThisTurn = true;
+        const monTok = arena.tokens.find((t) => t.x === ox && t.y === oy && t.type === 'monster');
+        if (monTok) {
+          const ch = state.characters[tok.id];
+          const mon = state.monsters.find((m) => m.id === monTok.id);
+          const floor = Math.max(1, Number(beat.floor || ch?.currentFloor || state.map?.currentFloor || 1));
+          const perScore = Number(ch?.stats?.PER ?? 10);
+          const perMod = computeStatModifier(perScore, state.mechanics, ch);
+          const successChancePct = Math.max(15, Math.min(90, 35 + perMod * 8 - (floor - 1) * 3));
+          const rollPct = crypto.randomInt(1, 101);
+          const weakSpotFound = rollPct <= successChancePct;
+          const bonusDamage = 2 + Math.floor(floor * 1.5);
+          const bonusCritDamage = 4 + floor * 2;
+          if (weakSpotFound && ch) {
+            ch.observedWeakSpots = ch.observedWeakSpots || {};
+            ch.observedWeakSpots[monTok.id] = {
+              monsterId: monTok.id,
+              monsterName: monTok.name,
+              floor,
+              bonusDamage,
+              bonusCritDamage,
+              discoveredAt: new Date().toISOString(),
+            };
+            logPlayerHistory(ch.id, 'combat', `Observed weak spot on ${monTok.name} (Floor ${floor}F): +${bonusDamage} dmg, +${bonusCritDamage} crit dmg`);
+            pushSystemToast({
+              title: `WEAK SPOT FOUND: ${monTok.name}!`,
+              message: `${ch.name} spotted a weak point (+${bonusDamage} Damage, +${bonusCritDamage} Crit Damage)!`,
+              category: 'combat',
+              target: ch.id,
+            });
+          }
+          state.version++;
+          saveState();
+          broadcastEvent('state');
+          return { ok: true, observedMonster: true, weakSpotFound, successChancePct, rollPct, floor, bonusDamage, bonusCritDamage, monster: mon, beat };
+        }
       } else if (sub === 'save_beat_starts') {
         arena.startPositions = arena.startPositions || {};
         for (const tok of arena.tokens) {
@@ -3502,20 +4171,246 @@ async function handleAction(body) {
       if (!isDm && characterId && characterId !== ch.id) {
         return { status: 403, error: 'Players can only allocate points on their own character.' };
       }
+      if (!isDm && isStatsAndEquipmentLocked()) {
+        return { status: 403, error: 'Stats are locked while a session and story beat are active.' };
+      }
       const statKey = String(payload.statKey || '').trim().toUpperCase();
-      const amount = Math.max(1, Math.trunc(Number(payload.amount || 1)));
-      if (!statKey) return { status: 400, error: 'Stat key is required.' };
+      const rawAmount = Math.trunc(Number(payload.amount || 1));
+      if (!statKey || rawAmount === 0) return { status: 400, error: 'Stat key and non-zero amount are required.' };
       const available = Number(ch.unspentStatPoints || 0);
-      if (available < amount) return { status: 400, error: 'Not enough unspent stat points.' };
       ch.stats = ch.stats || {};
-      ch.stats[statKey] = Number(ch.stats[statKey] || 0) + amount;
-      ch.unspentStatPoints = available - amount;
-      logPlayerHistory(ch.id, 'stat', `Allocated +${amount} ${statKey} (now ${ch.stats[statKey]})`);
+      const currentVal = Number(ch.stats[statKey] || 0);
+      if (rawAmount > 0) {
+        if (available < rawAmount) return { status: 400, error: 'Not enough unspent stat points.' };
+        ch.stats[statKey] = currentVal + rawAmount;
+        ch.unspentStatPoints = available - rawAmount;
+        logPlayerHistory(ch.id, 'stat', `Allocated +${rawAmount} ${statKey} (now ${ch.stats[statKey]})`);
+      } else {
+        const refund = Math.abs(rawAmount);
+        if (currentVal - refund < 1) return { status: 400, error: `${statKey} cannot go below 1.` };
+        ch.stats[statKey] = currentVal - refund;
+        ch.unspentStatPoints = available + refund;
+        logPlayerHistory(ch.id, 'stat', `Removed -${refund} ${statKey} (now ${ch.stats[statKey]})`);
+      }
       syncCharacterDerived(ch.id);
       state.version++;
       saveState();
       broadcastEvent('state');
       return { ok: true, character: ch };
+    }
+
+    case 'roll_passive_gacha': {
+      const ch = state.characters[payload.characterId || characterId];
+      if (!ch) return { status: 404, error: 'Character not found.' };
+      if (!isDm && characterId && characterId !== ch.id) {
+        return { status: 403, error: 'Players can only draw passives for their own character.' };
+      }
+      const tickets = Number(ch.passiveTickets || 0);
+      if (tickets < 1) {
+        return { status: 400, error: 'No Passive Skill Tickets available. Level up to earn a ticket!' };
+      }
+      if (ch.pendingPassiveDraw) {
+        return { status: 400, error: 'Resolve your current Passive Skill Lottery draw first.' };
+      }
+      ch.passiveTickets = tickets - 1;
+      ch.passives = ch.passives || [];
+
+      // 7-Tier Gacha roll (out of 1000):
+      // Mythic 0.5% (0..4), Legendary 1.5% (5..19), SSR 3% (20..49), SR 6% (50..109),
+      // Rare 12% (110..229), Advanced 22% (230..449), Normal 55% (450..999)
+      const roll = crypto.randomInt(0, 1000);
+      const tier = roll < 5
+        ? 'Mythic'
+        : roll < 20
+          ? 'Legendary'
+          : roll < 50
+            ? 'Super Super Rare'
+            : roll < 110
+              ? 'Super Rare'
+              : roll < 230
+                ? 'Rare'
+                : roll < 450
+                  ? 'Advanced'
+                  : 'Normal';
+      const tierPool = PASSIVE_SKILL_POOL.filter((p) => p.tier === tier);
+      const picked = tierPool[crypto.randomInt(0, tierPool.length)];
+      const existing = ch.passives.find((p) => p.id === picked.id);
+
+      const floorLevel = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
+      const tierMult = { Normal: 1, Advanced: 1.5, Rare: 2.2, 'Super Rare': 3, 'Super Super Rare': 4, Legendary: 6, Mythic: 10 }[tier] || 1;
+      const declineGold = Math.round(25 * floorLevel * tierMult);
+      const declineXp = Math.round(20 * floorLevel * tierMult);
+
+      const nextStacks = existing ? Number(existing.stacks || 1) + 1 : 1;
+      const extraPct = existing ? 40 + (nextStacks - 1) * 10 : 0;
+      const nextMult = existing ? 100 + extraPct : 100;
+
+      ch.pendingPassiveDraw = {
+        id: `pdraw-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+        tier,
+        skill: picked,
+        duplicate: Boolean(existing),
+        nextStacks,
+        extraPct,
+        multiplierPct: nextMult,
+        floorLevel,
+        declineGold,
+        declineXp,
+      };
+      state.version++;
+      saveState();
+      broadcastEvent('state');
+      return {
+        ok: true,
+        pending: true,
+        tier,
+        skill: picked,
+        duplicate: Boolean(existing),
+        nextStacks,
+        extraPct,
+        multiplierPct: nextMult,
+        floorLevel,
+        declineGold,
+        declineXp,
+        character: ch,
+      };
+    }
+
+    case 'resolve_passive_gacha': {
+      const ch = state.characters[payload.characterId || characterId];
+      if (!ch) return { status: 404, error: 'Character not found.' };
+      if (!isDm && characterId && characterId !== ch.id) {
+        return { status: 403, error: 'Players can only resolve their own passive draw.' };
+      }
+      const draw = ch.pendingPassiveDraw;
+      if (!draw) return { status: 400, error: 'No pending passive skill draw to resolve.' };
+      ch.pendingPassiveDraw = null;
+
+      if (payload.decision === 'decline') {
+        ch.currency = ch.currency || { gold: 0, manaStones: 0 };
+        ch.currency.gold = Number(ch.currency.gold || 0) + Number(draw.declineGold || 0);
+        const xpOutcome = grantXpToCharacter(ch, Number(draw.declineXp || 0));
+        logPlayerHistory(ch.id, 'passive_gacha', `Declined ${draw.tier} Passive (${draw.skill.name}) -> +${draw.declineGold} Gold & +${draw.declineXp} XP (Floor ${draw.floorLevel})`);
+        state.version++;
+        saveState();
+        broadcastEvent('state');
+        return {
+          ok: true,
+          decision: 'decline',
+          tier: draw.tier,
+          skill: draw.skill,
+          goldGained: draw.declineGold,
+          xpGained: draw.declineXp,
+          xpOutcome,
+          character: ch,
+        };
+      }
+
+      ch.passives = ch.passives || [];
+      const picked = draw.skill;
+      const tier = draw.tier;
+      const existing = ch.passives.find((p) => p.id === picked.id);
+      const bonusFields = [
+        ['bonusHp', 'maxHp', 'hp'],
+        ['bonusMp', 'maxMp', 'mp'],
+        ['bonusAc', 'ac', null],
+        ['bonusDr', 'dr', null],
+        ['bonusSpeedSpaces', 'speedSpaces', null],
+      ];
+
+      if (existing) {
+        const prevMult = Number(existing.multiplierPct || 100);
+        existing.stacks = Number(existing.stacks || 1) + 1;
+        const extraPct = 40 + (existing.stacks - 1) * 10; // 50%, 60%, 70%, 80%, ...
+        const nextMult = 100 + extraPct;
+        existing.multiplierPct = nextMult;
+        existing.lastUpgradedAt = new Date().toISOString();
+
+        for (const [field, statProp, currentProp] of bonusFields) {
+          const base = Number(picked[field] || 0);
+          if (!base) continue;
+          const prevVal = Math.round(base * (prevMult / 100));
+          const nextVal = Math.round(base * (nextMult / 100));
+          const diff = nextVal - prevVal;
+          if (diff !== 0) {
+            ch[statProp] = Number(ch[statProp] || 0) + diff;
+            if (currentProp) ch[currentProp] = Number(ch[currentProp] || 0) + diff;
+          }
+        }
+
+        logPlayerHistory(ch.id, 'passive_gacha', `Upgraded ${tier} Passive ${picked.name} to ×${existing.stacks} (${nextMult}% effect, +${extraPct}%)`);
+        pushSystemToast({
+          title: `PASSIVE UPGRADED (×${existing.stacks})!`,
+          message: `${ch.name} drew duplicate ${picked.name} [${tier}] -> ${nextMult}% effect (+${extraPct}%)!`,
+          category: ['Mythic', 'Legendary', 'Super Super Rare', 'Super Rare'].includes(tier) ? 'loot' : 'system',
+          target: ch.id,
+        });
+        state.version++;
+        saveState();
+        broadcastEvent('state');
+        return { ok: true, decision: 'accept', duplicate: true, tier, skill: existing, extraPct, multiplierPct: nextMult, character: ch };
+      }
+
+      const acquired = {
+        ...picked,
+        stacks: 1,
+        multiplierPct: 100,
+        acquiredAt: new Date().toISOString(),
+        levelAcquired: ch.level,
+      };
+      ch.passives.push(acquired);
+      for (const [field, statProp, currentProp] of bonusFields) {
+        const base = Number(picked[field] || 0);
+        if (!base) continue;
+        ch[statProp] = Number(ch[statProp] || 0) + base;
+        if (currentProp) ch[currentProp] = Number(ch[currentProp] || 0) + base;
+      }
+
+      logPlayerHistory(ch.id, 'passive_gacha', `Unlocked ${tier} Passive: ${picked.name} (${picked.description})`);
+      pushSystemToast({
+        title: `${tier.toUpperCase()} PASSIVE UNLOCKED!`,
+        message: `${ch.name} drew ${picked.name} [${tier}]: ${picked.description}`,
+        category: ['Mythic', 'Legendary', 'Super Super Rare', 'Super Rare'].includes(tier) ? 'loot' : 'system',
+        target: ch.id,
+      });
+      state.version++;
+      saveState();
+      broadcastEvent('state');
+      return { ok: true, decision: 'accept', duplicate: false, tier, skill: acquired, multiplierPct: 100, character: ch };
+    }
+
+    case 'level_up': {
+      const ch = state.characters[payload.characterId || characterId];
+      if (!ch) return { status: 404, error: 'Character not found.' };
+      if (!isDm && characterId && characterId !== ch.id) {
+        return { status: 403, error: 'Cannot level up another player.' };
+      }
+      ch.level = Math.max(1, Number(ch.level || 1));
+      ch.xp = Number(ch.xp || 0);
+      const xpToNext = Number(ch.xpToNext || ch.level * 100);
+      if (ch.xp < xpToNext) {
+        return { status: 400, error: `Not enough XP to level up (${ch.xp}/${xpToNext} XP).` };
+      }
+      ch.xp -= xpToNext; // Carry over excess XP to next level bar
+      ch.level += 1;
+      ch.xpToNext = ch.level * 100;
+      ch.unspentStatPoints = Number(ch.unspentStatPoints || 0) + 2;
+      ch.passiveTickets = Number(ch.passiveTickets || 0) + 1;
+      logPlayerHistory(ch.id, 'xp', `Leveled up to Level ${ch.level} (+2 Stat Pts, +1 Passive Ticket)!`);
+      state.version++;
+      saveState();
+      broadcastEvent('state');
+      return {
+        ok: true,
+        outcome: {
+          level: ch.level,
+          xp: ch.xp,
+          xpToNext: ch.xpToNext,
+          unspentStatPoints: ch.unspentStatPoints,
+          passiveTickets: ch.passiveTickets,
+        },
+        character: ch,
+      };
     }
 
     case 'grant_xp': {
@@ -3699,6 +4594,9 @@ function createServer() {
         if (identifier === 'admin' || identifier === 'player' || ['dm', 'dungeonmaster', 'dm@tower.gg'].includes(identifier)) {
           return sendJson(res, 200, { ok: true, found: true, activated: true, role: identifier === 'player' ? 'player' : 'dm' });
         }
+        if (identifier === 'demo.dm@tower.gg') {
+          return sendJson(res, 200, { ok: true, found: true, requiresDmSetup: true, email: 'demo.dm@tower.gg', role: 'dm' });
+        }
         const dmAcc = state.dmAccount;
         if (dmAcc && (identifier === dmAcc.email.toLowerCase() || (dmAcc.activated && dmAcc.username && identifier === dmAcc.username.toLowerCase()))) {
           if (!dmAcc.activated) {
@@ -3830,18 +4728,24 @@ function createServer() {
         const email = String(body.email || '').trim().toLowerCase();
         const newUsername = String(body.newUsername || '').trim().replace(/\s+/g, '');
         const newPassword = String(body.newPassword || '');
+        if (newUsername.length < 2) {
+          return sendJson(res, 400, { ok: false, error: 'New DM login username must be at least 2 characters.' });
+        }
+        if (newPassword.length < 4) {
+          return sendJson(res, 400, { ok: false, error: 'New DM password must be at least 4 characters.' });
+        }
+        if (email === 'demo.dm@tower.gg') {
+          return sendJson(res, 200, {
+            ok: true,
+            session: { role: 'dm', email: 'demo.dm@tower.gg', username: newUsername.slice(0, 32), name: 'Dungeon Master (Demo)' },
+          });
+        }
         const dmAcc = state.dmAccount;
         if (!dmAcc || dmAcc.email.toLowerCase() !== email) {
           return sendJson(res, 404, { ok: false, error: 'DM email account not found.' });
         }
         if (dmAcc.activated) {
           return sendJson(res, 400, { ok: false, error: 'DM account is already activated. Please log in normally.' });
-        }
-        if (newUsername.length < 2) {
-          return sendJson(res, 400, { ok: false, error: 'New DM login username must be at least 2 characters.' });
-        }
-        if (newPassword.length < 4) {
-          return sendJson(res, 400, { ok: false, error: 'New DM password must be at least 4 characters.' });
         }
         const { salt, hash } = hashPassword(newPassword);
         dmAcc.username = newUsername.slice(0, 32);
