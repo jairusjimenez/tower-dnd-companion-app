@@ -1,6 +1,6 @@
-# The Tower — DnD Companion App (`v0.3`)
+# The Tower — DnD Companion App (`v0.5`)
 
-A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** virtual tabletop and companion app. Built with a single centralized login portal that routes **Dungeon Masters** and **Players (Climbers)** into tailored interfaces, synchronized in real time via Server-Sent Events (SSE).
+A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** virtual tabletop and companion app built with **Full-Stack TypeScript, React 18 (Vite), and Fastify**, synchronized live across Dungeon Masters and Players via **Server-Sent Events (SSE)**.
 
 ![The Tower Login Screen](docs/images/login.png)
 
@@ -17,80 +17,119 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 
 ---
 
-## What's Implemented
+## What's Implemented (`Version 0.5`)
 
-### 1. Centralized Login & Role Routing
-- **Single Login Screen (`The Tower — DnD Companion App`)**: One glassmorphic **Username or Email + Password** form automatically routes users to the **DM Sanctum** or **Player Dashboard** based on their credentials.
-- **Mock Demo Credentials**:
-  - **Dungeon Master**: `admin` / `123456` (or `DM_PASSCODE`)
-  - **Player**: `player` / `123456`
-- **Email-Whitelisted Onboarding & Character Inspection**: DMs manage player email invites in the **Invites** tab, view any character's **85%-viewport Profile Modal** (AI character art, stats, equipment, inventory, and personal log history), and inspect the **All Players Log History** feed. First-time players activate with their invited email + new password and can update their username/password anytime in **Account** (salted `crypto.scryptSync` + timing-safe comparison).
+### 1. Security, Signed Cookie Sessions & RBAC Onboarding
+- **Two-Step Authentication (`The Tower — DnD Companion App`)**: Clean glassmorphic **Username or Email -> Password** login flow with **no mock accounts or demo quick-login shortcuts**.
+- **Signed `HttpOnly` Session Cookies & Server-Side RBAC**: Authenticated sessions use HMAC-SHA256 signed `HttpOnly` cookies (`tower_vtt_session`, `SameSite=Lax`) alongside `@fastify/helmet` CSP headers and `@fastify/rate-limit`. All `/api/state`, `/api/events`, `/api/action`, and `/api/auth/update-credentials` routes strictly derive identity from the verified session cookie and ignore spoofed `role`, `characterId`, or `email` parameters.
+- **DM Access & First-Time Setup**:
+  - DM login via `admin` + `DM_PASSCODE` (defaults to `dm123` unless overridden in env).
+  - First-time DM email setup flow (`/api/auth/dm-setup`) with reserved username enforcement (`admin`, `dm`, `dungeonmaster`, `dm@tower.gg` cannot be claimed by players).
+- **Email-Whitelisted Invites & 4-Step Onboarding Wizard**:
+  - DMs invite player emails in **Invites** (binding or auto-creating a character and seeding their token onto active story beat arenas).
+  - Players set their password on first login using `crypto.scryptSync` + timing-safe verification, then complete the **4-Step Awakening Wizard** (Profile, Starter Kit or Custom Wooden Weapon even while a live story beat is active, Custom Portrait Upload or AI Portrait Art, and Mechanics Overview).
 
-### 2. DM Sanctum, Story Beats & Full-Screen Scene View
-- **DM Navigation**: Streamlined across **Story Beats**, **Tower Map**, **Rules & Deities**, **Party & Dice**, and **Invites** (rightmost), plus a top-bar **Session Controls** modal (`Start / Stop Session` with custom title & paused message).
-- **Full-Screen `View Beat` Workspace & Editor**:
-  - Opens a dedicated full-screen scene view (with a **`← Back`** button returning to your previous view/scroll) showing the **Real-Time Arena Map**, **Stat-Based Initiative & Turn Order** (`AGI`/`AC` modifiers), **Players & Live Stats**, **Spawned Monsters**, **Treasure & Loot Chests**, **NPCs**, and a quick **Send Toast to Players** panel (all toast messages automatically prefixed with `SYSTEM: `).
-  - Includes an inline **Edit Beat** panel to update Title, Floor, XP, Grid Size, Narration, DM Secrets, Monster Encounters, NPCs, and Treasures.
-- **Arena Designer, Biomes, Impassable Terrain & Cryptic Auto-Gen**:
-  - Selectable **Arena Backgrounds** (`Obsidian Tower`, `Forest`, `Plains`, `Desert`), **Tree / Rock / Water** impassable terrain brushes (movement onto terrain is blocked), and **Auto-Generate Map** from a cryptic text description.
-  - Set precise starting positions for players, monsters, NPCs, and interactive **Treasure Chests** (`20×20` default up to `50×50` or custom `Cols × Rows`).
-- **Interactive NPCs & Monster Loot Drops**:
-  - Place **NPCs** with custom dialogue and one-time rewards (**Item**, **Skill Book** added to inventory & learned skills, or **XP**) claimed when players talk to them on the arena.
-  - Attach **Loot Drops** (`Item`, `Gold`, `Mana Stones`, `XP`) to monsters so defeated monsters (`0 HP`) automatically drop a lootable chest on the arena or award loot to the party.
-- **Themed Tower Floors**:
-  - Starts on **1F** (`Forest`), with **Tower Theme Designer** presets (`1F Forest -> 2F Desert -> 3F Underworld`), per-floor theme pickers, **Players & Story Beats per Floor** overviews, and **Delete Floor** with confirmation.
+### 2. Player Dashboard, View-Only Session Bar & Account Modals
+- **4-Tab Navigation + Live Session Status Indicator**: Quick mobile & desktop tabs across **Stats**, **Equipment & Inventory**, **Spells**, and **Tower**, paired with a tab-bar status indicator (**`SESSION STARTED`** vs **`SESSION STOPPED (VIEW ONLY)`**). When the session is stopped, players can freely inspect all 4 tabs and use read-only inventory category filters (`All`, `Weapons`, `Armor`, `Potions`, `Relics`) while interactive gameplay actions stay locked.
+- **85%-Viewport Modals (`85vw × 85vh`)**:
+  - **Account Settings Modal**: Update username/password, upload a custom character portrait (`image/*` compressed client-side), switch cleanly between **`Use Uploaded Image`** and **`Use AI-Generated Art`**, or pick from a deduplicated portrait history gallery (`GEMINI_API_KEY` Imagen 3 when configured, or built-in SVG synth).
+  - **DM Character Profile Modal**: Inspect any player's portrait gallery, stats, passives, Diablo-style equipped gear, inventory, and chronological activity history (newest first).
 
-### 3. Mobile-First Player Dashboard
-- **Sticky Bottom Icon Dock**: Quick phone navigation across **Stats**, **Gear**, **Bag**, **Magic**, **Tower**, **Dice**, and **Art**.
-- **XP, Level-Up & Stat Milestone Awakenings (`20 / 40 / 60 / 80 / 100`)**:
-  - All characters start at **Level 1** (`0 / 100 XP`) with **10 free stat points** to allocate freely (`+1` buttons on any attribute); every level up (`level * 100` XP) grants **+2 stat points**.
-  - Reaching **`20`, `40`, `60`, `80`, and `100`** in `STR`, `AGI`, `VIT`, `INT`, `PER`, or `LUCK` automatically unlocks **Awakened Milestone Abilities** (e.g., `Titan Cleave`, `Phantom Step`, `Immortal Vessel`, `Archmage Resonance`, `True Sight`, `Fatebreaker`).
-- **Real-Time Monster HP & Reactive Combat**:
-  - Inspect live monster HP bars, deal direct or weapon-formula damage, and respond to DM-triggered monster attacks in **Reactive** mode with **Counter**, **Parry**, **Spell**, or **Take Hit**.
-- **Equipment, Inventory & Party Inspector**: 6 gear slots (`Main Hand`, `Off-Hand`, `Head`, `Body`, `Boots`, `Relic`), filterable backpack, and full stats/equipment/inventory inspection + **View Character** modal in **Party & Dice**.
-- **Free-Flow Magic & Patron Deities**: Learn or craft spells with full mechanical explanations, damage formulas, and ranges in **Spaces**; pledge to a Patron Deity (with Google Docs lore import) and spend Divine Favor on Miracles.
-- **Graphical Polyhedral Dice Tray (`d4`–`d100`)**: Animated SVG polyhedral dice simulation (`d4`, `d6`, `d8`, `d10`, `d12`, `d20`, `d100`) with quick-roll buttons in both Player and DM Dice Trays, plus Normal, Advantage, Disadvantage, Exploding, and Secret DM roll modes.
-- **AI Character Art as Map Icons**: Generate a bespoke character portrait (`GEMINI_API_KEY` Imagen 3 when configured, or built-in SVG synthesis) that renders as the player's token icon with hover and touch-hold tooltips.
+### 3. Progression, Passive Gacha, Magic & Tactical Combat (`1F–100F`)
+- **XP, Level-Up & Stat Milestone Awakenings (`20 / 40 / 60 / 80 / 100`)**: Characters start at **Level 1** (`0 / 100 XP`) with **10 unspent stat points** and gain `+2 Stat Points + 1 Passive Ticket` per level-up. Crossing `20`, `40`, `60`, `80`, and `100` unlocks Awakened Abilities (and prevents refunding stats below unlocked milestone thresholds).
+- **200-Skill Passive Gacha**: 7-tier pool (`Normal` 55%, `Advanced` 22%, `Rare` 12%, `Super Rare` 6%, `Super Super Rare` 3%, `Legendary` 1.5%, `Mythic` 0.5%) with duplicate stack multipliers (`+50%, +60%, +70%...`), floor-scaled Gold + XP decline rewards, full **Resume Pending Draw** modal recovery, and persistent AC/DR recalculation across equip/unequip.
+- **Free-Flow 6-Element Magic**: Learn or craft spells (`Fire`, `Earth`, `Wind`, `Water`, `Light`, `Dark`) gated by `getSpellCraftLimits(floor)` and `getMaxSpellsForLevel(level)`, with MP validation and `Reaction` spell resolution during incoming attacks.
+- **Equipment, Inventory & Player Trading**: 6-slot Diablo-style gear grid (`Main Hand`, `Off-Hand`, `Head`, `Body`, `Boots`, `Relic`), filterable backpack, consumable restoration items, and player-to-player item quantity trades.
+- **Real-Time Tactical Arena (`20×20` to `50×50`), Reactive Combat & Turn Rules**:
+  - Fire Emblem Manhattan movement (`|dx| + |dy| <= speedSpaces`), impassable seeded terrain (`Tree`, `Rock`, `Water`), PER-based **Observe** weak-spot discovery (with explicit modifier preservation and HP masking/health tiers when `showExactMonsterHpToPlayers` is disabled), ranged line-of-sight with friendly-fire resolution, chests (`0` gold/stones preserved), NPCs (dialogue & skill book / item / XP gifts), and **Reactive** **Counter / Parry / Spell / Take Hit** banners inside both `PlayerView` and `BeatDetailView`.
+  - Authoritative turn order checks on `End Turn` and zoomed canvas tooltip scaling (`cellPx`).
 
-### 4. Custom Game Mechanics Builder
-- Customize attribute definitions (`Stat Key`, `Stat Name`, `Starting Value`), grouped **Stat Milestone Abilities (`20 / 40 / 60 / 80 / 100`)**, safe math formulas (`Stat Modifier`, `Hit Check`, `Damage Inflicted`, `Crit Multiplier`), resource names, and `Reactive` vs `Turn-Based` combat flow.
+### 4. DM Sanctum, Mechanics Builder & Atomic Persistence
+- **DM Workspace Tabs**: **Story Beats**, **Tower Map**, **Rules & Deities**, **Party & Dice**, and **Invites** (with dirty-state tracking so live player SSE rolls never overwrite unsaved DM notes or mechanics edits).
+- **Deterministic Terrain Preview**: Shared seeded `generateArenaTerrainFromPrompt` ensures the DM draft preview matches the saved arena map 1:1.
+- **Validated Game Mechanics & Deities**: Live formula syntax validation (`Stat Modifier`, `Hit Check`, `Damage Inflicted`), custom stats & milestones, `Reactive` vs `Turn-Based` combat modes, monster HP masking (`showExactMonsterHpToPlayers`), graphical SVG polyhedral dice (`d4`–`d100`), and Patron Deity Google Docs importer.
+- **Atomic Persistence (`JsonStateRepository`)**: Atomic temp-file + rename writes to `data/state.json`, rotating backups in `data/backups/`, automatic backup recovery if `state.json` is corrupted, and `schemaVersion: 2` backward-compatible state migrations.
 
 ---
 
 ## Tech Stack & Project Structure
-- **Backend**: Zero-dependency Node.js (`http`, `fs`, `path`, `crypto`) with Server-Sent Events (`/api/events`) and JSON persistence (`data/state.json`).
-- **Frontend**: Vanilla HTML5, CSS3, and HTML5 Canvas (`public/`).
+
+- **Backend**: TypeScript + Fastify 5 (`@fastify/cookie`, `@fastify/helmet`, `@fastify/rate-limit`, `@fastify/static`, `zod`) with SSE (`/api/events`) and `JsonStateRepository`.
+- **Frontend**: React 18 + TypeScript + Vite 6 + HTML5 Canvas (`client/src/`).
+- **Shared Domain Layer**: Single source of truth for types, safe recursive-descent math evaluation, gacha pools, starter kits, floor scaling rules, and deterministic terrain (`shared/`).
 
 ```text
 dnd-vtt/
-├── server.js          # HTTP server, SSE broadcaster, auth, formula engine, game actions
-├── test.js            # Automated integration test suite (12 suites)
-├── package.json       # Scripts (start, test) and Node engine config
-├── render.yaml        # Render Free Web Service blueprint
-├── Dockerfile         # Container setup for Koyeb / Fly / Docker hosts
-├── docs/images/       # README screenshots
-└── public/
-    ├── index.html     # Single login portal, Player dashboard, DM Sanctum & arena modal
-    ├── styles.css     # Mobile-friendly dark fantasy & System UI theme
-    └── app.js         # Client state sync, arena & tower canvas renderers, dice & sheet logic
+├── shared/                     # Consolidated domain logic shared by server & client
+│   ├── types.ts                # Core interfaces (GameState, Character, Monster, StoryBeat, Session)
+│   ├── formulas.ts             # evaluateFormula parser, grid/line math, getArenaCellPx
+│   ├── rules.ts                # Floor scaling, spell clamping, locks, AC/DR & stat helpers
+│   ├── passiveSkills.ts        # 200-skill 7-tier gacha catalog & bonus summarizer
+│   ├── starterKits.ts          # Starter kits & custom wooden weapon loadouts
+│   ├── terrain.ts              # Deterministic seeded arena terrain generator
+│   └── index.ts
+├── server/src/                 # Fastify backend
+│   ├── index.ts / app.ts / config.ts
+│   ├── auth/                   # scrypt passwords & HMAC-SHA256 HttpOnly cookie sessions
+│   ├── routes/                 # /health, /api/auth/*, /api/state, /api/events, /api/action
+│   ├── actions/                # Zod-validated handlers (session, combat, character, item, map, story)
+│   ├── services/               # dice, art, deities & shared state mutation helpers
+│   ├── realtime/               # Role- & character-filtered SSE broadcaster
+│   └── store/                  # initialState, filterState/HP masking, JsonStateRepository
+├── client/                     # React + Vite frontend
+│   ├── index.html
+│   ├── vite.config.ts / tsconfig.json
+│   └── src/
+│       ├── main.tsx / App.tsx
+│       ├── context/            # VttContext (cookie bootstrap, SSE sync, toasts, modals)
+│       ├── services/           # apiFetch & sendGameAction
+│       ├── canvas/             # Scaled canvas coordinates & Tower / Beat arena renderers
+│       ├── components/         # auth/, onboarding/, player/, dm/, arena/, modals/, common/
+│       └── styles/             # base.css, login.css, layout.css, game.css, index.css
+├── tests/
+│   └── integration.test.ts     # 16 unit, persistence, RBAC & full campaign integration suites
+├── package.json / tsconfig.base.json / tsconfig.server.json
+├── Dockerfile                  # Multi-stage Node 20 Alpine production build
+├── render.yaml                 # Render Web Service blueprint
+└── docs/images/                # README screenshots
 ```
 
 ---
 
 ## Getting Started
 
-### Run Locally
+### Prerequisites
+- Node.js `>= 18.0.0` (verified on Node `v20.16.0`)
+
+### Install, Build & Run Production Server
 ```bash
+npm install
+npm run build
 npm start
 ```
-Open `http://localhost:3456` (or `http://<your-local-IP>:3456` on mobile devices on the same network).
+Open `http://localhost:3456` (or `http://<your-local-IP>:3456` on other devices on the same network).
 
-### Run Automated Tests
+### Development Mode
+Run the backend watcher and Vite dev server (`http://localhost:5173`, proxied to `:3456`) in two terminals:
 ```bash
-npm test
+npm run dev:server
+npm run dev:client
 ```
 
-## Free Hosting (Render / Docker)
-1. Push this repository to GitHub.
-2. On **Render**, create a **Blueprint** (uses `render.yaml`) or **Web Service** on the **Free** tier (`$0/month`).
-3. Set `DM_PASSCODE` (and optionally `GEMINI_API_KEY`) in Environment Variables and deploy.
+### Typecheck & Automated Tests
+```bash
+npm run typecheck
+npm test
+```
+(`npm test` runs `tsx tests/integration.test.ts` across all 16 suites: shared rules/determinism, `JsonStateRepository` atomic persistence & backup recovery, HttpOnly cookie RBAC & security headers, and full DM/Player campaign workflows.)
+
+---
+
+## Hosting (Render / Docker)
+1. Push this repository to GitHub (`main`).
+2. On **Render**, create a **Blueprint** (`render.yaml`, runs `npm ci && npm run build` and `npm start`) or deploy with the multi-stage [Dockerfile](Dockerfile).
+3. Configure environment variables:
+   - `NODE_ENV=production`
+   - `DM_PASSCODE` (your Dungeon Master passcode)
+   - `SESSION_SECRET` (auto-generated in `render.yaml` or any random 32+ char secret)
+   - `GEMINI_API_KEY` (optional — enables AI Imagen portrait generation)

@@ -1,4 +1,7 @@
 node_modules/
+dist/
 data/state.json
+data/backups/
+data/.session-secret
 .DS_Store
 *.log

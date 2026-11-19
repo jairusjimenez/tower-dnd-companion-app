@@ -1,0 +1,161 @@
+﻿/* Login View â€” Single Glassmorphic "The Tower" Portal */
+.login-stage {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px 40px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(56, 189, 248, 0.22) 0%, transparent 45%),
+    radial-gradient(circle at 50% 82%, rgba(99, 102, 241, 0.16) 0%, transparent 50%),
+    #050811;
+}
+
+.tower-bg-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.rune-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: slowSpin 48s linear infinite;
+}
+
+.mote { animation: floatMote 6s ease-in-out infinite alternate; }
+.mote-2 { animation-delay: -2s; }
+.mote-3 { animation-delay: -4s; }
+.mote-4 { animation-delay: -1s; }
+
+@keyframes slowSpin {
+  from { transform: translate(400px, 280px) rotate(0deg); }
+  to { transform: translate(400px, 280px) rotate(360deg); }
+}
+
+@keyframes floatMote {
+  from { opacity: 0.25; transform: translateY(6px); }
+  to { opacity: 0.95; transform: translateY(-10px); }
+}
+
+.login-shell {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+}
+
+.brand-banner {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.tower-crest {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+  filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.55));
+}
+
+.brand-banner h1 {
+  margin: 0;
+  font-size: clamp(2.35rem, 6vw, 3.15rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #ffffff 10%, #bae6fd 58%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 24px rgba(56, 189, 248, 0.48));
+}
+
+.brand-subtitle {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+}
+
+.login-monolith {
+  position: relative;
+  background: rgba(11, 18, 34, 0.78);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(56, 189, 248, 0.38);
+  border-top-color: rgba(186, 230, 253, 0.55);
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.65),
+    0 0 36px rgba(56, 189, 248, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.login-monolith.dm-mode {
+  border-color: rgba(251, 191, 36, 0.5);
+  border-top-color: rgba(254, 240, 138, 0.65);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.65),
+    0 0 38px rgba(251, 191, 36, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.segmented-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.seg-btn.seg-dm.active {
+  color: var(--gold);
+  border-color: rgba(251, 191, 36, 0.5);
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.btn-glow-cyan {
+  box-shadow: 0 8px 24px rgba(56, 189, 248, 0.35);
+}
+
+.btn-glow-cyan:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 10px 30px rgba(56, 189, 248, 0.5);
+}
+
+.btn-glow-gold {
+  box-shadow: 0 8px 24px rgba(251, 191, 36, 0.32);
+}
+
+.btn-glow-gold:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 10px 30px rgba(251, 191, 36, 0.48);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rune-ring, .mote {
+    animation: none;
+  }
+}
+
+
+#login-view.login-denied,
+#login-view.login-denied .login-stage {
+  background: radial-gradient(circle at center, rgba(153, 27, 27, 0.85), rgba(32, 4, 8, 0.98)) !important;
+  transition: background 0.35s ease;
+}
+#login-view.login-denied .tower-bg-art {
+  filter: hue-rotate(155deg) saturate(1.65) brightness(1.08);
+  transition: filter 0.35s ease;
+}
+#login-view.login-denied .login-monolith {
+  border-color: rgba(239, 68, 68, 0.85);
+  box-shadow: 0 0 36px rgba(239, 68, 68, 0.35);
+}

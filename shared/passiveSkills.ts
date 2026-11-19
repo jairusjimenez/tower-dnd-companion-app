@@ -1,7 +1,6 @@
-// 200 Passive Skills across 7 Gacha Tiers
-// Drop rates sum to 100%: Normal 55%, Advanced 22%, Rare 12%, Super Rare 6%, Super Super Rare 3%, Legendary 1.5%, Mythic 0.5%
+import type { PassiveSkill, PassiveTier } from './types';
 
-const PASSIVE_GACHA_ODDS = {
+export const PASSIVE_GACHA_ODDS: Record<PassiveTier, number> = {
   Normal: 55,
   Advanced: 22,
   Rare: 12,
@@ -11,7 +10,9 @@ const PASSIVE_GACHA_ODDS = {
   Mythic: 0.5,
 };
 
-const TIER_DEFS = [
+type PassiveDefTuple = [string, string, Partial<Pick<PassiveSkill, 'bonusAc' | 'bonusDr' | 'bonusHp' | 'bonusMp' | 'bonusSpeedSpaces'>>];
+
+const TIER_DEFS: Array<{ tier: PassiveTier; prefix: string; items: PassiveDefTuple[] }> = [
   {
     tier: 'Normal',
     prefix: 'n',
@@ -256,7 +257,7 @@ const TIER_DEFS = [
   },
 ];
 
-const PASSIVE_SKILL_POOL = TIER_DEFS.flatMap(({ tier, prefix, items }) =>
+export const PASSIVE_SKILL_POOL: PassiveSkill[] = TIER_DEFS.flatMap(({ tier, prefix, items }) =>
   items.map(([name, description, bonuses], idx) => ({
     id: `pas-${prefix}-${String(idx + 1).padStart(2, '0')}`,
     name,
@@ -266,7 +267,45 @@ const PASSIVE_SKILL_POOL = TIER_DEFS.flatMap(({ tier, prefix, items }) =>
   })),
 );
 
-module.exports = {
-  PASSIVE_GACHA_ODDS,
-  PASSIVE_SKILL_POOL,
-};
+export function sampleWeightedPassive(pool: PassiveSkill[] = PASSIVE_SKILL_POOL): PassiveSkill {
+  const byTier: Record<string, PassiveSkill[]> = {};
+  for (const p of pool) {
+    if (!byTier[p.tier]) byTier[p.tier] = [];
+    byTier[p.tier].push(p);
+  }
+  const entries = Object.entries(PASSIVE_GACHA_ODDS).filter(([t]) => byTier[t]?.length);
+  const totalWeight = entries.reduce((sum, [, w]) => sum + w, 0);
+  let r = Math.random() * totalWeight;
+  let pickedTier = entries[0]?.[0] || 'Normal';
+  for (const [tier, w] of entries) {
+    r -= w;
+    if (r <= 0) {
+      pickedTier = tier;
+      break;
+    }
+  }
+  const tierList = byTier[pickedTier] || pool;
+  return tierList[Math.floor(Math.random() * tierList.length)] || pool[0];
+}
+
+export function summarizePassiveBonuses(passives: PassiveSkill[] = []): {
+  bonusHp: number;
+  bonusMp: number;
+  bonusAc: number;
+  bonusDr: number;
+  bonusSpeedSpaces: number;
+} {
+  let bonusHp = 0;
+  let bonusMp = 0;
+  let bonusAc = 0;
+  let bonusDr = 0;
+  let bonusSpeedSpaces = 0;
+  for (const p of passives) {
+    bonusHp += Number(p.bonusHp || 0);
+    bonusMp += Number(p.bonusMp || 0);
+    bonusAc += Number(p.bonusAc || 0);
+    bonusDr += Number(p.bonusDr || 0);
+    bonusSpeedSpaces += Number(p.bonusSpeedSpaces || 0);
+  }
+  return { bonusHp, bonusMp, bonusAc, bonusDr, bonusSpeedSpaces };
+}

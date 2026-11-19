@@ -1,8 +1,19 @@
-FROM node:20-alpine
+FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package.json ./
-COPY server.js ./
-COPY public ./public
+COPY package*.json ./
+RUN npm ci
+COPY tsconfig*.json ./
+COPY shared ./shared
+COPY server ./server
+COPY client ./client
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
 ENV PORT=3456
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY --from=builder /app/dist ./dist
 EXPOSE 3456
-CMD ["node", "server.js"]
+CMD ["node", "dist/server/src/index.js"]
