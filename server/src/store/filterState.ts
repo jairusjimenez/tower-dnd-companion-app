@@ -1,6 +1,7 @@
 import {
-  PASSIVE_GACHA_ODDS,
   PASSIVE_SKILL_POOL,
+  getPartyFloor,
+  getPassiveOddsForFloor,
   type FilteredGameState,
   type GameState,
   type Monster,
@@ -92,13 +93,23 @@ export function filterStateForRole(
   const filteredReactions = (srcState.pendingReactions || []).filter(
     (r) => isDm || !characterId || r.targetCharacterId === characterId,
   );
+  const lastResolvedClash =
+    srcState.lastResolvedClash &&
+    (isDm || !characterId || srcState.lastResolvedClash.targetCharacterId === characterId)
+      ? srcState.lastResolvedClash
+      : null;
 
   return {
     version: srcState.version,
     schemaVersion: srcState.schemaVersion,
     session: srcState.session,
     mechanics: srcState.mechanics,
-    passiveGacha: { odds: PASSIVE_GACHA_ODDS, pool: PASSIVE_SKILL_POOL },
+    passiveGacha: {
+      odds: getPassiveOddsForFloor(
+        Number(characterId ? srcState.characters?.[characterId]?.currentFloor : 0) || getPartyFloor(srcState),
+      ),
+      pool: PASSIVE_SKILL_POOL,
+    },
     grimoire: srcState.grimoire || [],
     deities: srcState.deities || [],
     characters: srcState.characters,
@@ -110,7 +121,11 @@ export function filterStateForRole(
     },
     monsters: filteredMonsters,
     pendingReactions: filteredReactions,
+    lastResolvedClash,
     bestiary: isDm ? srcState.bestiary : [],
+    npcRoster: isDm ? srcState.npcRoster || [] : [],
+    treasureCatalog: isDm ? srcState.treasureCatalog || [] : [],
+    chestCatalog: isDm ? srcState.chestCatalog : undefined,
     map: {
       ...srcState.map,
       tokens: filteredTokens,

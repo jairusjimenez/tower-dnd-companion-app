@@ -9,8 +9,14 @@ import { DmCharModal } from './components/dm/DmCharModal';
 import { DmSessionModal } from './components/dm/DmSessionModal';
 import { DmView } from './components/dm/DmView';
 import { AttackRollModal } from './components/modals/AttackRollModal';
+import { ChestRevealModal } from './components/modals/ChestRevealModal';
+import { CombatClashModal } from './components/modals/CombatClashModal';
+import { DiceRollModal } from './components/modals/DiceRollModal';
+import { MonsterDefeatedModal } from './components/modals/MonsterDefeatedModal';
 import { PassiveGachaModal } from './components/modals/PassiveGachaModal';
+import { StoryPromptModal } from './components/modals/StoryPromptModal';
 import { TradeModal } from './components/modals/TradeModal';
+import { TurnNotificationModal } from './components/modals/TurnNotificationModal';
 import { OnboardingView } from './components/onboarding/OnboardingView';
 import { PlayerView } from './components/player/PlayerView';
 import { useVtt } from './context/VttContext';
@@ -61,8 +67,14 @@ export function App() {
       <AccountModal />
       <BeatMapModal />
       <AttackRollModal />
+      <ChestRevealModal />
+      <CombatClashModal />
+      <DiceRollModal />
+      <MonsterDefeatedModal />
       <PassiveGachaModal />
+      <StoryPromptModal />
       <TradeModal />
+      <TurnNotificationModal />
       <DmCharModal />
       <DmSessionModal />
       <ToastStack />

@@ -1,10 +1,24 @@
 import { useEffect, useState } from 'react';
 import { useVtt } from '../../context/VttContext';
 
+interface AttackRollInfo {
+  natural: number;
+  total: number;
+  targetAc: number;
+  hit: boolean;
+  crit: boolean;
+  fumble: boolean;
+  breakdown: string;
+}
+
 interface DamageRes {
   ok?: boolean;
+  miss?: boolean;
+  hit?: boolean;
   finalDamage?: number;
   friendlyFire?: boolean;
+  targetsHit?: string[];
+  attackRoll?: AttackRollInfo | null;
   ally?: { name: string; hp: number; maxHp: number };
   monster?: { hp: number | null; maxHp: number | null; healthTier?: string };
   logEntry?: { rollDetails?: { breakdown?: string } };
@@ -41,22 +55,42 @@ export function AttackRollModal() {
             monsterId: attackRollRequest.monTok.id,
             attackerId: attackRollRequest.me.id,
             beatId: attackRollRequest.beatId,
-            diceFormula: attackRollRequest.wep?.damageDice || '1d6',
-            damageType: attackRollRequest.wep?.damageType || 'Physical',
+            diceFormula: attackRollRequest.diceFormulaOverride || attackRollRequest.wep?.damageDice || '1d6',
+            damageType: attackRollRequest.damageTypeOverride || attackRollRequest.wep?.damageType || 'Physical',
             includeStatMod: true,
+            attackRoll: true,
+            ...(attackRollRequest.attackArea ? { attackArea: attackRollRequest.attackArea } : {}),
+            ...(attackRollRequest.attackAreaModifier !== undefined
+              ? { attackAreaModifier: attackRollRequest.attackAreaModifier }
+              : {}),
+            ...(attackRollRequest.isSkill ? { isSkill: true } : {}),
+            ...(attackRollRequest.healFormula ? { healFormula: attackRollRequest.healFormula } : {}),
+            ...(attackRollRequest.effectSpec ? { effectSpec: attackRollRequest.effectSpec } : {}),
           },
           { throwOnError: true },
         );
         if (cancelled) return;
         window.clearInterval(tick);
         setRolling(false);
+
+        if (res?.miss) {
+          setLanded(false);
+          setCubeText(String(res.attackRoll?.natural ?? 'MISS'));
+          setResultInfo({
+            tierClass: 'tier-normal',
+            title: res.attackRoll?.fumble ? 'FAILED — Critical Miss (Natural 1)!' : 'FAILED — Attack Missed!',
+            detail: res.attackRoll?.breakdown || 'Your attack failed to beat monster AC.',
+          });
+          return;
+        }
+
         setLanded(true);
         setCubeText(String(res?.finalDamage ?? 0));
 
         if (res?.friendlyFire && res.ally) {
           setResultInfo({
             tierClass: 'tier-rare',
-            title: 'FRIENDLY FIRE!',
+            title: 'FAILED — FRIENDLY FIRE!',
             detail: `Your shot struck ally ${res.ally.name} for ${res.finalDamage} damage! (HP: ${res.ally.hp}/${res.ally.maxHp})`,
           });
         } else {
@@ -67,10 +101,15 @@ export function AttackRollModal() {
                 ? ` • ${attackRollRequest.monTok.name}: ${res.monster.healthTier}`
                 : ''
             : '';
-          const formula = attackRollRequest.wep?.damageDice || '1d6';
+          const formula = attackRollRequest.diceFormulaOverride || attackRollRequest.wep?.damageDice || '1d6';
+          const atkPrefix = res?.attackRoll?.breakdown ? `${res.attackRoll.breakdown} • ` : '';
+          const aoeText = res?.targetsHit && res.targetsHit.length > 1
+            ? ` • AoE hit ${res.targetsHit.length} monsters!`
+            : '';
           setResultInfo({
-            title: `Dealt ${res?.finalDamage ?? 0} Damage!`,
-            detail: `${res?.logEntry?.rollDetails?.breakdown || formula}${monHpText}`,
+            tierClass: res?.attackRoll?.crit ? 'tier-legendary' : undefined,
+            title: `${res?.attackRoll?.crit ? 'CRITICAL SUCCESS! ' : 'SUCCESS — '}Dealt ${res?.finalDamage ?? 0} Damage!`,
+            detail: `${atkPrefix}${res?.logEntry?.rollDetails?.breakdown || formula}${monHpText}${aoeText}`,
           });
         }
       } catch (err) {

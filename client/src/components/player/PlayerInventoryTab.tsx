@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { getEquippedTotals, isStatsAndEquipmentLocked, type Character } from '@shared/index';
+import {
+  PLAYER_ATTACK_AREAS,
+  UNIT_EFFECT_KINDS,
+  UNIT_EFFECT_META,
+  formatMonsterAttackArea,
+  getEquippedTotals,
+  isStatsAndEquipmentLocked,
+  type Character,
+  type UnitEffectKind,
+} from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 import { DiabloEquipmentGrid } from '../common/DiabloEquipmentGrid';
 import { InventoryItemSvg } from '../common/EquipmentIcons';
@@ -40,6 +49,84 @@ export function PlayerInventoryTab({ ch }: { ch: Character }) {
             onUnequip={(slot) => sendAction('equipment_action', { characterId: ch.id, subAction: 'unequip', slot })}
           />
         </div>
+        {ch.equipment?.mainHand && (
+          <div className="item-card mt-xs" style={{ padding: '8px 10px' }}>
+            <div className="small" style={{ fontWeight: 700, marginBottom: '4px' }}>
+              Main Hand Attack Area ({ch.equipment.mainHand.name})
+            </div>
+            <div className="btn-row" style={{ flexWrap: 'wrap', gap: '6px' }}>
+              <select
+                aria-label="Main Hand Weapon Attack Area"
+                disabled={isBuildLocked}
+                value={ch.equipment.mainHand.attackArea || 'single'}
+                onChange={(e) =>
+                  sendAction('equipment_action', {
+                    characterId: ch.id,
+                    subAction: 'update_area',
+                    slot: 'mainHand',
+                    attackArea: e.target.value,
+                  })
+                }
+                style={{ width: 'auto', minHeight: '26px', padding: '2px 6px', fontSize: '0.75rem' }}
+              >
+                {PLAYER_ATTACK_AREAS.map((a) => (
+                  <option key={a} value={a}>
+                    {formatMonsterAttackArea(a)}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Main Hand Weapon Area Size Modifier"
+                disabled={isBuildLocked}
+                value={ch.equipment.mainHand.attackAreaModifier ?? 0}
+                onChange={(e) =>
+                  sendAction('equipment_action', {
+                    characterId: ch.id,
+                    subAction: 'update_area',
+                    slot: 'mainHand',
+                    attackAreaModifier: Number(e.target.value),
+                  })
+                }
+                style={{ width: 'auto', minHeight: '26px', padding: '2px 6px', fontSize: '0.75rem' }}
+              >
+                {[-2, -1, 0, 1, 2, 3, 4].map((m) => (
+                  <option key={m} value={m}>
+                    Mod: {m > 0 ? `+${m}` : m} Sp
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Main Hand Weapon On-Hit Effect"
+                disabled={isBuildLocked}
+                value={ch.equipment.mainHand.effectSpec?.kind || ''}
+                onChange={(e) => {
+                  const kind = e.target.value as UnitEffectKind | '';
+                  sendAction('equipment_action', {
+                    characterId: ch.id,
+                    subAction: 'update_area',
+                    slot: 'mainHand',
+                    effectSpec: kind
+                      ? {
+                          kind,
+                          potency: kind === 'stun' ? 1 : 3,
+                          duration: kind === 'stun' ? 1 : 2,
+                          target: UNIT_EFFECT_META[kind].defaultTarget,
+                        }
+                      : null,
+                  });
+                }}
+                style={{ width: 'auto', minHeight: '26px', padding: '2px 6px', fontSize: '0.75rem' }}
+              >
+                <option value="">On-Hit Effect: None</option>
+                {UNIT_EFFECT_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {UNIT_EFFECT_META[k].label} ({UNIT_EFFECT_META[k].category})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="panel card-glow-cyan">

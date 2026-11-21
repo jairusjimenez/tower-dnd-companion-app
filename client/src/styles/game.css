@@ -778,3 +778,66 @@
   }
   .quick-vitals { display: none; }
 }
+
+@keyframes chestShakeAnim {
+  0%, 100% { transform: translateY(0) rotate(0deg) scale(1); }
+  20% { transform: translateY(-4px) rotate(-6deg) scale(1.04); }
+  40% { transform: translateY(-6px) rotate(6deg) scale(1.07); }
+  60% { transform: translateY(-4px) rotate(-5deg) scale(1.08); }
+  80% { transform: translateY(-8px) rotate(4deg) scale(1.12); }
+}
+
+@keyframes chestRevealPopAnim {
+  0% { opacity: 0; transform: scale(0.92) translateY(8px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.chest-anim-stage {
+  animation: chestShakeAnim 0.55s ease-in-out infinite;
+}
+
+.chest-reveal-pop {
+  animation: chestRevealPopAnim 0.35s ease-out forwards;
+}
+
+.tag-copper {
+  background: rgba(180, 83, 9, 0.22);
+  color: #fdba74;
+  border: 1px solid rgba(251, 146, 60, 0.45);
+}
+
+.tag-item-common {
+  background: rgba(148, 163, 184, 0.16);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.tag-item-uncommon {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border: 1px solid rgba(52, 211, 153, 0.45);
+}
+
+.tag-item-rare {
+  background: rgba(14, 165, 233, 0.2);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+}
+
+.tag-item-epic {
+  background: rgba(168, 85, 247, 0.22);
+  color: #d8b4fe;
+  border: 1px solid rgba(192, 132, 252, 0.55);
+}
+
+.tag-item-legendary {
+  background: rgba(245, 158, 11, 0.22);
+  color: #fde047;
+  border: 1px solid rgba(251, 191, 36, 0.6);
+}
+
+.tag-item-mythic {
+  background: rgba(225, 29, 72, 0.25);
+  color: #fda4af;
+  border: 1px solid rgba(251, 113, 133, 0.65);
+}

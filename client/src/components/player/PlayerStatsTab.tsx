@@ -1,4 +1,4 @@
-import { computeStatModifier, isStatsAndEquipmentLocked, type Character, type RollLogEntry } from '@shared/index';
+import { computePassiveModifiers, computeStatModifier, isStatsAndEquipmentLocked, type Character, type RollLogEntry } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 import { DiabloEquipmentGrid } from '../common/DiabloEquipmentGrid';
 
@@ -22,6 +22,7 @@ export function PlayerStatsTab({
     setTradeItemId,
     setGachaModalOpen,
     setGachaSpinData,
+    setActivePromptModal,
   } = useVtt();
 
   if (!state) return null;
@@ -36,51 +37,66 @@ export function PlayerStatsTab({
   const hasPendingDraw = Boolean(ch.pendingPassiveDraw);
   const ownedPassives = ch.passives || [];
 
-  // Build combined passive summary
+  // Build combined passive summary from structured PassiveModifiers
+  const pMods = computePassiveModifiers(ch);
   const passiveTotals = new Map<string, { val: number; unit: string }>();
   const addTotal = (label: string, val: number, unit = '') => {
     if (!val) return;
-    const prev = passiveTotals.get(label) || { val: 0, unit };
-    prev.val += val;
-    passiveTotals.set(label, prev);
+    passiveTotals.set(label, { val, unit });
   };
+
+  addTotal('Max HP', pMods.bonusHp);
+  addTotal('Max MP', pMods.bonusMp);
+  addTotal('Armor Class', pMods.bonusAc);
+  addTotal('Damage Reduction', pMods.bonusDr);
+  addTotal('Movement', pMods.bonusSpeedSpaces, ' Spaces');
+  addTotal('Initiative', pMods.bonusInitiative);
+  addTotal('Attack Hit', pMods.bonusAttackHit);
+  addTotal('Melee Hit', pMods.bonusMeleeHit);
+  addTotal('Ranged Hit', pMods.bonusRangedHit);
+  addTotal('Spell Hit', pMods.bonusSpellHit);
+  addTotal('Weapon Damage', pMods.bonusWeaponDamage);
+  addTotal('Melee Damage', pMods.bonusMeleeDamage);
+  addTotal('Ranged Damage', pMods.bonusRangedDamage);
+  addTotal('Spell Power', pMods.bonusSpellPower);
+  addTotal('Elemental Spell Dmg', pMods.bonusElementalSpellDamage);
+  addTotal('Crit Damage', pMods.bonusCritDamage);
+  addTotal('Ignore Enemy DR', pMods.ignoreEnemyDr);
+  addTotal('Ranged Range', pMods.bonusRangedRangeSpaces, ' Spaces');
+  addTotal('Spell Range', pMods.bonusSpellRangeSpaces, ' Spaces');
+  addTotal('HP Regen / Turn', pMods.hpRegenPerTurn);
+  addTotal('MP Regen / Turn', pMods.mpRegenPerTurn);
+  addTotal('Rest Spot HP', pMods.restSpotBonusHp);
+  addTotal('Rest Spot MP', pMods.restSpotBonusMp);
+  addTotal('Consumable HP', pMods.consumableBonusHp);
+  addTotal('Consumable MP', pMods.consumableBonusMp);
+  addTotal('Healing Received', pMods.healingReceivedBonus);
+  addTotal('Bonus Gold', pMods.bonusGoldPct, '%');
+  addTotal('Parry Roll', pMods.bonusParryRoll);
+  addTotal('Counter Damage', pMods.bonusCounterDamage);
+  addTotal('Evasion', pMods.evasionPct, '%');
+  addTotal('Spell MP Discount', pMods.spellMpDiscount);
+
   const specialEffects = new Map<string, { text: string; count: number; multPct: number }>();
-
-  for (const p of ownedPassives) {
-    const mult = Number(p.multiplierPct || 100) / 100;
-    if (p.bonusAc) addTotal('Armor Class', Math.round(Number(p.bonusAc) * mult));
-    if (p.bonusDr) addTotal('Damage Reduction', Math.round(Number(p.bonusDr) * mult));
-    if (p.bonusHp) addTotal('Max HP', Math.round(Number(p.bonusHp) * mult));
-    if (p.bonusMp) addTotal('Max MP', Math.round(Number(p.bonusMp) * mult));
-    if (p.bonusSpeedSpaces) addTotal('Movement', Math.round(Number(p.bonusSpeedSpaces) * mult), ' Spaces');
-
-    const desc = String(p.description || '');
-    let matchedNumeric = Boolean(p.bonusAc || p.bonusDr || p.bonusHp || p.bonusMp || p.bonusSpeedSpaces);
-    const patterns: Array<[RegExp, string, string]> = [
-      [/\+(\d+)\s+(?:to\s+)?Initiative/gi, 'Initiative', ''],
-      [/\+(\d+)\s+(?:to\s+)?(?:Melee\s+|Ranged\s+|Spell\s+)?Attack\s+Hit/gi, 'Attack Hit', ''],
-      [/\+(\d+)\s+(?:Weapon\s+Damage|Melee\s+Damage)/gi, 'Weapon Damage', ''],
-      [/\+(\d+)\s+Spell\s+(?:Power|Damage)/gi, 'Spell Power', ''],
-      [/\+(\d+)\s+Range\s+Spaces?/gi, 'Range', ' Spaces'],
-      [/\+(\d+)%\s+(?:bonus\s+)?Gold/gi, 'Bonus Gold', '%'],
-      [/Restore\s+(\d+)\s+HP\s+at\s+the\s+start/gi, 'HP Regen / Turn', ''],
-      [/Restore\s+(\d+)\s+MP\s+at\s+the\s+start/gi, 'MP Regen / Turn', ''],
-    ];
-    for (const [rx, label, unit] of patterns) {
-      let m: RegExpExecArray | null;
-      while ((m = rx.exec(desc)) !== null) {
-        addTotal(label, Math.round(Number(m[1]) * mult), unit);
-        matchedNumeric = true;
-      }
-    }
-    if (!matchedNumeric && desc) {
-      const key = desc.trim();
-      const prev = specialEffects.get(key) || { text: key, count: 0, multPct: 0 };
-      prev.count += 1;
-      prev.multPct = Math.max(prev.multPct, Number(p.multiplierPct || 100));
-      specialEffects.set(key, prev);
-    }
-  }
+  const addSpecial = (text: string) => {
+    if (!text) return;
+    specialEffects.set(text, { text, count: 1, multPct: 100 });
+  };
+  if (pMods.critThreshold !== null) addSpecial(`Crit on ${pMods.critThreshold}-20`);
+  if (pMods.critMultiplier !== null) addSpecial(`Crit ×${pMods.critMultiplier}`);
+  if (pMods.ignoreAllEnemyDr) addSpecial('Ignore All Enemy DR');
+  if (pMods.actFirstInInitiative) addSpecial('Act First in Initiative');
+  if (pMods.allAttributesInCombat > 0) addSpecial(`+${pMods.allAttributesInCombat} All Stat Mods in Combat`);
+  if (pMods.zeroCostAllSpells) addSpecial('All Spells Cost 0 MP');
+  else if (pMods.zeroCostFirstSpell) addSpecial('First Spell Costs 0 MP');
+  if (pMods.revivePerCombatPct > 0) addSpecial(`Revive ${pMods.revivePerCombatPct}% HP${pMods.reviveMpAlso ? ' & MP' : ''} (1/combat)`);
+  if (pMods.surviveFatalPerCombat) addSpecial('Survive Lethal Hit at 1 HP (1/combat)');
+  if (pMods.undyingLegendPerCombat) addSpecial('1 HP Floor for 1 Round (1/combat)');
+  if (pMods.damageBonusVsLowLevel > 0) addSpecial(`+${pMods.damageBonusVsLowLevel} Dmg vs Lv 1-10`);
+  if (pMods.damageBonusVsBossPct > 0) addSpecial(`+${pMods.damageBonusVsBossPct}% Dmg vs Boss/Elite`);
+  if (pMods.aoeAllEnemiesWithin4Spaces) addSpecial('Spells Hit All Foes Within 4 Spaces');
+  if (pMods.hitAdditionalNearbyFoe) addSpecial('Weapon Strike Hits +1 Nearby Foe');
+  for (const note of pMods.specialNotes) addSpecial(note);
 
   const tierOrder = ['Normal', 'Advanced', 'Rare', 'Super Rare', 'Super Super Rare', 'Legendary', 'Mythic'];
   const tierCounts: Record<string, number> = {};
@@ -305,18 +321,21 @@ export function PlayerStatsTab({
                       type="button"
                       className="btn btn-xs btn-outline"
                       onClick={async () => {
+                        const floorNum = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
+                        const dc = 10 + Math.floor(floorNum * 1.2);
                         const res = await sendAction<{ roll?: RollLogEntry }>('roll_dice', {
                           count: 1,
                           sides: 20,
                           modifier: mod,
-                          label: `${st.key} Check`,
+                          dc,
+                          label: `${st.key} Check (DC ${dc})`,
                           rollerName: ch.name,
                         });
                         if (res?.roll) {
                           pushLocalToast({
                             title: `${st.key} CHECK`,
-                            message: `Rolled ${res.roll.total} (${res.roll.formula})`,
-                            category: 'info',
+                            message: `Rolled ${res.roll.total} vs DC ${dc} (${res.roll.passed ? 'SUCCESS' : 'FAILED'})`,
+                            category: res.roll.passed ? 'loot' : 'warning',
                           });
                         }
                       }}
@@ -364,18 +383,21 @@ export function PlayerStatsTab({
                         type="button"
                         className="btn btn-xs btn-cyan"
                         onClick={async () => {
+                          const floorNum = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
+                          const dc = 10 + Math.floor(floorNum * 1.2);
                           const res = await sendAction<{ roll?: RollLogEntry }>('roll_dice', {
                             count: 1,
                             sides: 20,
                             modifier: mod,
-                            label: sk.name,
+                            dc,
+                            label: `${sk.name} Check (DC ${dc})`,
                             rollerName: ch.name,
                           });
                           if (res?.roll) {
                             pushLocalToast({
                               title: sk.name.toUpperCase(),
-                              message: `Rolled ${res.roll.total} (${res.roll.formula})`,
-                              category: 'info',
+                              message: `Rolled ${res.roll.total} vs DC ${dc} (${res.roll.passed ? 'SUCCESS' : 'FAILED'})`,
+                              category: res.roll.passed ? 'loot' : 'warning',
                             });
                           }
                         }}
@@ -493,16 +515,68 @@ export function PlayerStatsTab({
           <div id="p-active-story-card" className="panel card-glow-gold">
             <div className="panel-header">
               <h3>{activeBeat.title}</h3>
-              <span className="tag tag-gold">{activeBeat.floor}F</span>
+              <div className="btn-row">
+                <span className={`tag ${activeBeat.beatType === 'narration' ? 'tag-purple' : 'tag-crimson'}`}>
+                  {activeBeat.beatType === 'narration' ? 'NARRATION' : 'COMBAT'}
+                </span>
+                <span className="tag tag-gold">{activeBeat.floor}F</span>
+              </div>
             </div>
             <div className="story-narration">{activeBeat.narration}</div>
+            {(activeBeat.prompts || []).length > 0 && (
+              <div className="list-stack mt-xs">
+                {activeBeat.prompts!.map((pr) => {
+                  const isForMe = pr.target === 'all' || pr.target === ch.id;
+                  const myAns = (pr.answers || []).find((a) => a.characterId === ch.id);
+                  const partyCount = Object.keys(state.characters || {}).length;
+                  const allGroupDone =
+                    pr.target === 'all'
+                      ? partyCount > 0 && (pr.answers || []).length >= partyCount
+                      : (pr.answers || []).length >= 1;
+                  return (
+                    <div key={pr.id} className="item-card" style={{ borderColor: 'rgba(168, 85, 247, 0.45)' }}>
+                      <div className="item-card-top">
+                        <strong className="small">
+                          <span className={`tag ${pr.target === 'all' ? 'tag-cyan' : 'tag-gold'}`}>
+                            {pr.target === 'all' ? 'DM Asks Group' : `DM Asks ${pr.targetName}`}
+                          </span>{' '}
+                          &ldquo;{pr.question}&rdquo;
+                        </strong>
+                        {isForMe && (
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-gold"
+                            onClick={() => setActivePromptModal({ beatId: activeBeat.id, promptId: pr.id })}
+                          >
+                            {myAns ? (allGroupDone ? 'View Poll' : 'Waiting Status') : 'Answer in Modal'}
+                          </button>
+                        )}
+                      </div>
+                      {myAns && !allGroupDone ? (
+                        <div className="small mt-xs" style={{ color: '#fbbf24' }}>
+                          Waiting on other players to make an answer...
+                        </div>
+                      ) : (
+                        (pr.answers || []).map((ans) => (
+                          <div key={ans.id} className="small mt-xs" style={{ paddingLeft: '6px', borderLeft: '2px solid #38bdf8' }}>
+                            <b style={{ color: '#38bdf8' }}>{ans.characterName}:</b> &ldquo;{ans.answer}&rdquo;
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <div className="btn-row mt-xs">
               <button type="button" className="btn btn-xs btn-gold" onClick={() => onOpenBeat(activeBeat.id)}>
-                View Beat
+                View Beat{(activeBeat.prompts || []).length > 0 ? ' & Answer DM' : ''}
               </button>
-              <button type="button" className="btn btn-xs btn-cyan" onClick={() => onOpenBeatMap(activeBeat.id)}>
-                View Map ({activeBeat.arena?.cols || 20}×{activeBeat.arena?.rows || 20})
-              </button>
+              {activeBeat.beatType !== 'narration' && (
+                <button type="button" className="btn btn-xs btn-cyan" onClick={() => onOpenBeatMap(activeBeat.id)}>
+                  View Map ({activeBeat.arena?.cols || 20}×{activeBeat.arena?.rows || 20})
+                </button>
+              )}
             </div>
           </div>
         )}

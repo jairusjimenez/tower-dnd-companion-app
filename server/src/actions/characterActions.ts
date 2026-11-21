@@ -1,10 +1,18 @@
 import crypto from 'node:crypto';
 import {
+  BALANCE,
   DEFAULT_STAT_MILESTONES,
   PASSIVE_SKILL_POOL,
+  computeStatModifier,
+  getPartyFloor,
+  getPassiveOddsForFloor,
   isStatsAndEquipmentLocked,
+  levelUpGrowth,
+  pickPassiveTier,
+  statPointsForLevelUp,
+  xpToNextForLevel,
+  type Character,
   type CharacterSkill,
-  type PassiveTier,
 } from '../../../shared';
 import { generateCharacterArt } from '../services/art';
 import {
@@ -51,6 +59,10 @@ export function updateCharacterAction(ctx: ActionRequestContext, payload: Record
     }
   }
   if (Array.isArray(p.skills)) ch.skills = p.skills as CharacterSkill[];
+  if (ctx.role === 'dm' && Array.isArray(p.passives)) {
+    ch.passives = p.passives as Character['passives'];
+    recalculateCharacterAcAndDr(ctx.state, ch);
+  }
   if (p.currency && typeof p.currency === 'object') ch.currency = { ...ch.currency, ...(p.currency as { gold?: number; manaStones?: number }) };
   if (Array.isArray(p.conditions)) ch.conditions = p.conditions as string[];
   if (p.notes !== undefined) ch.notes = String(p.notes);
@@ -147,6 +159,19 @@ export async function generateCharacterArtAction(
   return { ok: true, portraitUrl: ch.portraitUrl, engine: generated.engine, character: ch };
 }
 
+/** Each point in VIT / INT directly raises (or refunds) max HP / MP so early stat choices matter. */
+function applyStatInvestmentToPools(ch: Character, statKey: string, delta: number): void {
+  if (statKey === 'VIT') {
+    const hpDelta = delta * BALANCE.perVitPointHp;
+    ch.maxHp = Math.max(1, Number(ch.maxHp || 1) + hpDelta);
+    ch.hp = Math.max(1, Math.min(ch.maxHp, Number(ch.hp || 0) + (hpDelta > 0 ? hpDelta : 0)));
+  } else if (statKey === 'INT') {
+    const mpDelta = delta * BALANCE.perIntPointMp;
+    ch.maxMp = Math.max(0, Number(ch.maxMp || 0) + mpDelta);
+    ch.mp = Math.max(0, Math.min(ch.maxMp, Number(ch.mp || 0) + (mpDelta > 0 ? mpDelta : 0)));
+  }
+}
+
 export function allocateStatAction(ctx: ActionRequestContext, payload: Record<string, unknown>): ActionResult {
   const { ch, error } = resolveAuthorizedCharacter(
     ctx,
@@ -171,6 +196,7 @@ export function allocateStatAction(ctx: ActionRequestContext, payload: Record<st
     if (available < rawAmount) return { status: 400, error: 'Not enough unspent stat points.' };
     ch.stats[statKey] = currentVal + rawAmount;
     ch.unspentStatPoints = available - rawAmount;
+    applyStatInvestmentToPools(ch, statKey, rawAmount);
     logPlayerHistory(ctx.state, ch.id, 'stat', `Allocated +${rawAmount} ${statKey} (now ${ch.stats[statKey]})`);
   } else {
     const refund = Math.abs(rawAmount);
@@ -188,6 +214,7 @@ export function allocateStatAction(ctx: ActionRequestContext, payload: Record<st
     }
     ch.stats[statKey] = currentVal - refund;
     ch.unspentStatPoints = available + refund;
+    applyStatInvestmentToPools(ch, statKey, -refund);
     logPlayerHistory(ctx.state, ch.id, 'stat', `Removed -${refund} ${statKey} (now ${ch.stats[statKey]})`);
   }
 
@@ -216,27 +243,13 @@ export function rollPassiveGachaAction(ctx: ActionRequestContext, payload: Recor
   ch.passiveTickets = tickets - 1;
   ch.passives = ch.passives || [];
 
-  const roll = crypto.randomInt(0, 1000);
-  const tier: PassiveTier =
-    roll < 5
-      ? 'Mythic'
-      : roll < 20
-        ? 'Legendary'
-        : roll < 50
-          ? 'Super Super Rare'
-          : roll < 110
-            ? 'Super Rare'
-            : roll < 230
-              ? 'Rare'
-              : roll < 450
-                ? 'Advanced'
-                : 'Normal';
+  const floorLevel = Math.max(1, Number(ch.currentFloor) || getPartyFloor(ctx.state));
+  const tier = pickPassiveTier(getPassiveOddsForFloor(floorLevel), crypto.randomInt(0, 1_000_000) / 1_000_000);
 
   const tierPool = PASSIVE_SKILL_POOL.filter((p) => p.tier === tier);
   const picked = tierPool[crypto.randomInt(0, tierPool.length)];
   const existing = ch.passives.find((p) => p.id === picked.id);
 
-  const floorLevel = Math.max(1, Number(ch.currentFloor || ctx.state.map?.currentFloor || 1));
   const tierMult = ({ Normal: 1, Advanced: 1.5, Rare: 2.2, 'Super Rare': 3, 'Super Super Rare': 4, Legendary: 6, Mythic: 10 } as Record<string, number>)[tier] || 1;
   const declineGold = Math.round(25 * floorLevel * tierMult);
   const declineXp = Math.round(20 * floorLevel * tierMult);
@@ -350,6 +363,8 @@ export function resolvePassiveGachaAction(ctx: ActionRequestContext, payload: Re
       category: ['Mythic', 'Legendary', 'Super Super Rare', 'Super Rare'].includes(tier) ? 'loot' : 'system',
       target: ch.id,
     });
+    ch.speed = Math.max(1, Number(ch.speedSpaces || 6)) * 5;
+    recalculateCharacterAcAndDr(ctx.state, ch);
     syncCharacterDerived(ctx, ch.id);
     commitState(ctx);
     return { ok: true, decision: 'accept', duplicate: true, tier, skill: existing, extraPct, multiplierPct: nextMult, character: ch };
@@ -377,6 +392,8 @@ export function resolvePassiveGachaAction(ctx: ActionRequestContext, payload: Re
     category: ['Mythic', 'Legendary', 'Super Super Rare', 'Super Rare'].includes(tier) ? 'loot' : 'system',
     target: ch.id,
   });
+  ch.speed = Math.max(1, Number(ch.speedSpaces || 6)) * 5;
+  recalculateCharacterAcAndDr(ctx.state, ch);
   syncCharacterDerived(ctx, ch.id);
   commitState(ctx);
   return { ok: true, decision: 'accept', duplicate: false, tier, skill: acquired, multiplierPct: 100, character: ch };
@@ -392,17 +409,33 @@ export function levelUpAction(ctx: ActionRequestContext, payload: Record<string,
 
   ch.level = Math.max(1, Number(ch.level || 1));
   ch.xp = Number(ch.xp || 0);
-  const xpToNext = Number(ch.xpToNext || ch.level * 100);
+  const xpToNext = Number(ch.xpToNext || xpToNextForLevel(ch.level));
   if (ch.xp < xpToNext) {
     return { status: 400, error: `Not enough XP to level up (${ch.xp}/${xpToNext} XP).` };
   }
 
   ch.xp -= xpToNext;
   ch.level += 1;
-  ch.xpToNext = ch.level * 100;
-  ch.unspentStatPoints = Number(ch.unspentStatPoints || 0) + 2;
+  ch.xpToNext = xpToNextForLevel(ch.level);
+  const gainedPoints = statPointsForLevelUp(ch.level);
+  ch.unspentStatPoints = Number(ch.unspentStatPoints || 0) + gainedPoints;
   ch.passiveTickets = Number(ch.passiveTickets || 0) + 1;
-  logPlayerHistory(ctx.state, ch.id, 'xp', `Leveled up to Level ${ch.level} (+2 Stat Pts, +1 Passive Ticket)!`);
+
+  const vitMod = computeStatModifier(Number(ch.stats?.VIT ?? 10), ctx.state.mechanics, ch);
+  const intMod = computeStatModifier(Number(ch.stats?.INT ?? 10), ctx.state.mechanics, ch);
+  const growth = levelUpGrowth(vitMod, intMod);
+  ch.maxHp = Number(ch.maxHp || 1) + growth.hp;
+  ch.hp = Math.min(ch.maxHp, Number(ch.hp || 0) + growth.hp);
+  ch.maxMp = Number(ch.maxMp || 0) + growth.mp;
+  ch.mp = Math.min(ch.maxMp, Number(ch.mp || 0) + growth.mp);
+
+  logPlayerHistory(
+    ctx.state,
+    ch.id,
+    'xp',
+    `Leveled up to Level ${ch.level} (+${gainedPoints} Stat Pts, +${growth.hp} Max HP, +${growth.mp} Max MP, +1 Passive Ticket)!`,
+  );
+  syncCharacterDerived(ctx, ch.id);
   commitState(ctx);
 
   return {
@@ -413,6 +446,9 @@ export function levelUpAction(ctx: ActionRequestContext, payload: Record<string,
       xpToNext: ch.xpToNext,
       unspentStatPoints: ch.unspentStatPoints,
       passiveTickets: ch.passiveTickets,
+      statPointsGained: gainedPoints,
+      hpGained: growth.hp,
+      mpGained: growth.mp,
     },
     character: ch,
   };

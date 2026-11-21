@@ -1,16 +1,26 @@
 import crypto from 'node:crypto';
 import {
+  PLAYER_ATTACK_AREAS,
+  UNIT_EFFECT_META,
   buildStarterEquipment,
+  clampAttackAreaModifier,
   clampSpellToFloor,
+  computePassiveModifiers,
   getMaxSpellsForLevel,
+  getPartyFloor,
   isStatsAndEquipmentLocked,
   normalizeSpellElement,
+  type AttackArea,
   type EquipmentItem,
   type EquipmentSlot,
   type Spell,
+  type UnitEffectKind,
+  type UnitEffectSpec,
 } from '../../../shared';
 import { extractGoogleDocId, parseDeityTextIntoEntries } from '../services/deities';
+import { rollDiceServer } from '../services/dice';
 import {
+  applyUnitEffect,
   commitState,
   createInventoryItem,
   logPlayerHistory,
@@ -46,7 +56,7 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
     }
 
     const normElement = normalizeSpellElement(sp.element);
-    const floorLevel = Math.max(1, Number(ch?.currentFloor || ctx.state.map?.currentFloor || 1));
+    const floorLevel = Math.max(1, Number(ch?.currentFloor) || getPartyFloor(ctx.state));
     const balanced = !isDm
       ? clampSpellToFloor(sp, floorLevel)
       : {
@@ -55,6 +65,19 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
           mpCost: Math.max(0, Number(sp.mpCost || 0)),
         };
 
+    const rawArea = String(sp.attackArea || 'single');
+    const spellArea: AttackArea = PLAYER_ATTACK_AREAS.includes(rawArea as AttackArea) ? (rawArea as AttackArea) : 'single';
+    const spellAreaMod = clampAttackAreaModifier(sp.attackAreaModifier);
+    const spHeal = typeof sp.healFormula === 'string' && sp.healFormula.trim() ? sp.healFormula.trim().slice(0, 24) : undefined;
+    const rawEff = sp.effectSpec && typeof sp.effectSpec === 'object' ? (sp.effectSpec as UnitEffectSpec) : null;
+    const spEffect: UnitEffectSpec | undefined = rawEff && rawEff.kind && UNIT_EFFECT_META[rawEff.kind as UnitEffectKind]
+      ? {
+          kind: rawEff.kind as UnitEffectKind,
+          potency: Math.max(1, Math.min(50, Math.round(Number(rawEff.potency) || 2))),
+          duration: Math.max(1, Math.min(10, Math.round(Number(rawEff.duration) || 2))),
+          target: rawEff.target === 'self' || rawEff.target === 'enemy' || rawEff.target === 'all_allies' ? rawEff.target : undefined,
+        }
+      : undefined;
     const newSpell: Spell = {
       id: `sp-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
       name: String(sp.name).trim().slice(0, 50),
@@ -64,6 +87,10 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
       damageType: normElement,
       rangeSpaces: balanced.rangeSpaces,
       areaText: String(sp.areaText || `${balanced.rangeSpaces} Spaces`).slice(0, 80),
+      attackArea: spellArea,
+      attackAreaModifier: spellAreaMod,
+      ...(spHeal ? { healFormula: spHeal } : {}),
+      ...(spEffect ? { effectSpec: spEffect } : {}),
       actionType: sp.actionType === 'Reaction' ? 'Reaction' : 'Action',
       explanation: String(sp.explanation || 'Custom free-flow magic manifestation.').slice(0, 400),
     };
@@ -100,6 +127,15 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
     }
   } else if (sub === 'forget') {
     authChar.spells = authChar.spells.filter((s) => s.id !== payload.spellId);
+  } else if (sub === 'update_area') {
+    const sp = authChar.spells.find((s) => s.id === payload.spellId);
+    if (!sp) return { status: 404, error: 'Spell not found.' };
+    if (payload.attackArea !== undefined && PLAYER_ATTACK_AREAS.includes(String(payload.attackArea) as AttackArea)) {
+      sp.attackArea = String(payload.attackArea) as AttackArea;
+    }
+    if (payload.attackAreaModifier !== undefined) {
+      sp.attackAreaModifier = clampAttackAreaModifier(payload.attackAreaModifier);
+    }
   } else if (sub === 'cast') {
     const sp = authChar.spells.find((s) => s.id === payload.spellId) || ctx.state.grimoire.find((g) => g.id === payload.spellId);
     if (!sp) return { status: 404, error: 'Spell not found.' };
@@ -107,22 +143,58 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
     if (sp.actionType === 'Reaction' && !payload.reactionId && !hasPendingReaction) {
       return { status: 400, error: 'Reaction spells can only be used when a monster attacks you.' };
     }
-    const cost = Number(sp.mpCost || 0);
+    const pMods = computePassiveModifiers(authChar);
+    authChar.combatPassiveFlags = authChar.combatPassiveFlags || {};
+    const rawCost = Number(sp.mpCost || 0);
+    const isFirstSpell = Number(authChar.combatPassiveFlags.spellsCastThisCombat || 0) === 0;
+    const cost = pMods.zeroCostAllSpells || (pMods.zeroCostFirstSpell && isFirstSpell)
+      ? 0
+      : rawCost > 0
+        ? Math.max(1, rawCost - pMods.spellMpDiscount)
+        : 0;
     if (authChar.mp < cost) return { status: 400, error: `Not enough ${ctx.state.mechanics.resourceName || 'Mana'} (needs ${cost}).` };
+
+    const applyCastSideEffects = () => {
+      authChar.combatPassiveFlags = authChar.combatPassiveFlags || {};
+      authChar.combatPassiveFlags.spellsCastThisCombat = Number(authChar.combatPassiveFlags.spellsCastThisCombat || 0) + 1;
+      if (cost > 0 && pMods.spellEchoPct > 0 && crypto.randomInt(1, 101) <= pMods.spellEchoPct) {
+        const refund = Math.max(1, Math.floor(cost / 2));
+        authChar.mp = Math.min(authChar.maxMp, authChar.mp + refund);
+      }
+      const healOnCast = pMods.spellHealOnCast[sp.element] || 0;
+      if (healOnCast > 0) authChar.hp = Math.min(authChar.maxHp, authChar.hp + healOnCast);
+      const tempDr = pMods.spellTempDrOnCast[sp.element] || 0;
+      if (tempDr > 0) {
+        authChar.combatPassiveFlags.tempDrBonus = Number(authChar.combatPassiveFlags.tempDrBonus || 0) + tempDr;
+        recalculateCharacterAcAndDr(ctx.state, authChar);
+      }
+    };
 
     if (payload.targetMonsterId) {
       const targetMon = ctx.state.monsters.find((m) => m.id === payload.targetMonsterId);
       if (!targetMon) return { status: 404, error: 'Target monster not found.' };
       if (Number(targetMon.hp ?? 0) <= 0) return { status: 400, error: `${targetMon.name} is already defeated.` };
       authChar.mp = Math.max(0, authChar.mp - cost);
+      applyCastSideEffects();
       syncCharacterDerived(ctx, authChar.id);
+      const castHealFormula = typeof payload.healFormula === 'string' && payload.healFormula.trim()
+        ? payload.healFormula.trim()
+        : sp.healFormula;
+      const castEffectSpec = payload.effectSpec !== undefined ? payload.effectSpec : sp.effectSpec;
       const dmgRes = inflictDamageAction(ctx, {
         monsterId: payload.targetMonsterId,
         attackerId: authChar.id,
+        beatId: payload.beatId,
         diceFormula: sp.damageDice,
         damageType: sp.damageType || sp.element,
         includeStatMod: true,
         statKey: 'INT',
+        isSpell: true,
+        rangeSpaces: sp.rangeSpaces,
+        attackArea: payload.attackArea ?? sp.attackArea ?? 'single',
+        attackAreaModifier: payload.attackAreaModifier ?? sp.attackAreaModifier ?? 0,
+        ...(castHealFormula ? { healFormula: castHealFormula } : {}),
+        ...(castEffectSpec ? { effectSpec: castEffectSpec } : {}),
       });
       if (dmgRes.error) return dmgRes;
       const summary =
@@ -133,8 +205,47 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
     }
 
     authChar.mp = Math.max(0, authChar.mp - cost);
+    applyCastSideEffects();
+
+    const castHealFormula = typeof payload.healFormula === 'string' && payload.healFormula.trim()
+      ? payload.healFormula.trim()
+      : sp.healFormula;
+    const castEffectSpec = (payload.effectSpec !== undefined ? payload.effectSpec : sp.effectSpec) as UnitEffectSpec | null | undefined;
+    const effectNotes: string[] = [];
+
+    if (castHealFormula) {
+      const hRoll = rollDiceServer({ formula: castHealFormula });
+      const healAmt = Math.max(1, hRoll.total);
+      if (castEffectSpec?.target === 'all_allies') {
+        const allies = Object.values(ctx.state.characters).filter((c) => Number(c.hp || 0) > 0);
+        for (const ally of allies) {
+          ally.hp = Math.min(ally.maxHp, ally.hp + healAmt);
+          syncCharacterDerived(ctx, ally.id);
+        }
+        effectNotes.push(`Healed party +${healAmt} HP (${castHealFormula})`);
+      } else {
+        authChar.hp = Math.min(authChar.maxHp, authChar.hp + healAmt);
+        effectNotes.push(`Healed +${healAmt} HP (${castHealFormula})`);
+      }
+    }
+
+    if (castEffectSpec && castEffectSpec.kind && UNIT_EFFECT_META[castEffectSpec.kind]) {
+      const meta = UNIT_EFFECT_META[castEffectSpec.kind];
+      if (castEffectSpec.target === 'all_allies') {
+        const allies = Object.values(ctx.state.characters).filter((c) => Number(c.hp || 0) > 0);
+        for (const ally of allies) {
+          applyUnitEffect(ally, castEffectSpec, sp.name);
+          syncCharacterDerived(ctx, ally.id);
+        }
+        effectNotes.push(`Party ${meta.label} (${castEffectSpec.duration}t)`);
+      } else {
+        applyUnitEffect(authChar, castEffectSpec, sp.name);
+        effectNotes.push(`${meta.label} (${castEffectSpec.duration}t)`);
+      }
+    }
+
     syncCharacterDerived(ctx, authChar.id);
-    const castSummary = `${authChar.name} cast ${sp.name} (${sp.areaText}, Cost ${cost} MP).`;
+    const castSummary = `${authChar.name} cast ${sp.name} (${sp.areaText}, Cost ${cost} MP)${effectNotes.length ? ` • ${effectNotes.join(', ')}` : ''}.`;
     ctx.state.combatLog.unshift({
       id: `cblog-${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -182,7 +293,8 @@ export async function deityAction(ctx: ActionRequestContext, payload: Record<str
     if (error || !ch) return error!;
     const deity = ctx.state.deities.find((d) => d.id === (payload.deityId || ch.patronDeityId));
     if (!deity) return { status: 404, error: 'Select a Patron Deity first.' };
-    const cost = Number(deity.favorCost || 1);
+    const pMods = computePassiveModifiers(ch);
+    const cost = Math.max(1, Number(deity.favorCost || 1) - pMods.deityFavorDiscount);
     if (Number(ch.favor || 0) < cost) return { status: 400, error: 'Not enough Divine Favor.' };
     ch.favor -= cost;
 
@@ -345,6 +457,10 @@ export function equipmentAction(ctx: ActionRequestContext, payload: Record<strin
       damageDice: item.damageDice || (item.category === 'weapon' ? '1d8' : ''),
       damageType: item.damageType || 'Physical',
       rangeSpaces: Number(item.rangeSpaces || (item.category === 'weapon' ? 2 : 0)),
+      ...(item.attackArea ? { attackArea: item.attackArea } : {}),
+      ...(item.attackAreaModifier !== undefined ? { attackAreaModifier: clampAttackAreaModifier(item.attackAreaModifier) } : {}),
+      ...(item.healFormula ? { healFormula: item.healFormula } : {}),
+      ...(item.effectSpec ? { effectSpec: item.effectSpec } : {}),
       drBonus: Number(item.drBonus || 0),
       acBonus: Number(item.acBonus || 0),
       ...(item.artUrl ? { artUrl: item.artUrl } : {}),
@@ -353,6 +469,30 @@ export function equipmentAction(ctx: ActionRequestContext, payload: Record<strin
     ch.equipment[targetSlot] = equippedItem;
     if (item.qty > 1) item.qty -= 1;
     else ch.inventory.splice(idx, 1);
+  } else if (subAction === 'update_area') {
+    const targetSlot = (slot || 'mainHand') as EquipmentSlot;
+    const eq = ch.equipment[targetSlot];
+    if (!eq) return { status: 404, error: `No item equipped in ${targetSlot}.` };
+    if (payload.attackArea !== undefined && PLAYER_ATTACK_AREAS.includes(String(payload.attackArea) as AttackArea)) {
+      eq.attackArea = String(payload.attackArea) as AttackArea;
+    }
+    if (payload.attackAreaModifier !== undefined) {
+      eq.attackAreaModifier = clampAttackAreaModifier(payload.attackAreaModifier);
+    }
+    if (payload.healFormula !== undefined) {
+      eq.healFormula = typeof payload.healFormula === 'string' && payload.healFormula.trim() ? payload.healFormula.trim().slice(0, 24) : undefined;
+    }
+    if (payload.effectSpec !== undefined) {
+      const rawEff = payload.effectSpec && typeof payload.effectSpec === 'object' ? (payload.effectSpec as UnitEffectSpec) : null;
+      eq.effectSpec = rawEff && rawEff.kind && UNIT_EFFECT_META[rawEff.kind as UnitEffectKind]
+        ? {
+            kind: rawEff.kind as UnitEffectKind,
+            potency: Math.max(1, Math.min(50, Math.round(Number(rawEff.potency) || 2))),
+            duration: Math.max(1, Math.min(10, Math.round(Number(rawEff.duration) || 2))),
+            target: rawEff.target === 'self' || rawEff.target === 'enemy' || rawEff.target === 'all_allies' ? rawEff.target : undefined,
+          }
+        : null;
+    }
   }
 
   recalculateCharacterAcAndDr(ctx.state, ch);
@@ -401,8 +541,11 @@ export function inventoryAction(ctx: ActionRequestContext, payload: Record<strin
   } else if (subAction === 'use_consumable' && itemId) {
     const found = ch.inventory.find((i) => i.id === itemId);
     if (!found) return { status: 404, error: 'Item not found.' };
-    const hpGain = Number(found.healHp || 0);
-    const mpGain = Number(found.healMp || 0);
+    const pMods = computePassiveModifiers(ch);
+    const baseHp = Number(found.healHp || 0);
+    const baseMp = Number(found.healMp || 0);
+    const hpGain = baseHp > 0 ? baseHp + pMods.consumableBonusHp + pMods.healingReceivedBonus : 0;
+    const mpGain = baseMp > 0 ? baseMp + pMods.consumableBonusMp : 0;
     ch.hp = Math.min(ch.maxHp, ch.hp + hpGain);
     ch.mp = Math.min(ch.maxMp, ch.mp + mpGain);
     found.qty -= 1;

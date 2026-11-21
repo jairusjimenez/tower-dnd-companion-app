@@ -1,9 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type {
+  AttackArea,
   Character,
+  ChestLootSummary,
   EquipmentItem,
   FilteredGameState,
   MapToken,
+  MonsterDefeatSummary,
+  RollLogEntry,
   SessionIdentity,
   ToastMessage,
 } from '@shared/index';
@@ -24,6 +28,14 @@ export interface AttackRollRequest {
   me: Character;
   wep: EquipmentItem | null;
   beatId: string;
+  attackArea?: AttackArea;
+  attackAreaModifier?: number;
+  skillName?: string;
+  diceFormulaOverride?: string;
+  damageTypeOverride?: string;
+  isSkill?: boolean;
+  healFormula?: string;
+  effectSpec?: import('@shared/index').UnitEffectSpec | null;
   onComplete: (outcome: AttackRollOutcome | null) => void;
 }
 
@@ -65,6 +77,14 @@ interface VttContextValue {
   setGachaModalOpen: (v: boolean) => void;
   gachaSpinData: Record<string, unknown> | null;
   setGachaSpinData: (d: Record<string, unknown> | null) => void;
+  defeatedMonster: MonsterDefeatSummary | null;
+  setDefeatedMonster: (d: MonsterDefeatSummary | null) => void;
+  chestReveal: ChestLootSummary | null;
+  setChestReveal: (c: ChestLootSummary | null) => void;
+  activePromptModal: { beatId: string; promptId: string } | null;
+  setActivePromptModal: (m: { beatId: string; promptId: string } | null) => void;
+  diceRollModal: RollLogEntry | null;
+  setDiceRollModal: (r: RollLogEntry | null) => void;
   tooltip: { tok: Partial<MapToken>; x: number; y: number } | null;
   showTooltip: (tok: Partial<MapToken>, x: number, y: number) => void;
   hideTooltip: () => void;
@@ -95,10 +115,15 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
   const [attackRollRequest, setAttackRollRequest] = useState<AttackRollRequest | null>(null);
   const [gachaModalOpen, setGachaModalOpen] = useState(false);
   const [gachaSpinData, setGachaSpinData] = useState<Record<string, unknown> | null>(null);
+  const [defeatedMonster, setDefeatedMonster] = useState<MonsterDefeatSummary | null>(null);
+  const [chestReveal, setChestReveal] = useState<ChestLootSummary | null>(null);
+  const [activePromptModal, setActivePromptModal] = useState<{ beatId: string; promptId: string } | null>(null);
+  const [diceRollModal, setDiceRollModal] = useState<RollLogEntry | null>(null);
   const [tooltip, setTooltip] = useState<{ tok: Partial<MapToken>; x: number; y: number } | null>(null);
 
   const sseRef = useRef<EventSource | null>(null);
   const seenToastIdsRef = useRef<Set<string>>(new Set());
+  const seenRollIdRef = useRef<string | null>(null);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -209,6 +234,20 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
       if (!session) return undefined;
       try {
         const res = await sendGameAction<T>(type, payload);
+        const anyRes = res as unknown as {
+          defeatSummary?: MonsterDefeatSummary | null;
+          damageOutcome?: { defeatSummary?: MonsterDefeatSummary | null };
+          chestLootSummary?: ChestLootSummary | null;
+          roll?: RollLogEntry | null;
+          beat?: { prompts?: Array<{ triggeredStatCheckResults?: Array<{ characterId: string; characterName: string; statKey: string; statMod: number; floorBonus: number; roll: number; total: number; dc: number; passed: boolean; rewardSummary?: string }> }> };
+        } | undefined;
+        const summary = anyRes?.defeatSummary || anyRes?.damageOutcome?.defeatSummary || null;
+        if (summary) setDefeatedMonster(summary);
+        if (anyRes?.chestLootSummary) setChestReveal(anyRes.chestLootSummary);
+        if (anyRes?.roll) {
+          seenRollIdRef.current = anyRes.roll.id;
+          setDiceRollModal(anyRes.roll);
+        }
         await refreshState();
         return res;
       } catch (err) {
@@ -232,6 +271,29 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
       void logout();
     }
   }, [logout, pushLocalToast, session, state]);
+
+  // Show DiceRollModal when a new stat-check or dice roll entry appears in rollLog
+  useEffect(() => {
+    const latestRoll = state?.rollLog?.[0];
+    if (!latestRoll) return;
+    if (seenRollIdRef.current === null) {
+      // Seed initial roll ID on page load without popping a modal for historical rolls
+      seenRollIdRef.current = latestRoll.id;
+      return;
+    }
+    if (latestRoll.id !== seenRollIdRef.current) {
+      seenRollIdRef.current = latestRoll.id;
+      // Show modal if this roll belongs to the current user, or if it's a scenario stat check
+      const myCharName = session?.characterId ? state?.characters?.[session.characterId]?.name : null;
+      const isMyRoll =
+        (session?.role === 'dm' && latestRoll.rollerRole === 'dm') ||
+        (myCharName && latestRoll.rollerName === myCharName) ||
+        /Stat Check/i.test(latestRoll.label || '');
+      if (isMyRoll) {
+        setDiceRollModal(latestRoll);
+      }
+    }
+  }, [state?.rollLog, session, state?.characters]);
 
   const requestAttackRoll = useCallback(
     (req: Omit<AttackRollRequest, 'onComplete'>): Promise<AttackRollOutcome | null> => {
@@ -312,6 +374,14 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
         setGachaModalOpen,
         gachaSpinData,
         setGachaSpinData,
+        defeatedMonster,
+        setDefeatedMonster,
+        chestReveal,
+        setChestReveal,
+        activePromptModal,
+        setActivePromptModal,
+        diceRollModal,
+        setDiceRollModal,
         tooltip,
         showTooltip,
         hideTooltip,

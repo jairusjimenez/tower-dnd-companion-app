@@ -9,6 +9,7 @@ export function DmPartyTab() {
   const [diceCount, setDiceCount] = useState(1);
   const [diceSides, setDiceSides] = useState(20);
   const [diceMod, setDiceMod] = useState(0);
+  const [diceDc, setDiceDc] = useState(12);
   const [diceLabel, setDiceLabel] = useState('');
   const [diceSecret, setDiceSecret] = useState(true);
   const [lastRoll, setLastRoll] = useState<RollLogEntry | null>(null);
@@ -33,6 +34,7 @@ export function DmPartyTab() {
       count: diceCount,
       sides,
       modifier: diceMod,
+      dc: diceDc > 0 ? diceDc : undefined,
       label: diceLabel.trim() || `DM d${sides} Roll`,
       rollerName: 'Dungeon Master',
       isSecret: diceSecret,
@@ -219,10 +221,11 @@ export function DmPartyTab() {
             rollDmDice(Math.max(1, Math.min(100, diceSides)));
           }}
         >
-          <div className="grid-3">
+          <div className="grid-4">
             <label><span>Count</span><input type="number" min={1} max={30} value={diceCount} onChange={(e) => setDiceCount(Number(e.target.value || 1))} /></label>
             <label><span>Sides (1–100)</span><input type="number" min={1} max={100} value={diceSides} onChange={(e) => setDiceSides(Number(e.target.value || 20))} /></label>
             <label><span>Modifier</span><input type="number" value={diceMod} onChange={(e) => setDiceMod(Number(e.target.value || 0))} /></label>
+            <label><span>Target DC</span><input type="number" min={0} max={100} value={diceDc} onChange={(e) => setDiceDc(Number(e.target.value || 0))} /></label>
           </div>
           <input type="text" placeholder="Roll Label (e.g. Secret Ambush Check)" value={diceLabel} onChange={(e) => setDiceLabel(e.target.value)} />
           <label className="checkbox-row">

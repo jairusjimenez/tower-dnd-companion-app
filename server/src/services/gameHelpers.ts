@@ -1,8 +1,16 @@
 import crypto from 'node:crypto';
 import {
+  BALANCE,
   DEFAULT_STAT_MILESTONES,
+  UNIT_EFFECT_META,
+  VALID_FLOOR_THEME_IDS,
+  computeActiveEffectModifiers,
+  computePassiveModifiers,
+  getFloorThemeLabel,
+  xpToNextForLevel,
   computeStatModifier,
   getEquippedTotals,
+  type ActiveUnitEffect,
   type BeatArena,
   type Character,
   type EquipmentSlot,
@@ -11,12 +19,13 @@ import {
   type InventoryItem,
   type Monster,
   type ToastMessage,
+  type UnitEffectSpec,
 } from '../../../shared';
 import type { ActionRequestContext } from '../actions/types';
 import { generateSvgPortraitDataUri } from './art';
 import { rollSingleDie } from './dice';
 
-const VALID_BIOME_THEMES = ['forest', 'desert', 'underworld', 'plains', 'frost', 'obsidian'];
+const VALID_BIOME_THEMES = VALID_FLOOR_THEME_IDS;
 
 export function defaultThemeForFloor(n: number): string {
   return n === 1 ? 'forest' : n === 2 ? 'desert' : n === 3 ? 'underworld' : n === 4 ? 'frost' : 'obsidian';
@@ -122,7 +131,7 @@ export function grantXpToCharacter(state: GameState, ch: Character, xpAmount: nu
   const gained = Math.max(0, Math.round(Number(xpAmount || 0)));
   ch.level = Math.max(1, Number(ch.level || 1));
   ch.xp = Number(ch.xp || 0) + gained;
-  ch.xpToNext = Number(ch.xpToNext || ch.level * 100);
+  ch.xpToNext = Number(ch.xpToNext || xpToNextForLevel(ch.level));
   ch.unspentStatPoints = Number(ch.unspentStatPoints || 0);
   ch.passiveTickets = Number(ch.passiveTickets || 0);
 
@@ -198,7 +207,7 @@ export function pushNewFloorToTowerMap(
   const floorTheme = opts.theme && VALID_BIOME_THEMES.includes(opts.theme) ? opts.theme : defaultThemeForFloor(nextNum);
   const newFloor: FloorConfig = {
     number: nextNum,
-    title: String(opts.title || `${nextNum}F • ${floorTheme.charAt(0).toUpperCase() + floorTheme.slice(1)} Realm`).slice(0, 60),
+    title: String(opts.title || `${nextNum}F • ${getFloorThemeLabel(floorTheme)}`).slice(0, 60),
     theme: floorTheme,
     rowStart: 0,
     rowEnd: 4,
@@ -219,14 +228,7 @@ export function pushNewFloorToTowerMap(
 export function recalculateCharacterAcAndDr(state: GameState, ch: Character): void {
   const totals = getEquippedTotals(ch);
   const agiScore = ch.stats?.AGI ?? ch.stats?.DEX ?? 10;
-
-  let passiveAc = 0;
-  let passiveDr = 0;
-  for (const p of ch.passives || []) {
-    const mult = Number(p.multiplierPct || 100) / 100;
-    if (p.bonusAc) passiveAc += Math.round(Number(p.bonusAc) * mult);
-    if (p.bonusDr) passiveDr += Math.round(Number(p.bonusDr) * mult);
-  }
+  const pMods = computePassiveModifiers(ch);
 
   const milestones = state.mechanics?.statMilestones || DEFAULT_STAT_MILESTONES;
   const awakeningSet = new Set(ch.awakenings || []);
@@ -239,8 +241,186 @@ export function recalculateCharacterAcAndDr(state: GameState, ch: Character): vo
     }
   }
 
-  ch.ac = 10 + Math.max(0, computeStatModifier(agiScore, state.mechanics, ch)) + totals.armorAc + passiveAc + awkAc;
-  ch.dr = totals.armorDr + passiveDr + awkDr;
+  const tempDr = Number(ch.combatPassiveFlags?.tempDrBonus || 0);
+  const effMods = computeActiveEffectModifiers(ch.activeEffects);
+  ch.ac = Math.max(1, 10 + Math.max(0, computeStatModifier(agiScore, state.mechanics, ch)) + totals.armorAc + pMods.bonusAc + awkAc + effMods.acDelta);
+  ch.dr = Math.max(0, totals.armorDr + pMods.bonusDr + awkDr + tempDr + effMods.drDelta);
+}
+
+export function applyGoldBonus(ch: Character, baseGold: number, isChest = false): number {
+  if (baseGold <= 0) return 0;
+  const mods = computePassiveModifiers(ch);
+  const pct = Number(mods.bonusGoldPct || 0);
+  const extraChest = isChest ? Number(mods.chestBonusGold || 0) : 0;
+  return Math.max(0, Math.round(baseGold * (1 + pct / 100)) + extraChest);
+}
+
+export function resetCombatPassiveFlags(state: GameState): void {
+  for (const ch of Object.values(state.characters || {})) {
+    ch.combatPassiveFlags = {};
+    recalculateCharacterAcAndDr(state, ch);
+  }
+}
+
+export function triggerStartOfTurnPassives(ctx: ActionRequestContext, charId: string): void {
+  const ch = ctx.state.characters[charId];
+  if (!ch) return;
+  ch.combatPassiveFlags = ch.combatPassiveFlags || {};
+  ch.combatPassiveFlags.hitsTakenThisRound = 0;
+  ch.combatPassiveFlags.tempDrBonus = 0;
+  if ((ch.combatPassiveFlags.undyingLegendRounds || 0) > 0) {
+    ch.combatPassiveFlags.undyingLegendRounds = Math.max(0, (ch.combatPassiveFlags.undyingLegendRounds || 0) - 1);
+  }
+  recalculateCharacterAcAndDr(ctx.state, ch);
+
+  if (ch.hp <= 0) return;
+  const mods = computePassiveModifiers(ch);
+  const hpGain = Number(mods.hpRegenPerTurn || 0);
+  const mpGain = Number(mods.mpRegenPerTurn || 0);
+  if (hpGain > 0 || mpGain > 0) {
+    const prevHp = ch.hp;
+    const prevMp = ch.mp;
+    if (hpGain > 0) ch.hp = Math.min(ch.maxHp, ch.hp + hpGain);
+    if (mpGain > 0) ch.mp = Math.min(ch.maxMp, ch.mp + mpGain);
+    const dHp = ch.hp - prevHp;
+    const dMp = ch.mp - prevMp;
+    if (dHp > 0 || dMp > 0) {
+      syncCharacterDerived(ctx, ch.id);
+      pushSystemToast(ctx, {
+        title: 'PASSIVE REGENERATION',
+        message: `${ch.name} regenerated${dHp > 0 ? ` +${dHp} HP` : ''}${dMp > 0 ? ` +${dMp} MP` : ''} at turn start.`,
+        category: 'info',
+        target: ch.id,
+      });
+    }
+  }
+}
+
+export function getAllyAuraBonuses(state: GameState, targetChar: Character): { hitBonus: number; dmgBonus: number; acBonus: number; drBonus: number } {
+  let hitBonus = 0;
+  let dmgBonus = 0;
+  let acBonus = 0;
+  let drBonus = 0;
+  const activeBeat = (state.storyBeats || []).find((b) => b.presented && b.status === 'active');
+  const tokens = activeBeat?.arena?.tokens || [];
+  const myTok = tokens.find((t) => t.id === targetChar.id);
+  if (!myTok) return { hitBonus, dmgBonus, acBonus, drBonus };
+
+  for (const ally of Object.values(state.characters || {})) {
+    if (ally.id === targetChar.id || ally.hp <= 0) continue;
+    const allyTok = tokens.find((t) => t.id === ally.id);
+    if (!allyTok) continue;
+    const dist = Math.max(Math.abs(allyTok.x - myTok.x), Math.abs(allyTok.y - myTok.y));
+    const allyMods = computePassiveModifiers(ally);
+    if (dist <= 3) {
+      hitBonus += allyMods.auraAllyHitBonus;
+      dmgBonus += allyMods.auraAllyDmgBonus;
+    }
+    if (dist <= 2 && allyMods.auraAllyAcDr > 0) {
+      acBonus += allyMods.auraAllyAcDr;
+      drBonus += allyMods.auraAllyAcDr;
+    }
+  }
+  return { hitBonus, dmgBonus, acBonus, drBonus };
+}
+
+export function applyIncomingDamageToCharacter(
+  ctx: ActionRequestContext,
+  ch: Character,
+  rawIncoming: number,
+  opts: { attackerMonster?: Monster | null; damageType?: string; isCrit?: boolean; isSpell?: boolean; halveAfterDr?: boolean } = {},
+): { dmgTaken: number; reflectedDamage: number; evaded: boolean; notes: string[] } {
+  const mods = computePassiveModifiers(ch);
+  ch.combatPassiveFlags = ch.combatPassiveFlags || {};
+  const notes: string[] = [];
+  let reflectedDamage = 0;
+
+  if (!opts.isSpell && mods.evasionPct > 0 && crypto.randomInt(1, 101) <= mods.evasionPct) {
+    notes.push(`Evaded (${mods.evasionPct}% Evasion)`);
+    return { dmgTaken: 0, reflectedDamage: 0, evaded: true, notes };
+  }
+
+  if (mods.reflectOneAttackPerCombat && !ch.combatPassiveFlags.divineMirrorUsedThisCombat) {
+    ch.combatPassiveFlags.divineMirrorUsedThisCombat = true;
+    reflectedDamage = Math.max(1, Math.round(rawIncoming));
+    if (opts.attackerMonster) {
+      opts.attackerMonster.hp = Math.max(0, Number(opts.attackerMonster.hp ?? 0) - reflectedDamage);
+      syncMonsterDerived(ctx, opts.attackerMonster.id);
+      if (opts.attackerMonster.hp <= 0) removeMonsterTokensFromMaps(ctx.state, opts.attackerMonster.id);
+    }
+    notes.push(`Divine Mirror reflected ${reflectedDamage} dmg!`);
+    return { dmgTaken: 0, reflectedDamage, evaded: false, notes };
+  }
+
+  const dmgType = opts.damageType || 'Physical';
+  const aura = getAllyAuraBonuses(ctx.state, ch);
+  let effectiveDr = Number(ch.dr || 0) + aura.drBonus;
+  if (mods.adaptiveWardDr > 0 && ch.combatPassiveFlags.lastDamageType === dmgType) {
+    effectiveDr += mods.adaptiveWardDr;
+    notes.push(`Adaptive Ward +${mods.adaptiveWardDr} DR`);
+  }
+  if (opts.isCrit && mods.critDamageReduction > 0) effectiveDr += mods.critDamageReduction;
+  if (opts.isSpell && mods.spellDmgResist > 0) effectiveDr += mods.spellDmgResist;
+  if (/slash/i.test(dmgType) && mods.slashingResist > 0) effectiveDr += mods.slashingResist;
+  for (const [el, val] of Object.entries(mods.elementalResists)) {
+    if (dmgType.toLowerCase().includes(el.toLowerCase())) effectiveDr += val;
+  }
+  if (/fire|water|ice|earth|wind|light|dark/i.test(dmgType) && mods.allElementalResist > 0) {
+    effectiveDr += mods.allElementalResist;
+  }
+
+  let dmgTaken = Math.max(1, Math.round(rawIncoming) - effectiveDr);
+  if (opts.halveAfterDr) dmgTaken = Math.max(1, Math.floor(dmgTaken / 2));
+
+  const hitCount = Number(ch.combatPassiveFlags.hitsTakenThisRound || 0);
+  ch.combatPassiveFlags.hitsTakenThisRound = hitCount + 1;
+  if (hitCount === 0 && mods.firstHitHalved) {
+    dmgTaken = Math.max(1, Math.floor(dmgTaken / 2));
+    notes.push('Absolute Defense (50% halved)');
+  }
+  ch.combatPassiveFlags.lastDamageType = dmgType;
+
+  if (mods.reflectDamageOnHit > 0 && opts.attackerMonster) {
+    reflectedDamage += mods.reflectDamageOnHit;
+    opts.attackerMonster.hp = Math.max(0, Number(opts.attackerMonster.hp ?? 0) - mods.reflectDamageOnHit);
+    syncMonsterDerived(ctx, opts.attackerMonster.id);
+    if (opts.attackerMonster.hp <= 0) removeMonsterTokensFromMaps(ctx.state, opts.attackerMonster.id);
+    notes.push(`Reflective Carapace (${mods.reflectDamageOnHit} dmg)`);
+  }
+
+  let nextHp = ch.hp - dmgTaken;
+  if ((ch.combatPassiveFlags.undyingLegendRounds || 0) > 0 && nextHp < 1) {
+    nextHp = 1;
+    notes.push('Undying Legend (1 HP floor)');
+  } else if (nextHp <= 0) {
+    if (mods.undyingLegendPerCombat && !ch.combatPassiveFlags.undyingLegendUsedThisCombat) {
+      ch.combatPassiveFlags.undyingLegendUsedThisCombat = true;
+      ch.combatPassiveFlags.undyingLegendRounds = 1;
+      nextHp = 1;
+      notes.push('Undying Legend triggered! (1 HP for 1 round)');
+    } else if (mods.surviveFatalPerCombat && !ch.combatPassiveFlags.survivedFatalThisCombat) {
+      ch.combatPassiveFlags.survivedFatalThisCombat = true;
+      nextHp = 1;
+      notes.push('Undying Will survived at 1 HP!');
+    } else if (mods.revivePerCombatPct > 0 && !ch.combatPassiveFlags.revivedThisCombat) {
+      ch.combatPassiveFlags.revivedThisCombat = true;
+      nextHp = Math.max(1, Math.round((ch.maxHp * mods.revivePerCombatPct) / 100));
+      if (mods.reviveMpAlso) {
+        ch.mp = ch.maxMp;
+      }
+      notes.push(`Revived at ${mods.revivePerCombatPct}% HP${mods.reviveMpAlso ? ' & 100% MP' : ''}!`);
+      pushSystemToast(ctx, {
+        title: 'PASSIVE REVIVAL!',
+        message: `${ch.name} revived with ${nextHp} HP${mods.reviveMpAlso ? ` & ${ch.mp} MP` : ''}!`,
+        category: 'loot',
+        target: ch.id,
+      });
+    }
+  }
+
+  ch.hp = Math.max(0, nextHp);
+  syncCharacterDerived(ctx, ch.id);
+  return { dmgTaken, reflectedDamage, evaded: false, notes };
 }
 
 export function syncCharacterDerived(ctx: ActionRequestContext, charId: string): void {
@@ -418,19 +598,19 @@ export function createNewCharacterRecord(
     rank: 'E-Rank',
     level: Math.max(1, Number(level) || 1),
     xp: 0,
-    xpToNext: Math.max(1, Number(level) || 1) * 100,
-    unspentStatPoints: 10,
+    xpToNext: xpToNextForLevel(Math.max(1, Number(level) || 1)),
+    unspentStatPoints: BALANCE.start.unspentStatPoints,
     passiveTickets: 0,
     passives: [],
-    hp: 30,
-    maxHp: 30,
+    hp: BALANCE.start.maxHp,
+    maxHp: BALANCE.start.maxHp,
     tempHp: 0,
-    mp: 25,
-    maxMp: 25,
-    ac: 14,
+    mp: BALANCE.start.maxMp,
+    maxMp: BALANCE.start.maxMp,
+    ac: 12,
     dr: 1,
     speed: 30,
-    speedSpaces: 6,
+    speedSpaces: BALANCE.start.speedSpaces,
     patronDeityId: state.deities[0]?.id || '',
     favor: 2,
     inspiration: false,
@@ -446,9 +626,9 @@ export function createNewCharacterRecord(
       relic: null,
     },
     inventory: [
-      { id: `inv-${id}-1`, name: 'Starter Healing Vial', category: 'consumable', qty: 2, healHp: 12, healMp: 0, slot: '', attackBonus: 0, damageDice: '', drBonus: 0, acBonus: 0, notes: 'Restores 12 HP' },
+      { id: `inv-${id}-1`, name: 'Starter Healing Vial', category: 'consumable', qty: BALANCE.start.potionQty, healHp: BALANCE.start.potionHeal, healMp: 0, slot: '', attackBonus: 0, damageDice: '', drBonus: 0, acBonus: 0, notes: `Restores ${BALANCE.start.potionHeal} HP` },
     ],
-    currency: { gold: 100, manaStones: 2 },
+    currency: { gold: BALANCE.start.gold, manaStones: BALANCE.start.manaStones },
     conditions: [],
     notes: 'Newly entered the Tower.',
     portraitPrompt: prompt,
@@ -533,6 +713,115 @@ export function createNewCharacterRecord(
   }
 
   return char;
+}
+
+export function applyUnitEffect(
+  target: { name: string; activeEffects?: ActiveUnitEffect[] },
+  spec: UnitEffectSpec,
+  sourceName: string,
+): ActiveUnitEffect {
+  const meta = UNIT_EFFECT_META[spec.kind];
+  const potency = Math.max(1, Math.trunc(Number(spec.potency ?? meta.defaultPotency)));
+  const duration = Math.max(1, Math.min(10, Math.trunc(Number(spec.duration ?? meta.defaultDuration))));
+  const next: ActiveUnitEffect = {
+    id: `eff-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+    kind: spec.kind,
+    category: meta.category,
+    name: meta.label.split(' (')[0],
+    potency,
+    turnsRemaining: duration,
+    sourceName,
+  };
+  target.activeEffects = target.activeEffects || [];
+  const existingIdx = target.activeEffects.findIndex((e) => e.kind === spec.kind);
+  if (existingIdx >= 0) {
+    const prev = target.activeEffects[existingIdx];
+    next.potency = Math.max(prev.potency, next.potency);
+    next.turnsRemaining = Math.max(prev.turnsRemaining, next.turnsRemaining);
+    target.activeEffects[existingIdx] = next;
+  } else {
+    target.activeEffects.push(next);
+  }
+  return next;
+}
+
+export function tickUnitEffectsOnTurnStart(
+  ctx: ActionRequestContext,
+  unitId: string,
+  unitType: 'player' | 'monster',
+): void {
+  const unit = unitType === 'player'
+    ? ctx.state.characters[unitId]
+    : (ctx.state.monsters || []).find((m) => m.id === unitId);
+  if (!unit || !Array.isArray(unit.activeEffects) || unit.activeEffects.length === 0) return;
+
+  const mods = computeActiveEffectModifiers(unit.activeEffects);
+  const notes: string[] = [];
+
+  if (mods.regenPerTurn > 0 && Number(unit.hp ?? 0) > 0 && unit.maxHp) {
+    const prevHp = Number(unit.hp ?? 0);
+    unit.hp = Math.min(unit.maxHp, prevHp + mods.regenPerTurn);
+    const gained = unit.hp - prevHp;
+    if (gained > 0) notes.push(`+${gained} HP Regen`);
+  }
+
+  if (mods.dotPerTurn > 0 && Number(unit.hp ?? 0) > 0) {
+    const prevHp = Number(unit.hp ?? 0);
+    unit.hp = Math.max(0, prevHp - mods.dotPerTurn);
+    notes.push(`-${mods.dotPerTurn} HP (Burn/Poison)`);
+    if (unitType === 'monster' && unit.hp <= 0) {
+      removeMonsterTokensFromMaps(ctx.state, unit.id);
+    }
+  }
+
+  if (mods.stunned) {
+    notes.push('STUNNED (Cannot Move or Attack this turn)');
+  }
+
+  // Decrement turnsRemaining and expire finished effects
+  const expiredNames: string[] = [];
+  const remaining: ActiveUnitEffect[] = [];
+  for (const eff of unit.activeEffects) {
+    const nextTurns = Number(eff.turnsRemaining || 1) - 1;
+    if (nextTurns > 0) {
+      remaining.push({ ...eff, turnsRemaining: nextTurns });
+    } else {
+      expiredNames.push(eff.name);
+    }
+  }
+  unit.activeEffects = remaining;
+
+  if (unitType === 'player') {
+    recalculateCharacterAcAndDr(ctx.state, unit as Character);
+    syncCharacterDerived(ctx, unit.id);
+  } else {
+    syncMonsterDerived(ctx, unit.id);
+  }
+
+  if (notes.length > 0 || expiredNames.length > 0) {
+    const summaryParts = [
+      ...notes,
+      ...(expiredNames.length ? [`Expired: ${expiredNames.join(', ')}`] : []),
+    ];
+    pushSystemToast(ctx, {
+      title: `EFFECTS: ${unit.name.toUpperCase()}`,
+      message: summaryParts.join(' • '),
+      category: mods.dotPerTurn > 0 || mods.stunned ? 'combat' : 'info',
+      target: unitType === 'player' ? unit.id : 'all',
+    });
+    ctx.state.combatLog.unshift({
+      id: `cblog-${Date.now()}-${crypto.randomInt(10, 99)}`,
+      timestamp: new Date().toISOString(),
+      attacker: 'Status Effects',
+      target: unit.name,
+      rawDamage: mods.dotPerTurn,
+      finalDamage: mods.dotPerTurn,
+      damageType: 'Effect Tick',
+      remainingHp: unit.hp,
+      summary: `${unit.name} turn start: ${summaryParts.join(' • ')}.`,
+    });
+    ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
+  }
 }
 
 export { VALID_BIOME_THEMES };

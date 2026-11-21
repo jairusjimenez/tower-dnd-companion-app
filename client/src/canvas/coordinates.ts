@@ -70,6 +70,15 @@ export function findBeatTokenAt(
       hp: null,
     };
   }
+  const restSpot = (beat.arena.restSpots || []).find((r) => r.x === x && r.y === y);
+  if (restSpot) {
+    return {
+      id: restSpot.id,
+      type: 'rest',
+      name: `${restSpot.name} (+${Math.round(restSpot.hpPct * 100)}% HP/MP after combat)`,
+      hp: null,
+    };
+  }
   const tile = (beat.arena.terrain || []).find((t) => t.x === x && t.y === y);
   if (tile) {
     const labels: Record<string, string> = {

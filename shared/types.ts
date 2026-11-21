@@ -3,8 +3,9 @@ export type CombatMode = 'reactive' | 'turn_based';
 export type SessionStatus = 'active' | 'stopped' | 'paused';
 export type SpellElement = 'Fire' | 'Earth' | 'Wind' | 'Water' | 'Light' | 'Dark';
 export type EquipmentSlot = 'mainHand' | 'offHand' | 'head' | 'body' | 'boots' | 'relic';
-export type ArenaBiome = 'obsidian' | 'forest' | 'plains' | 'desert';
-export type TerrainType = 'tree' | 'rock' | 'water';
+export type ArenaBiome = string;
+export type TerrainType = 'tree' | 'rock' | 'boulder' | 'water' | 'crystal' | 'pillar' | 'lava' | 'ice';
+export const VALID_TERRAIN_TYPES: TerrainType[] = ['tree', 'rock', 'boulder', 'water', 'crystal', 'pillar', 'lava', 'ice'];
 export type PassiveTier =
   | 'Normal'
   | 'Advanced'
@@ -13,6 +14,37 @@ export type PassiveTier =
   | 'Super Super Rare'
   | 'Legendary'
   | 'Mythic';
+
+export type UnitEffectKind =
+  | 'shield'
+  | 'empower'
+  | 'haste'
+  | 'regen'
+  | 'burn'
+  | 'poison'
+  | 'armor_break'
+  | 'weaken'
+  | 'slow'
+  | 'stun';
+
+import type { TokenIconId } from './tokenIcons';
+
+export interface UnitEffectSpec {
+  kind: UnitEffectKind;
+  potency: number;
+  duration: number;
+  target?: 'enemy' | 'self' | 'ally' | 'all_allies';
+}
+
+export interface ActiveUnitEffect {
+  id: string;
+  kind: UnitEffectKind;
+  category: 'buff' | 'debuff';
+  name: string;
+  potency: number;
+  turnsRemaining: number;
+  sourceName?: string;
+}
 
 export interface EquipmentItem {
   id: string;
@@ -23,6 +55,10 @@ export interface EquipmentItem {
   damageDice: string;
   damageType: string;
   rangeSpaces: number;
+  attackArea?: AttackArea;
+  attackAreaModifier?: number;
+  healFormula?: string;
+  effectSpec?: UnitEffectSpec | null;
   drBonus: number;
   acBonus: number;
   artUrl?: string;
@@ -42,6 +78,10 @@ export interface InventoryItem {
   damageDice?: string;
   damageType?: string;
   rangeSpaces?: number;
+  attackArea?: AttackArea;
+  attackAreaModifier?: number;
+  healFormula?: string;
+  effectSpec?: UnitEffectSpec | null;
   drBonus?: number;
   acBonus?: number;
   artUrl?: string;
@@ -57,6 +97,10 @@ export interface Spell {
   damageType: string;
   rangeSpaces: number;
   areaText: string;
+  attackArea?: AttackArea;
+  attackAreaModifier?: number;
+  healFormula?: string;
+  effectSpec?: UnitEffectSpec | null;
   actionType: 'Action' | 'Reaction' | string;
   explanation: string;
 }
@@ -79,6 +123,126 @@ export interface CharacterSkill {
   cooldown?: string;
   description?: string;
   unlockedByStat?: string;
+  attackArea?: AttackArea;
+  attackAreaModifier?: number;
+  healFormula?: string;
+  effectSpec?: UnitEffectSpec | null;
+}
+
+export interface PassiveEffects {
+  // Conditional AC / DR
+  requiresShieldDr?: number;
+  requiresLightArmorHp?: number;
+  requiresLightArmorInit?: number;
+  requiresBodyArmorAc?: number;
+  requiresBodyArmorDr?: number;
+  requiresUnarmoredAc?: number;
+  rangedAndSpellAc?: number;
+  critDamageReduction?: number;
+  // Initiative & Attributes
+  bonusInitiative?: number;
+  actFirstInInitiative?: boolean;
+  allAttributesInCombat?: number;
+  // Hit & Crit
+  bonusAttackHit?: number;
+  bonusMeleeHit?: number;
+  bonusRangedHit?: number;
+  bonusSpellHit?: number;
+  bonusReactionSpellHit?: number;
+  round1HitBonus?: number;
+  critThreshold?: number;
+  critMultiplier?: number;
+  bonusCritDamage?: number;
+  bonusCritDice?: string;
+  rerollNat1PerCombat?: boolean;
+  turnMissToHitPerCombat?: boolean;
+  // Damage
+  bonusWeaponDamage?: number;
+  bonusMeleeDamage?: number;
+  bonusRangedDamage?: number;
+  bonusSpellPower?: number;
+  bonusElementalSpellDamage?: number;
+  elementalBonusDamage?: Record<string, number>;
+  elementalBonusDice?: Record<string, string>;
+  bonusWeaponDice?: string;
+  bonusSpellDice?: string;
+  ignoreEnemyDr?: number;
+  ignoreAllEnemyDr?: boolean;
+  shredEnemyDr?: number;
+  secondAttackBonusDamage?: number;
+  round1DamageBonus?: number;
+  lowHpDamageBonus?: number;
+  lowHpThresholdPct?: number;
+  executeBonusDice?: string;
+  moveChargeBonusDice?: string;
+  damageBonusVsLowLevel?: number;
+  damageBonusVsHighDr?: number;
+  damageBonusVsBossPct?: number;
+  bonusWeaponAttackOnCrit?: boolean;
+  hitAdditionalNearbyFoe?: boolean;
+  // Range & Movement
+  bonusRangedRangeSpaces?: number;
+  bonusSpellRangeSpaces?: number;
+  bonusObserveRangeSpaces?: number;
+  round1MoveBonus?: number;
+  ignoreDifficultTerrain?: boolean;
+  // Spell Economy & Casting
+  spellMpDiscount?: number;
+  zeroCostFirstSpell?: boolean;
+  zeroCostAllSpells?: boolean;
+  spellEchoPct?: number;
+  spellHealOnCast?: Record<string, number>;
+  spellMpOnHit?: Record<string, number>;
+  spellTempDrOnCast?: Record<string, number>;
+  spellMoveOnCast?: Record<string, number>;
+  spellLifestealHp?: Record<string, number>;
+  spellLifestealPct?: number;
+  bonusReactionSpellDice?: string;
+  aoeAllEnemiesWithin4Spaces?: boolean;
+  // Regen, Defense, Survival & Reactions
+  hpRegenPerTurn?: number;
+  mpRegenPerTurn?: number;
+  evasionPct?: number;
+  firstHitHalved?: boolean;
+  reflectDamageOnHit?: number;
+  reflectOneAttackPerCombat?: boolean;
+  bonusParryRoll?: number;
+  parryReflectPct?: number;
+  bonusCounterDamage?: number;
+  extraReactionPerRound?: number;
+  surviveFatalPerCombat?: boolean;
+  undyingLegendPerCombat?: boolean;
+  revivePerCombatPct?: number;
+  reviveMpAlso?: boolean;
+  elementalResists?: Record<string, number>;
+  allElementalResist?: number;
+  spellDmgResist?: number;
+  slashingResist?: number;
+  adaptiveWardDr?: number;
+  lifestealMeleePct?: number;
+  lifestealAllPct?: number;
+  hpOnKill?: number;
+  mpOnKill?: number;
+  tempHpOnKill?: number;
+  // Rest Spots, Consumables, Gold & Deities
+  restSpotBonusHp?: number;
+  restSpotBonusMp?: number;
+  restSpotTempHp?: number;
+  consumableBonusHp?: number;
+  consumableBonusMp?: number;
+  healingReceivedBonus?: number;
+  bonusGoldPct?: number;
+  chestBonusGold?: number;
+  deityFavorDiscount?: number;
+  // Auras & Checks
+  auraAllyHitBonus?: number;
+  auraAllyDmgBonus?: number;
+  auraAllyAcDr?: number;
+  auraEnemyHitPenalty?: number;
+  perCheckBonus?: number;
+  statusImmune?: boolean;
+  knockbackImmune?: boolean;
+  skillCheckNote?: string;
 }
 
 export interface PassiveSkill {
@@ -91,6 +255,7 @@ export interface PassiveSkill {
   bonusHp?: number;
   bonusMp?: number;
   bonusSpeedSpaces?: number;
+  effects?: PassiveEffects;
   stacks?: number;
   multiplierPct?: number;
   acquiredAt?: string;
@@ -192,6 +357,34 @@ export interface Character {
   artHistory: ArtHistoryEntry[];
   history?: PlayerHistoryEntry[];
   observedWeakSpots?: Record<string, ObservedWeakSpot>;
+  activeEffects?: ActiveUnitEffect[];
+  combatPassiveFlags?: {
+    lastDamageType?: string;
+    hitsTakenThisRound?: number;
+    spellsCastThisCombat?: number;
+    revivedThisCombat?: boolean;
+    survivedFatalThisCombat?: boolean;
+    rerolledNat1ThisCombat?: boolean;
+    luckyStarUsedThisCombat?: boolean;
+    divineMirrorUsedThisCombat?: boolean;
+    undyingLegendRounds?: number;
+    undyingLegendUsedThisCombat?: boolean;
+    tempDrBonus?: number;
+  };
+}
+
+export interface MonsterDefeatSummary {
+  monsterId: string;
+  monsterName: string;
+  floor: number;
+  killerName: string;
+  xpGained: number;
+  goldGained: number;
+  manaStonesGained: number;
+  manaStoneDroppedOnMap?: boolean;
+  items: Array<{ name: string; category: string; tier?: ChestTier; notes?: string }>;
+  leveledUp?: boolean;
+  newLevel?: number;
 }
 
 export interface MonsterLoot {
@@ -201,6 +394,33 @@ export interface MonsterLoot {
   manaStones: number;
   xp: number;
   dropped: boolean;
+}
+
+export type MonsterAttackArea =
+  | 'single'
+  | 'around_1'
+  | 'line_3'
+  | 'cleave_3'
+  | 'cone_3'
+  | 'around_2'
+  | 'ranged_aoe';
+
+export type AttackArea = MonsterAttackArea;
+
+export interface MonsterSkill {
+  id: string;
+  name: string;
+  damageFormula: string;
+  attackBonus: number;
+  baseUsesPerCombat: number;
+  maxUsesPerCombat: number;
+  usesRemaining: number;
+  minFloor?: number;
+  description?: string;
+  attackArea?: MonsterAttackArea;
+  attackAreaModifier?: number;
+  healFormula?: string;
+  effectSpec?: UnitEffectSpec | null;
 }
 
 export interface Monster {
@@ -213,6 +433,12 @@ export interface Monster {
   dr: number;
   agi?: number;
   rangeSpaces: number;
+  iconId?: TokenIconId;
+  attackArea?: MonsterAttackArea;
+  attackAreaModifier?: number;
+  healFormula?: string;
+  effectSpec?: UnitEffectSpec | null;
+  activeEffects?: ActiveUnitEffect[];
   attackFormula: string;
   damageFormula: string;
   hiddenFromPlayers: boolean;
@@ -220,17 +446,107 @@ export interface Monster {
   notes: string;
   healthTier?: string;
   loot: MonsterLoot;
+  skills?: MonsterSkill[];
+}
+
+export type ChestTier = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
+
+export interface ChestTierConfig {
+  tier: ChestTier;
+  minItems: number;
+  maxItems: number;
+  baseGold: number;
+  baseManaStones: number;
+  pool: BestiaryLootDrop[];
+}
+
+export interface ChestPassiveTrigger {
+  skillName: string;
+  tier: string;
+  effectText: string;
+  bonusGold: number;
+}
+
+export interface ChestLootSummary {
+  chestId: string;
+  chestName: string;
+  tier: ChestTier;
+  openerName: string;
+  baseGold?: number;
+  passiveBonusGold?: number;
+  goldGained: number;
+  manaStonesGained: number;
+  items: Array<{ name: string; category: string; tier?: ChestTier; notes?: string }>;
+  passiveTriggers?: ChestPassiveTrigger[];
+}
+
+export interface TreasureEntry {
+  id: string;
+  name: string;
+  category: 'weapon' | 'armor' | 'relic' | 'skill_book' | 'consumable';
+  tier?: ChestTier;
+  origin?: 'Manhwa' | 'D&D' | 'Custom';
+  floorLevel: number;
+  slot?: EquipmentSlot | '';
+  attackBonus: number;
+  damageDice: string;
+  acBonus: number;
+  drBonus: number;
+  baseGold: number;
+  baseManaStones: number;
+  notes?: string;
+}
+
+export interface NpcAppearance {
+  floor: number;
+  beatTitle: string;
+  beatId?: string;
+}
+
+export interface NpcEntry {
+  id: string;
+  name: string;
+  role: string;
+  origin?: 'Manhwa' | 'D&D' | 'Custom';
+  level: number;
+  firstAppearedFloor: number;
+  stats: Record<string, number>;
+  maxHp: number;
+  ac: number;
+  story: string;
+  dialogue: string;
+  appearances?: NpcAppearance[];
+}
+
+export interface BestiaryLootDrop {
+  itemName: string;
+  category: 'weapon' | 'armor' | 'consumable' | 'relic' | 'material';
+  tier?: ChestTier;
+  dropChancePct: number;
+  baseGold: number;
+  baseManaStones: number;
+  minFloor?: number;
+  notes?: string;
 }
 
 export interface BestiaryEntry {
   id: string;
   name: string;
+  category?: 'Manhwa' | 'D&D' | 'Boss' | 'Custom';
   maxHp: number;
   ac: number;
   dr: number;
   attackFormula: string;
   damageFormula: string;
   rangeSpaces: number;
+  iconId?: TokenIconId;
+  attackArea?: MonsterAttackArea;
+  attackAreaModifier?: number;
+  healFormula?: string;
+  effectSpec?: UnitEffectSpec | null;
+  notes?: string;
+  lootTable?: BestiaryLootDrop[];
+  skills?: MonsterSkill[];
 }
 
 export interface MapToken {
@@ -244,6 +560,7 @@ export interface MapToken {
   maxHp: number | null;
   hiddenFromPlayers?: boolean;
   label?: string;
+  iconId?: TokenIconId;
   hasMovedThisTurn?: boolean;
   hasObservedThisTurn?: boolean;
   attacksUsedThisTurn?: number;
@@ -262,6 +579,7 @@ export interface MapToken {
 export interface MapChest {
   id: string;
   name: string;
+  tier?: ChestTier;
   x: number;
   y: number;
   gold: number;
@@ -269,6 +587,7 @@ export interface MapChest {
   itemName: string;
   itemCategory: string;
   opened: boolean;
+  lastLootSummary?: ChestLootSummary;
 }
 
 export interface ArenaManaStone {
@@ -283,6 +602,20 @@ export interface ArenaTerrainTile {
   x: number;
   y: number;
   type: TerrainType;
+  w?: number;
+  h?: number;
+  featureId?: string;
+  isAnchor?: boolean;
+}
+
+export interface ArenaRestSpot {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  hpPct: number;
+  mpPct: number;
+  usedBy?: string[];
 }
 
 export interface BeatArena {
@@ -293,6 +626,7 @@ export interface BeatArena {
   tokens: MapToken[];
   chests: MapChest[];
   manaStones?: ArenaManaStone[];
+  restSpots?: ArenaRestSpot[];
   startPositions?: Record<string, { x: number; y: number }>;
 }
 
@@ -302,12 +636,16 @@ export interface BeatEncounterSpec {
   ac: number;
   dr: number;
   rangeSpaces?: number;
+  iconId?: TokenIconId;
+  attackArea?: MonsterAttackArea;
+  attackAreaModifier?: number;
   attackFormula: string;
   damageFormula: string;
   hiddenFromPlayers?: boolean;
   floor?: number;
   startX?: number | string | null;
   startY?: number | string | null;
+  skills?: MonsterSkill[];
 }
 
 export interface BeatTreasureSpec {
@@ -329,19 +667,101 @@ export interface BeatTreasureSpec {
   notes?: string;
 }
 
+export interface StoryBeatPromptAnswer {
+  id: string;
+  characterId: string;
+  characterName: string;
+  answer: string;
+  answeredAt: string;
+}
+
+export interface StoryPromptStatCheckResult {
+  characterId: string;
+  characterName: string;
+  statKey: string;
+  statScore: number;
+  statMod: number;
+  floorBonus: number;
+  roll: number;
+  total: number;
+  dc: number;
+  passed: boolean;
+  rewardSummary?: string;
+}
+
+export interface StoryPromptBranch {
+  option: string;
+  scenario: string;
+  dmNote?: string;
+  nextQuestion?: string;
+  nextOptions?: string[];
+  // Stat Check (triggers bonuses relative to floor level)
+  statCheckStat?: string;
+  statCheckDc?: number;
+  // Reward: Treasure or Treasure Chest
+  rewardType?: 'none' | 'treasure' | 'chest';
+  rewardTreasureId?: string;
+  rewardItemName?: string;
+  rewardItemCategory?: string;
+  rewardChestTier?: ChestTier;
+  rewardGold?: number;
+  rewardManaStones?: number;
+  // Ends in a Combat Story Beat (auto-generates combat beat & resolves current beat)
+  endsInCombat?: boolean;
+  combatMonsterPresetId?: string;
+  combatMonsterQty?: number;
+}
+
+export interface StoryBeatPrompt {
+  id: string;
+  question: string;
+  target: 'all' | string;
+  targetName: string;
+  options?: string[];
+  branches?: StoryPromptBranch[];
+  triggeredOption?: string;
+  triggeredScenario?: string;
+  triggeredStatCheckResults?: StoryPromptStatCheckResult[];
+  triggeredRewardSummary?: string;
+  spawnedCombatBeatId?: string;
+  spawnedCombatBeatTitle?: string;
+  askedAt: string;
+  answers: StoryBeatPromptAnswer[];
+}
+
+export interface CombatDefeatPenaltyEntry {
+  characterId: string;
+  characterName: string;
+  hpLost: number;
+  mpLost: number;
+  goldLost: number;
+  xpLost: number;
+}
+
+export interface CombatDefeatRecord {
+  roundExceeded: number;
+  maxRounds: number;
+  timestamp: string;
+  penalties: CombatDefeatPenaltyEntry[];
+}
+
 export interface StoryBeat {
   id: string;
   order: number;
   floor: number;
+  beatType?: 'narration' | 'combat';
   title: string;
   narration: string;
   dmSecret: string | null;
   presented: boolean;
-  status: 'upcoming' | 'active' | 'resolved' | string;
+  status: 'upcoming' | 'active' | 'resolved' | 'failed' | string;
   xpReward: number;
+  maxRounds?: number;
+  defeatSummary?: CombatDefeatRecord | null;
   arena: BeatArena;
   encounters: BeatEncounterSpec[];
   treasures: BeatTreasureSpec[];
+  prompts?: StoryBeatPrompt[];
 }
 
 export interface Deity {
@@ -407,11 +827,28 @@ export interface PendingReaction {
   createdAt: string;
   monsterId: string;
   monsterName: string;
+  skillName?: string;
   targetCharacterId: string;
   targetCharacterName: string;
+  targetAc?: number;
+  attackNatural?: number;
   attackTotal: number;
+  attackFormula?: string;
+  attackHit?: boolean;
   incomingDamage: number;
   formula: string;
+  // Resolution fields once Player rolls their reaction die (or DM resolves)
+  resolved?: boolean;
+  resolvedAt?: string;
+  playerChoice?: 'parry' | 'counter' | 'spell' | 'accept' | string;
+  playerRollNatural?: number;
+  playerRollMod?: number;
+  playerRollTotal?: number;
+  playerRollFormula?: string;
+  playerSuccess?: boolean;
+  dmgTaken?: number;
+  counterDamageDealt?: number;
+  resolutionSummary?: string;
 }
 
 export interface CombatLogEntry {
@@ -466,6 +903,10 @@ export interface RollLogEntry {
   modifier: number;
   diceTotal?: number;
   total: number;
+  dc?: number;
+  passed?: boolean;
+  rewardSummary?: string;
+  breakdown?: string;
   mode: string;
   isCrit: boolean;
   isFumble: boolean;
@@ -537,7 +978,11 @@ export interface GameState {
   dmAccount: DmAccountRecord;
   monsters: Monster[];
   pendingReactions: PendingReaction[];
+  lastResolvedClash?: PendingReaction | null;
   bestiary: BestiaryEntry[];
+  npcRoster?: NpcEntry[];
+  treasureCatalog?: TreasureEntry[];
+  chestCatalog?: Record<ChestTier, ChestTierConfig>;
   map: TowerMapState;
   combat: {
     active: boolean;
@@ -573,7 +1018,11 @@ export interface FilteredGameState {
   };
   monsters: Monster[];
   pendingReactions: PendingReaction[];
+  lastResolvedClash?: PendingReaction | null;
   bestiary: BestiaryEntry[];
+  npcRoster?: NpcEntry[];
+  treasureCatalog?: TreasureEntry[];
+  chestCatalog?: Record<ChestTier, ChestTierConfig>;
   map: TowerMapState;
   combat: GameState['combat'];
   notes: GameNotes;

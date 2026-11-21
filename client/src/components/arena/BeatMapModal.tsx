@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react';
-import { getArenaCellPx } from '@shared/index';
+import {
+  CHEST_TIERS,
+  FLOOR_THEMES,
+  VALID_TERRAIN_TYPES,
+  buildChestLootPreview,
+  getArenaCellPx,
+  type ChestLootSummary,
+  type ChestTier,
+  type TerrainType,
+} from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 import { BeatArenaCanvas, useBeatPlayerCellAction } from './BeatArenaCanvas';
 
-type ArenaTool = 'move' | 'measure' | 'tree' | 'rock' | 'water' | 'chest' | 'npc' | 'talk';
+type ArenaTool = 'move' | 'measure' | TerrainType | 'chest' | 'npc' | 'talk' | 'rest';
 
 export function BeatMapModal() {
-  const { activeBeatMapId, setActiveBeatMapId, session, state, sendAction, pushLocalToast } = useVtt();
+  const { activeBeatMapId, setActiveBeatMapId, session, state, sendAction, pushLocalToast, setChestReveal } = useVtt();
   const handlePlayerBeatCell = useBeatPlayerCellAction();
 
   const beat = (state?.storyBeats || []).find((b) => b.id === activeBeatMapId);
@@ -25,8 +34,9 @@ export function BeatMapModal() {
   const [biome, setBiome] = useState(String(beat?.arena?.biome || 'obsidian'));
   const [genPrompt, setGenPrompt] = useState('');
 
-  const [chestName, setChestName] = useState('Treasure Chest');
-  const [chestGold, setChestGold] = useState(100);
+  const [chestName, setChestName] = useState('');
+  const [chestTier, setChestTier] = useState<ChestTier>('Common');
+  const [chestGold, setChestGold] = useState(0);
   const [chestItem, setChestItem] = useState('');
 
   const [npcName, setNpcName] = useState('Tower Guide');
@@ -73,12 +83,23 @@ export function BeatMapModal() {
         await sendAction('story_action', {
           subAction: 'add_beat_chest',
           beatId: beat.id,
-          name: chestName.trim() || 'Treasure Chest',
+          name: chestName.trim() || `${chestTier} Chest`,
+          tier: chestTier,
           gold: chestGold,
           itemName: chestItem.trim(),
           x,
           y,
         });
+      }
+      return;
+    }
+
+    if (isDm && tool === 'rest') {
+      const existingRest = (arena.restSpots || []).find((r) => r.x === x && r.y === y);
+      if (existingRest) {
+        await sendAction('story_action', { subAction: 'remove_beat_rest_spot', beatId: beat.id, restSpotId: existingRest.id });
+      } else {
+        await sendAction('story_action', { subAction: 'add_beat_rest_spot', beatId: beat.id, x, y });
       }
       return;
     }
@@ -107,7 +128,7 @@ export function BeatMapModal() {
       return;
     }
 
-    if (isDm && (tool === 'tree' || tool === 'rock' || tool === 'water')) {
+    if (isDm && VALID_TERRAIN_TYPES.includes(tool as TerrainType)) {
       await sendAction('story_action', {
         subAction: 'toggle_beat_terrain',
         beatId: beat.id,
@@ -123,14 +144,22 @@ export function BeatMapModal() {
       if (handled) return;
     }
 
-    const clickedChest = (arena.chests || []).find((c) => c.x === x && c.y === y && !c.opened);
+    const clickedChest = (arena.chests || []).find((c) => c.x === x && c.y === y && (isDm || !c.opened));
     if (clickedChest && !(arena.tokens || []).some((t) => t.x === x && t.y === y)) {
-      await sendAction('story_action', {
+      if (isDm) {
+        setChestReveal(buildChestLootPreview(clickedChest, beat.floor || 1, null, 'DM', state.chestCatalog));
+        return;
+      }
+      const me = session.characterId ? state.characters?.[session.characterId] : null;
+      const res = await sendAction<{ chestLootSummary?: ChestLootSummary }>('story_action', {
         subAction: 'open_beat_chest',
         beatId: beat.id,
         chestId: clickedChest.id,
         characterId: session.characterId || null,
       });
+      if (!res?.chestLootSummary) {
+        setChestReveal(buildChestLootPreview(clickedChest, beat.floor || 1, me || null));
+      }
       return;
     }
 
@@ -275,10 +304,9 @@ export function BeatMapModal() {
                   sendAction('story_action', { subAction: 'set_beat_biome', beatId: beat.id, biome: e.target.value });
                 }}
               >
-                <option value="obsidian">Obsidian Tower</option>
-                <option value="forest">Forest</option>
-                <option value="plains">Plains</option>
-                <option value="desert">Desert</option>
+                {FLOOR_THEMES.map((t) => (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                ))}
               </select>
               <input
                 type="text"
@@ -302,7 +330,7 @@ export function BeatMapModal() {
               >
                 Auto-Generate
               </button>
-              {(['tree', 'rock', 'water'] as const).map((t) => (
+              {VALID_TERRAIN_TYPES.map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -338,13 +366,32 @@ export function BeatMapModal() {
               </button>
               <button
                 type="button"
+                className={`btn btn-xs btn-outline ${tool === 'rest' ? 'active' : ''}`}
+                style={{ borderColor: 'rgba(16,185,129,0.7)', color: '#6ee7b7' }}
+                onClick={() => setTool('rest')}
+              >
+                + Rest Spot
+              </button>
+              <button
+                type="button"
                 className={`btn btn-xs btn-outline ${tool === 'chest' ? 'active' : ''}`}
                 onClick={() => setTool('chest')}
               >
                 + Place Chest
               </button>
+              <select
+                value={chestTier}
+                aria-label="Chest Tier"
+                onChange={(e) => setChestTier(e.target.value as ChestTier)}
+                style={{ width: 'auto', minHeight: '32px', padding: '4px 8px' }}
+              >
+                {CHEST_TIERS.map((ct) => (
+                  <option key={ct} value={ct}>{ct} Tier</option>
+                ))}
+              </select>
               <input
                 type="text"
+                placeholder="Chest Name (auto)"
                 value={chestName}
                 onChange={(e) => setChestName(e.target.value)}
                 style={{ width: '130px', minHeight: '32px', padding: '4px 8px' }}

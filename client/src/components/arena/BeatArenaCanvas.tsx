@@ -4,6 +4,7 @@ import {
   getArenaCellPx,
   spaceDistanceBetweenPoints,
   type ArenaCanvasVariant,
+  type AttackArea,
   type StoryBeat,
 } from '@shared/index';
 import { findBeatTokenAt, getScaledCanvasCell } from '../../canvas/coordinates';
@@ -19,11 +20,19 @@ export function useBeatPlayerCellAction() {
       x,
       y,
       mode,
+      attackArea,
+      attackAreaModifier,
+      healFormula,
+      effectSpec,
     }: {
       beat: StoryBeat;
       x: number;
       y: number;
       mode: BeatActionMode;
+      attackArea?: AttackArea;
+      attackAreaModifier?: number;
+      healFormula?: string;
+      effectSpec?: import('@shared/index').UnitEffectSpec | null;
     }): Promise<boolean> => {
       if (!session || session.role === 'dm' || !session.characterId || !state) return false;
       const arena = beat.arena;
@@ -145,17 +154,21 @@ export function useBeatPlayerCellAction() {
       if (mode === 'attack') {
         const monTok = (arena.tokens || []).find((t) => t.x === x && t.y === y && t.type === 'monster');
         if (!monTok) {
-          pushLocalToast({
-            title: 'SELECT MONSTER',
-            message: 'Tap a monster token on the map to attack.',
-            category: 'warning',
-          });
-          return true;
+          return false;
         }
         const me = state.characters?.[session.characterId];
         if (!me) return true;
         const wep = me.equipment?.mainHand || null;
-        await requestAttackRoll({ monTok, me, wep, beatId: beat.id });
+        await requestAttackRoll({
+          monTok,
+          me,
+          wep,
+          beatId: beat.id,
+          attackArea: attackArea ?? wep?.attackArea ?? 'single',
+          attackAreaModifier: attackAreaModifier ?? wep?.attackAreaModifier ?? 0,
+          ...(healFormula ?? wep?.healFormula ? { healFormula: healFormula ?? wep?.healFormula } : {}),
+          ...(effectSpec ?? wep?.effectSpec ? { effectSpec: effectSpec ?? wep?.effectSpec } : {}),
+        });
         return true;
       }
 
@@ -172,6 +185,9 @@ export function BeatArenaCanvas({
   cellPxOverride = null,
   selectedTokenId = null,
   beatActionMode = 'move',
+  previewAttackArea = null,
+  previewAttackAreaModifier = undefined,
+  previewAimCell = null,
   measureStart = null,
   measureEnd = null,
   centerOnCharacterId = null,
@@ -184,6 +200,9 @@ export function BeatArenaCanvas({
   cellPxOverride?: number | null;
   selectedTokenId?: string | null;
   beatActionMode?: BeatActionMode;
+  previewAttackArea?: AttackArea | null;
+  previewAttackAreaModifier?: number;
+  previewAimCell?: { x: number; y: number } | null;
   measureStart?: { x: number; y: number } | null;
   measureEnd?: { x: number; y: number } | null;
   centerOnCharacterId?: string | null;
@@ -209,6 +228,9 @@ export function BeatArenaCanvas({
       cellPx,
       selectedTokenId,
       beatActionMode,
+      previewAttackArea,
+      previewAttackAreaModifier,
+      previewAimCell,
       session,
       state,
       onPortraitLoaded: () => setPortraitRev((r) => r + 1),
@@ -234,7 +256,7 @@ export function BeatArenaCanvas({
         onMeasuredLabel?.(dist);
       }
     }
-  }, [beat, cellPx, selectedTokenId, beatActionMode, session, state, measureStart, measureEnd, portraitRev, onMeasuredLabel]);
+  }, [beat, cellPx, selectedTokenId, beatActionMode, previewAttackArea, previewAttackAreaModifier, previewAimCell, session, state, measureStart, measureEnd, portraitRev, onMeasuredLabel]);
 
   // Center scroll viewport on player's token when opening Beat Detail
   useEffect(() => {

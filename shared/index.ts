@@ -4,3 +4,5 @@ export * from './passiveSkills';
 export * from './starterKits';
 export * from './rules';
 export * from './terrain';
+export * from './balance';
+export * from './tokenIcons';

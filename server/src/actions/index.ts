@@ -10,12 +10,17 @@ import {
   updateCharacterProfileAction,
 } from './characterActions';
 import {
+  bestiaryAction,
+  chestCatalogAction,
   inflictDamageAction,
   initiativeAction,
   monsterAttackAction,
+  npcAction,
   resolveReactionAction,
   rollDiceAction,
   spawnMonsterAction,
+  treasureAction,
+  unitEffectAction,
   updateMonsterAction,
 } from './combatActions';
 import { deityAction, equipmentAction, inventoryAction, spellAction } from './itemActions';
@@ -46,6 +51,10 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   update_notes: updateNotesAction,
   reset_campaign: resetCampaignAction,
   spawn_monster: spawnMonsterAction,
+  bestiary_action: bestiaryAction,
+  npc_action: npcAction,
+  treasure_action: treasureAction,
+  chest_catalog_action: chestCatalogAction,
   update_monster: updateMonsterAction,
   monster_attack: monsterAttackAction,
   resolve_reaction: resolveReactionAction,
@@ -62,6 +71,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   move_token: moveTokenAction,
   update_map: updateMapAction,
   story_action: storyAction,
+  unit_effect_action: unitEffectAction,
   allocate_stat: allocateStatAction,
   roll_passive_gacha: rollPassiveGachaAction,
   resolve_passive_gacha: resolvePassiveGachaAction,

@@ -1,4 +1,4 @@
-# The Tower — DnD Companion App (`v0.5`)
+# The Tower — DnD Companion App (`v0.6`)
 
 A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** virtual tabletop and companion app built with **Full-Stack TypeScript, React 18 (Vite), and Fastify**, synchronized live across Dungeon Masters and Players via **Server-Sent Events (SSE)**.
 
@@ -17,7 +17,7 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 
 ---
 
-## What's Implemented (`Version 0.5`)
+## What's Implemented (`Version 0.6`)
 
 ### 1. Security, Signed Cookie Sessions & RBAC Onboarding
 - **Two-Step Authentication (`The Tower — DnD Companion App`)**: Clean glassmorphic **Username or Email -> Password** login flow with **no mock accounts or demo quick-login shortcuts**.
@@ -50,6 +50,14 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 - **Validated Game Mechanics & Deities**: Live formula syntax validation (`Stat Modifier`, `Hit Check`, `Damage Inflicted`), custom stats & milestones, `Reactive` vs `Turn-Based` combat modes, monster HP masking (`showExactMonsterHpToPlayers`), graphical SVG polyhedral dice (`d4`–`d100`), and Patron Deity Google Docs importer.
 - **Atomic Persistence (`JsonStateRepository`)**: Atomic temp-file + rename writes to `data/state.json`, rotating backups in `data/backups/`, automatic backup recovery if `state.json` is corrupted, and `schemaVersion: 2` backward-compatible state migrations.
 
+### 5. Tactical Combat, Status Effects, Round Limits, Multi-Tile Terrain & Unit Icons (`v0.6`)
+- **Attack Area & Size Modifiers**: Configurable attack shapes and `-2` to `+4` Space size modifiers across player weapons, spells, and skills as well as monster basic attacks and skills, with live directional aiming previews on the arena grid.
+- **Strict Turn Enforcement & BFS Pathfinding**: Enforces active-turn ownership for both players and monsters, single-move-per-turn rules, a DM **End Turn** action in monster controls, and realistic BFS movement pathfinding that routes around impassable obstacles.
+- **Multi-Tile Theme-Aware Terrain & Auto-Generate Map**: Generates floor-themed `2×2` trees, `3×2` boulders, organic rivers/lakes, pillars, crystals, and lava/ice clusters via one-click **Auto-Generate Map**.
+- **Heal HP, Buffs & Debuffs**: Full tactical suite (`shield`, `empower`, `haste`, `regen`, `burn`, `poison`, `armor_break`, `weaken`, `slow`, `stun`) with automatic start-of-turn DoT/regen ticking & turn expiry, Beat Arena quick actions, and configuration in Bestiary Monsters/Skills, Custom Spells, and Main Hand Weapons.
+- **Combat Round Limits & Timeout Penalties**: Default `20`-round limit (DM-editable per combat beat) with live `ROUND X / Y` HUD pills, urgent warnings in the final 3 rounds, Standard Tower timeout defeat penalties (`-25%` HP min 1, `-25%` MP, `-20%` Gold, `-15%` XP), Defeat Summary banner, and DM **Retry Battle** reset.
+- **Vector Monster & NPC Icons**: Crisp auto-matched vector silhouettes (13 monster archetypes + 8 NPC archetypes) rendered on the arena canvas, Spawned Monster cards, Initiative Order, and Bestiary/NPC editors, complete with golden Boss crowns/auras, `#1`/`#2` numbered corner pips, and DM icon overrides.
+
 ---
 
 ## Tech Stack & Project Structure
@@ -67,6 +75,8 @@ dnd-vtt/
 │   ├── passiveSkills.ts        # 200-skill 7-tier gacha catalog & bonus summarizer
 │   ├── starterKits.ts          # Starter kits & custom wooden weapon loadouts
 │   ├── terrain.ts              # Deterministic seeded arena terrain generator
+│   ├── balance.ts              # Tower-Hard Ascent tuning, effect modifiers & round limits
+│   ├── tokenIcons.ts           # Monster & NPC vector icon registry & archetype matching
 │   └── index.ts
 ├── server/src/                 # Fastify backend
 │   ├── index.ts / app.ts / config.ts
@@ -87,12 +97,31 @@ dnd-vtt/
 │       ├── components/         # auth/, onboarding/, player/, dm/, arena/, modals/, common/
 │       └── styles/             # base.css, login.css, layout.css, game.css, index.css
 ├── tests/
-│   └── integration.test.ts     # 16 unit, persistence, RBAC & full campaign integration suites
+│   └── integration.test.ts     # 18 unit, persistence, RBAC & full campaign integration suites
 ├── package.json / tsconfig.base.json / tsconfig.server.json
 ├── Dockerfile                  # Multi-stage Node 20 Alpine production build
 ├── render.yaml                 # Render Web Service blueprint
 └── docs/images/                # README screenshots
 ```
+
+---
+
+## Balance: "Tower-Hard Ascent" Curve
+
+Climbers start fragile and every early fight is tense, then power compounds as they climb. All tuning numbers live in [`shared/balance.ts`](shared/balance.ts) (single source of truth for server enforcement and client previews). These defaults apply to **new campaigns** (use **Reset** in the DM Sanctum to start fresh); existing saves keep their stored formulas.
+
+| Lever | Early game (Lv 1) | Growth |
+| :--- | :--- | :--- |
+| **Starting stats** | `24 HP`, `15 MP`, all attributes `10`, `6` free stat points, `60 Gold`, `1 Mana Stone`, 2 Healing Vials (`+8 HP`) | Each point in `VIT` = `+2 Max HP`, each point in `INT` = `+1 Max MP` |
+| **Stat modifier** | `floor((SCORE - 10) / 3) + floor(SCORE / 30)` (flat early: `16 -> +2`) | Bigger swings late (`20 -> +3`, `100 -> +33`) |
+| **Damage** | `max(1, RAW_DMG * CRIT_MULT + STAT_MOD + floor(LEVEL / 3) - TARGET_DR)` | `+1` damage every 3 character levels |
+| **Level-up** | XP to next level = `100 + (level - 1) * 60` | `+2` stat points (`+3` on every 3rd level), `+5 Max HP` (+VIT mod), `+2 Max MP` (+half INT mod), `+1` Passive Ticket |
+| **Monsters** | Bestiary presets are Floor 1 baselines | Floor scaling in the DM spawn form: `+22%` HP per floor, `+1 AC / 2 floors`, `+1 DR / 3 floors`, attack `+0.8/floor`, damage `+1.5/floor` |
+| **Rewards** | Defeated monsters drop XP by default (`10 + 5 * floor`) | Passive gacha odds shift `0.9%` per floor from `Normal` into higher tiers (up to 20 floors); decline payouts scale by floor |
+| **Combat & Accuracy** | Weapon attacks roll `d20 + STAT_MOD + WEAPON_BONUS + floor(LEVEL / 4)` vs Monster AC | Natural `1` auto-misses, crit threshold auto-hits, `+1` accuracy every 4 levels |
+| **Resources & Rest** | Spell MP cost = `ceil(avg damage / 2)` (no resting during combat) | DM can place or trigger post-combat **Rest Spots** (`+50%` Max HP & MP once monsters are cleared) |
+
+The party's "current floor" for gacha odds, decline payouts and spell crafting limits is the highest floor among live (presented, unresolved) story beats. A lone Level 1 hero cannot comfortably beat a 1F Goblin Gatekeeper, but a coordinated party using terrain, reactions and consumables can; by around Level 3-4 characters begin to out-scale same-floor monsters.
 
 ---
 

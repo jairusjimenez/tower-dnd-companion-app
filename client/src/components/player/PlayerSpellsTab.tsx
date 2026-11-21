@@ -1,10 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import {
+  PLAYER_ATTACK_AREAS,
   SPELL_ELEMENTS,
+  UNIT_EFFECT_KINDS,
+  UNIT_EFFECT_META,
+  formatMonsterAttackArea,
+  formatUnitEffectSpec,
   getMaxSpellsForLevel,
   getSpellCraftLimits,
   normalizeSpellElement,
+  type AttackArea,
   type Character,
+  type UnitEffectKind,
 } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 
@@ -32,6 +39,12 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
   const [spRange, setSpRange] = useState(4);
   const [spMp, setSpMp] = useState(3);
   const [spExpl, setSpExpl] = useState('');
+  const [spAttackArea, setSpAttackArea] = useState<AttackArea>('single');
+  const [spAreaMod, setSpAreaMod] = useState(0);
+  const [spHealFormula, setSpHealFormula] = useState('');
+  const [spEffectKind, setSpEffectKind] = useState<UnitEffectKind | ''>('');
+  const [spEffectPotency, setSpEffectPotency] = useState(3);
+  const [spEffectDuration, setSpEffectDuration] = useState(2);
   const [targetMonsterId, setTargetMonsterId] = useState('');
 
   const livingMonsters = (state?.monsters || []).filter((m) => m.hp === null || m.hp > 0);
@@ -70,11 +83,28 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
         damageDice: spDmg,
         rangeSpaces: spRange,
         mpCost: spMp,
+        attackArea: spAttackArea,
+        attackAreaModifier: spAreaMod,
+        ...(spHealFormula.trim() ? { healFormula: spHealFormula.trim() } : {}),
+        ...(spEffectKind
+          ? {
+              effectSpec: {
+                kind: spEffectKind,
+                potency: Math.max(1, spEffectPotency),
+                duration: Math.max(1, spEffectDuration),
+                target: UNIT_EFFECT_META[spEffectKind].defaultTarget,
+              },
+            }
+          : {}),
         explanation: spExpl.trim(),
       },
     });
     setSpName('');
     setSpExpl('');
+    setSpAttackArea('single');
+    setSpAreaMod(0);
+    setSpHealFormula('');
+    setSpEffectKind('');
   };
 
   return (
@@ -110,10 +140,56 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
                   <strong>
                     {sp.name} <span className={`tag tag-el-${elName.toLowerCase()}`}>{elName}</span>
                     {isReaction && <span className="tag tag-purple">Reaction</span>}
+                    {sp.healFormula && <span className="tag tag-green">Heal {sp.healFormula}</span>}
+                    {sp.effectSpec && (
+                      <span className={`tag ${UNIT_EFFECT_META[sp.effectSpec.kind]?.category === 'buff' ? 'tag-green' : 'tag-crimson'}`}>
+                        {formatUnitEffectSpec(sp.effectSpec)}
+                      </span>
+                    )}
                   </strong>
                   <span className="tag tag-cyan">
                     {sp.damageDice} • {sp.rangeSpaces} Sp • {sp.mpCost} MP
                   </span>
+                </div>
+                <div className="btn-row mt-xs" style={{ flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                  <select
+                    aria-label={`${sp.name} Attack Area`}
+                    value={sp.attackArea || 'single'}
+                    onChange={(e) =>
+                      sendAction('spell_action', {
+                        characterId: ch.id,
+                        subAction: 'update_area',
+                        spellId: sp.id,
+                        attackArea: e.target.value,
+                      })
+                    }
+                    style={{ width: 'auto', minHeight: '24px', padding: '2px 6px', fontSize: '0.75rem' }}
+                  >
+                    {PLAYER_ATTACK_AREAS.map((a) => (
+                      <option key={a} value={a}>
+                        Area: {formatMonsterAttackArea(a)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label={`${sp.name} Area Modifier`}
+                    value={sp.attackAreaModifier ?? 0}
+                    onChange={(e) =>
+                      sendAction('spell_action', {
+                        characterId: ch.id,
+                        subAction: 'update_area',
+                        spellId: sp.id,
+                        attackAreaModifier: Number(e.target.value),
+                      })
+                    }
+                    style={{ width: 'auto', minHeight: '24px', padding: '2px 6px', fontSize: '0.75rem' }}
+                  >
+                    {[-2, -1, 0, 1, 2, 3, 4].map((m) => (
+                      <option key={m} value={m}>
+                        Mod: {m > 0 ? `+${m}` : m} Sp
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <details className="small muted">
                   <summary>
@@ -289,6 +365,62 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
                 />
               </label>
             </div>
+            <div className="grid-2">
+              <label>
+                <span>Attack Area</span>
+                <select value={spAttackArea} onChange={(e) => setSpAttackArea(e.target.value as AttackArea)}>
+                  {PLAYER_ATTACK_AREAS.map((a) => (
+                    <option key={a} value={a}>
+                      {formatMonsterAttackArea(a)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Area Size Modifier (Spaces)</span>
+                <select value={spAreaMod} onChange={(e) => setSpAreaMod(Number(e.target.value))}>
+                  {[-2, -1, 0, 1, 2, 3, 4].map((m) => (
+                    <option key={m} value={m}>
+                      {m > 0 ? `+${m}` : m} Space{Math.abs(m) === 1 ? '' : 's'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="grid-2">
+              <label>
+                <span>Heal HP Formula (Optional)</span>
+                <input
+                  type="text"
+                  placeholder="e.g. 2d6+3"
+                  value={spHealFormula}
+                  onChange={(e) => setSpHealFormula(e.target.value)}
+                />
+              </label>
+              <label>
+                <span>Buff / Debuff Effect (Optional)</span>
+                <select value={spEffectKind} onChange={(e) => setSpEffectKind(e.target.value as UnitEffectKind | '')}>
+                  <option value="">None</option>
+                  {UNIT_EFFECT_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {UNIT_EFFECT_META[k].label} ({UNIT_EFFECT_META[k].category})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {spEffectKind && (
+              <div className="grid-2">
+                <label>
+                  <span>Effect Potency</span>
+                  <input type="number" min={1} max={50} value={spEffectPotency} onChange={(e) => setSpEffectPotency(Number(e.target.value || 1))} />
+                </label>
+                <label>
+                  <span>Duration (Turns)</span>
+                  <input type="number" min={1} max={10} value={spEffectDuration} onChange={(e) => setSpEffectDuration(Number(e.target.value || 1))} />
+                </label>
+              </div>
+            )}
             <label>
               <span>Explanation</span>
               <textarea id="sp-expl" rows={2} placeholder="Spell effect & range details..." value={spExpl} onChange={(e) => setSpExpl(e.target.value)} />

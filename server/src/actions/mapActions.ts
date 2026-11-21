@@ -105,6 +105,8 @@ export function updateMapAction(ctx: ActionRequestContext, payload: Record<strin
     } else if (payload.preset) {
       const presetMap: Record<string, (n: number) => string> = {
         classic: (n) => defaultThemeForFloor(n),
+        manhwa_climb: (n) => (n === 1 ? 'floor_of_tests' : n === 2 ? 'red_gate' : n === 3 ? 'demon_castle' : n === 4 ? 'shinsu_sea' : 'shadow_monarch'),
+        dnd_planes: (n) => (n === 1 ? 'feywild' : n === 2 ? 'underdark' : n === 3 ? 'nine_hells' : n === 4 ? 'astral_sea' : 'dragon_lair'),
         all_forest: () => 'forest',
         all_desert: () => 'desert',
         all_underworld: () => 'underworld',

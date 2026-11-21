@@ -4,13 +4,27 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  BALANCE,
+  PASSIVE_GACHA_ODDS,
+  TOWER_DAMAGE_FORMULA,
+  TOWER_STAT_FORMULA,
   buildStarterEquipment,
   clampSpellToFloor,
+  computePassiveModifiers,
+  computeReachableMoveCells,
+  computeStatModifier,
   evaluateFormula,
   generateArenaTerrainFromPrompt,
   getArenaCellPx,
+  getMonsterXpReward,
+  getPassiveOddsForFloor,
+  levelUpGrowth,
+  pickPassiveTier,
   PASSIVE_SKILL_POOL,
+  scaleMonsterForFloor,
+  statPointsForLevelUp,
   summarizePassiveBonuses,
+  xpToNextForLevel,
 } from '../shared';
 import { buildApp } from '../server/src/app';
 import { rollDiceServer } from '../server/src/services/dice';
@@ -190,12 +204,49 @@ async function runTests(): Promise<void> {
     awakenings: ['ms-vit-20'], // VIT 20 milestone grants +2 DR
   };
   recalculateCharacterAcAndDr(acState, acChar);
-  // Base 10 + AGI mod (+2) + Armor AC (3) + Passive AC (round(2 * 1.5)=3) = 18
-  assert.strictEqual(acChar.ac, 18);
+  // Base 10 + AGI mod (floor((14-10)/3)+floor(14/30) = +1) + Armor AC (3) + Passive AC (round(2 * 1.5)=3) = 17
+  assert.strictEqual(acChar.ac, 17);
   // Armor DR (2) + Passive DR (round(3 * 1.5)=5) + Awakening VIT20 DR (2) = 9
   assert.strictEqual(acChar.dr, 9);
 
   assert.strictEqual(PASSIVE_SKILL_POOL.length, 200);
+
+  // --- Tower-Hard balance curve (shared/balance.ts) ---
+  const towerMechanics = { statFormula: TOWER_STAT_FORMULA };
+  assert.strictEqual(computeStatModifier(10, towerMechanics), 0);
+  assert.strictEqual(computeStatModifier(13, towerMechanics), 1);
+  assert.strictEqual(computeStatModifier(16, towerMechanics), 2);
+  assert.strictEqual(computeStatModifier(20, towerMechanics), 3);
+  assert.strictEqual(computeStatModifier(100, towerMechanics), 33); // flat early, big swings late
+  assert.strictEqual(
+    evaluateFormula(TOWER_DAMAGE_FORMULA, { RAW_DMG: 10, CRIT_MULT: 1, STAT_MOD: 1, LEVEL: 6, TARGET_DR: 2 }),
+    11, // 10 + 1 + floor(6/3)=2 - 2
+  );
+  assert.strictEqual(xpToNextForLevel(1), 100);
+  assert.strictEqual(xpToNextForLevel(5), 340);
+  assert.strictEqual(statPointsForLevelUp(2), 2);
+  assert.strictEqual(statPointsForLevelUp(3), 3); // bonus point every 3rd level
+  assert.deepStrictEqual(levelUpGrowth(0, 0), { hp: 5, mp: 2 });
+  assert.deepStrictEqual(levelUpGrowth(4, 6), { hp: 9, mp: 5 });
+
+  assert.deepStrictEqual(getPassiveOddsForFloor(1), PASSIVE_GACHA_ODDS);
+  const deepOdds = getPassiveOddsForFloor(11);
+  assert.strictEqual(deepOdds.Normal, 46);
+  assert.ok(deepOdds.Mythic > PASSIVE_GACHA_ODDS.Mythic);
+  assert.ok(Math.abs(Object.values(deepOdds).reduce((a, b) => a + b, 0) - 100) < 0.1);
+  assert.strictEqual(pickPassiveTier(PASSIVE_GACHA_ODDS, 0), 'Mythic');
+  assert.strictEqual(pickPassiveTier(PASSIVE_GACHA_ODDS, 0.999), 'Normal');
+
+  const goblinBase = { maxHp: 26, ac: 14, dr: 1, attackFormula: '1d20+5', damageFormula: '1d8+3' };
+  assert.deepStrictEqual(scaleMonsterForFloor(goblinBase, 1), goblinBase);
+  assert.deepStrictEqual(scaleMonsterForFloor(goblinBase, 4), {
+    maxHp: 43,
+    ac: 15,
+    dr: 2,
+    attackFormula: '1d20+7',
+    damageFormula: '1d8+7',
+  });
+  assert.ok(getMonsterXpReward(10) > getMonsterXpReward(1));
 
   const deityParsed = parseDeityTextIntoEntries(
     'Solarix\nDomain: Sun\nBlessing: Dawn\nBoon: +5 Radiant\nRange: 6 Spaces',
@@ -453,6 +504,10 @@ async function runTests(): Promise<void> {
     });
     assert.strictEqual(spawn.status, 200);
     const monId = spawn.data.monster.id;
+    assert.ok(Array.isArray(spawn.data.monster.skills) && spawn.data.monster.skills.length > 0);
+    const kasakaSkill = spawn.data.monster.skills[0];
+    assert.strictEqual(kasakaSkill.maxUsesPerCombat, 2);
+    assert.strictEqual(kasakaSkill.usesRemaining, 2);
 
     const dmgRes = await heroPlayer.action('inflict_damage', {
       monsterId: monId,
@@ -470,13 +525,18 @@ async function runTests(): Promise<void> {
     const playerSeenMonster = playerState.data.monsters.find((m: any) => m.id === monId);
     assert.strictEqual(playerSeenMonster.hp, 35);
 
-    // --- Suite 6: Reactive Combat Counter-Attack ---
+    // --- Suite 6: Reactive Combat Counter-Attack & Shared DM/Player Clash Summary ---
     const monAtk = await dm.action('monster_attack', {
       monsterId: monId,
       targetCharacterId: heroCharId,
+      skillId: kasakaSkill.id,
       customDamage: 8,
     });
     assert.strictEqual(monAtk.data.reactive, true);
+    assert.ok(monAtk.data.reaction.attackTotal >= 1);
+    assert.ok(monAtk.data.reaction.targetAc >= 10);
+    assert.strictEqual(monAtk.data.reaction.skillName, kasakaSkill.name);
+    assert.strictEqual(monAtk.data.skill.usesRemaining, 1);
 
     const reactRes = await heroPlayer.action('resolve_reaction', {
       reactionId: monAtk.data.reaction.id,
@@ -486,6 +546,11 @@ async function runTests(): Promise<void> {
     assert.strictEqual(reactRes.status, 200);
     assert.ok(reactRes.data.counterDamageDealt >= 1);
     assert.ok(reactRes.data.monster.hp < 35);
+    assert.ok(reactRes.data.resolvedClash);
+    assert.strictEqual(reactRes.data.resolvedClash.resolved, true);
+    assert.strictEqual(reactRes.data.resolvedClash.playerChoice, 'counter');
+    assert.ok(typeof reactRes.data.resolvedClash.playerRollTotal === 'number');
+    assert.ok(reactRes.data.resolvedClash.resolutionSummary.includes('COUNTER-ATTACKED'));
 
     // --- Suite 7: DM Custom Mechanics & Stats ---
     const mechRes = await dm.action('update_mechanics', {
@@ -597,6 +662,10 @@ async function runTests(): Promise<void> {
     const spawnBeat = await dm.action('story_action', { subAction: 'spawn_beat_monsters', beatId });
     assert.strictEqual(spawnBeat.data.spawned.length, 1);
 
+    // Calling spawn_beat_monsters again when already attached must not duplicate monsters
+    const dupSpawnBeat = await dm.action('story_action', { subAction: 'spawn_beat_monsters', beatId });
+    assert.strictEqual(dupSpawnBeat.status, 400);
+
     const beatArenaState = await heroPlayer.get('/api/state');
     const arenaBeat = beatArenaState.data.storyBeats.find((b: any) => b.id === beatId);
     assert.strictEqual(arenaBeat.arena.cols, 20);
@@ -701,20 +770,26 @@ async function runTests(): Promise<void> {
     });
     assert.strictEqual(overMove.status, 400);
 
-    // Valid open cell within Manhattan distance 1..6 succeeds once, second move same turn fails
-    let openCell: { x: number; y: number } | null = null;
-    for (let dy = -3; dy <= 3 && !openCell; dy++) {
-      for (let dx = -3; dx <= 3 && !openCell; dx++) {
-        const d = Math.abs(dx) + Math.abs(dy);
-        if (d < 1 || d > 6) continue;
-        const cx = heroTokNow.x + dx;
-        const cy = heroTokNow.y + dy;
-        if (cx >= 0 && cy >= 0 && cx < arenaStateNow.cols && cy < arenaStateNow.rows && !blockedSet.has(`${cx},${cy}`)) {
-          openCell = { x: cx, y: cy };
-        }
-      }
+    // Valid open cell within BFS movement range succeeds once, second move same turn fails
+    const reachableNow = computeReachableMoveCells({
+      startX: heroTokNow.x,
+      startY: heroTokNow.y,
+      maxSpaces: 6,
+      cols: arenaStateNow.cols,
+      rows: arenaStateNow.rows,
+      terrain: arenaStateNow.terrain,
+    });
+    const openCell: { x: number; y: number } | null = reachableNow.cells.find((c) => !blockedSet.has(`${c.x},${c.y}`)) || null;
+    assert.ok(openCell, 'Expected open cell within BFS movement range');
+    // Ensure initiative is on heroCharId's turn before testing player movement
+    let initCheckState = await dm.get('/api/state');
+    const maxTurns = (initCheckState.data.combat?.combatants || []).length || 1;
+    for (let step = 0; step < maxTurns; step++) {
+      const curComb = initCheckState.data.combat?.combatants?.[initCheckState.data.combat?.turnIndex ?? 0];
+      if (!curComb || curComb.id === heroCharId) break;
+      await dm.action('initiative_action', { subAction: 'next_turn' });
+      initCheckState = await dm.get('/api/state');
     }
-    assert.ok(openCell, 'Expected open cell within Manhattan range');
     const validDiagMove = await heroPlayer.action('story_action', {
       subAction: 'move_beat_token',
       beatId,
@@ -722,7 +797,7 @@ async function runTests(): Promise<void> {
       x: openCell.x,
       y: openCell.y,
     });
-    assert.strictEqual(validDiagMove.status, 200);
+    assert.strictEqual(validDiagMove.status, 200, `Expected 200 for validDiagMove, got ${validDiagMove.status}: ${validDiagMove.data?.error}`);
 
     const secondMoveSameTurn = await heroPlayer.action('story_action', {
       subAction: 'move_beat_token',
@@ -747,14 +822,27 @@ async function runTests(): Promise<void> {
     assert.ok(npcTok);
     assert.strictEqual(npcTok.npcRole, 'Quest Giver');
 
+    const npcBlocked = new Set<string>((addNpcRes.data.beat.arena.terrain || []).map((t: any) => `${t.x},${t.y}`));
+    let npcDest = { x: 4, y: 4 };
+    if (npcBlocked.has(`${npcDest.x},${npcDest.y}`)) {
+      for (let yy = 0; yy < 10; yy++) {
+        for (let xx = 0; xx < 10; xx++) {
+          if (!npcBlocked.has(`${xx},${yy}`) && (xx !== npcTok.x || yy !== npcTok.y)) {
+            npcDest = { x: xx, y: yy };
+            break;
+          }
+        }
+        if (!npcBlocked.has(`${npcDest.x},${npcDest.y}`)) break;
+      }
+    }
     const moveNpcRes = await dm.action('story_action', {
       subAction: 'move_beat_token',
       beatId,
       tokenId: npcTok.id,
-      x: 4,
-      y: 4,
+      x: npcDest.x,
+      y: npcDest.y,
     });
-    assert.strictEqual(moveNpcRes.status, 200);
+    assert.strictEqual(moveNpcRes.status, 200, `Expected 200 for moveNpcRes, got ${moveNpcRes.status}: ${moveNpcRes.data?.error}`);
 
     const sageRes = await dm.action('story_action', {
       subAction: 'add_beat_npc',
@@ -813,6 +901,97 @@ async function runTests(): Promise<void> {
     assert.strictEqual(updBeatRes.data.beat.xpReward, 150);
     assert.strictEqual(updBeatRes.data.beat.arena.cols, 30);
 
+    // Narration Story Beat (no combat) + DM Question to Player/Group with Options + Player Answer
+    const addNarBeatRes = await dm.action('story_action', {
+      subAction: 'add_beat',
+      beatType: 'narration',
+      title: '3F • Voice of the Administrator',
+      floor: 3,
+      xpReward: 50,
+      narration: 'The Administrator asks why you climb the Tower.',
+      presentNow: true,
+      prompts: [
+        {
+          question: 'Why do you climb the Tower?',
+          target: 'all',
+          options: ['For power & glory', 'To protect my companions', 'To uncover the truth of the 100th Floor'],
+        },
+      ],
+    });
+    assert.strictEqual(addNarBeatRes.status, 200);
+    const narBeat = addNarBeatRes.data.beat;
+    assert.strictEqual(narBeat.beatType, 'narration');
+    assert.strictEqual(narBeat.encounters.length, 0);
+    assert.strictEqual(narBeat.prompts.length, 1);
+    assert.strictEqual(narBeat.prompts[0].options.length, 3);
+
+    const askPlayerRes = await dm.action('story_action', {
+      subAction: 'ask_beat_prompt',
+      beatId: narBeat.id,
+      question: 'Do you accept the trial?',
+      target: heroCharId,
+      options: ['Accept the trial', 'Demand to know the reward first'],
+      branches: [
+        {
+          option: 'Accept the trial',
+          scenario: 'The crimson seal parts and the Floor Guardian grants you safe passage!',
+          dmNote: 'Grant +50 XP',
+          statCheckStat: 'STR',
+          statCheckDc: 5,
+          rewardType: 'treasure',
+          rewardItemName: 'Trial Seal Amulet',
+          rewardItemCategory: 'relic',
+          rewardGold: 40,
+          rewardManaStones: 1,
+          endsInCombat: true,
+          combatMonsterQty: 2,
+        },
+        {
+          option: 'Demand to know the reward first',
+          scenario: 'The Administrator chuckles and reveals a Rare Chest hidden behind the throne.',
+          rewardType: 'chest',
+          rewardChestTier: 'Rare',
+        },
+      ],
+    });
+    assert.strictEqual(askPlayerRes.status, 200);
+    assert.strictEqual(askPlayerRes.data.beat.prompts.length, 2);
+    assert.strictEqual(askPlayerRes.data.beat.prompts[1].options.length, 2);
+    assert.strictEqual(askPlayerRes.data.beat.prompts[1].branches.length, 2);
+    const targetedPromptId = askPlayerRes.data.beat.prompts[1].id;
+
+    const ansPromptRes = await heroPlayer.action('story_action', {
+      subAction: 'answer_beat_prompt',
+      beatId: narBeat.id,
+      promptId: targetedPromptId,
+      answer: 'Accept the trial',
+    });
+    assert.strictEqual(ansPromptRes.status, 200);
+    const updatedPrompt = ansPromptRes.data.beat.prompts.find((p: any) => p.id === targetedPromptId);
+    assert.strictEqual(updatedPrompt.answers.length, 1);
+    assert.strictEqual(updatedPrompt.answers[0].characterId, heroCharId);
+    assert.strictEqual(updatedPrompt.triggeredOption, 'Accept the trial');
+    assert.match(updatedPrompt.triggeredScenario, /Floor Guardian grants you safe passage/i);
+    assert.strictEqual(updatedPrompt.triggeredStatCheckResults.length, 1);
+    assert.strictEqual(updatedPrompt.triggeredStatCheckResults[0].passed, true);
+    assert.ok(updatedPrompt.triggeredRewardSummary.includes('Trial Seal Amulet'));
+    assert.strictEqual(ansPromptRes.data.beat.status, 'resolved');
+    assert.ok(updatedPrompt.spawnedCombatBeatId);
+    const spawnedCombatBeat = ansPromptRes.data.storyBeats.find((b: any) => b.id === updatedPrompt.spawnedCombatBeatId);
+    assert.ok(spawnedCombatBeat);
+    assert.strictEqual(spawnedCombatBeat.beatType, 'combat');
+    assert.strictEqual(spawnedCombatBeat.encounters.length, 2);
+
+    // Clear the narration beat's auto-spawned monsters so Suite 12 level-up & gacha checks start from baseline XP
+    for (const tok of spawnedCombatBeat.arena.tokens.filter((t: any) => t.type === 'monster')) {
+      await dm.action('remove_monster', { monsterId: tok.id });
+    }
+    const resetHeroAfterNar = await dm.get('/api/state');
+    const heroAfterNar = resetHeroAfterNar.data.characters[heroCharId];
+    if (heroAfterNar.xp > 0) {
+      await dm.action('update_character', { characterId: heroCharId, xp: 0 });
+    }
+
     const sysToastRes = await dm.action('broadcast_toast', {
       title: 'SYSTEM NOTICE',
       category: 'info',
@@ -842,8 +1021,12 @@ async function runTests(): Promise<void> {
     const beforeXpState = await heroPlayer.get('/api/state');
     const heroBefore = beforeXpState.data.characters[heroCharId];
     assert.strictEqual(heroBefore.level, 1);
+    // Difficult start: fragile Level 1 character with default 10s and limited starting points
+    assert.strictEqual(heroBefore.maxHp, BALANCE.start.maxHp);
+    assert.strictEqual(heroBefore.maxMp, BALANCE.start.maxMp);
+    assert.strictEqual(heroBefore.stats.STR, BALANCE.start.defaultStat);
     const prevPts = heroBefore.unspentStatPoints;
-    assert.ok(prevPts >= 10);
+    assert.strictEqual(prevPts, BALANCE.start.unspentStatPoints);
     const prevStr = heroBefore.stats.STR;
 
     const alloc = await heroPlayer.action('allocate_stat', { statKey: 'STR', amount: 3 });
@@ -865,6 +1048,11 @@ async function runTests(): Promise<void> {
     assert.strictEqual(heroAfter.xp, (heroBefore.xp || 0) + 20);
     assert.strictEqual(heroAfter.unspentStatPoints, prevPts - 1);
     assert.strictEqual(heroAfter.passiveTickets, 1);
+    // Power compounds on level-up: at least +5 Max HP and +2 Max MP (more with VIT/INT modifiers;
+    // Suite 7 swapped in a custom stat formula, so modifiers are positive here)
+    assert.ok(heroAfter.maxHp >= heroBefore.maxHp + BALANCE.levelUp.baseHp);
+    assert.ok(heroAfter.maxMp >= heroBefore.maxMp + BALANCE.levelUp.baseMp);
+    assert.strictEqual(heroAfter.xpToNext, xpToNextForLevel(2));
 
     const gachaDraw = await heroPlayer.action('roll_passive_gacha', {});
     assert.strictEqual(gachaDraw.status, 200);
@@ -1027,7 +1215,213 @@ async function runTests(): Promise<void> {
     assert.ok(maskedDmg.data.monster.healthTier);
     assert.ok(maskedDmg.data.logEntry?.rollDetails?.breakdown);
 
-    console.log('ALL 16 PRODUCTION TEST SUITES PASSED!');
+    // --- Suite 17: Attack Roll vs Monster AC & Post-Combat Rest Spots ---
+    await dm.action('update_mechanics', { showExactMonsterHpToPlayers: true });
+    // 17a. Attack roll vs AC (hit or miss matches d20 + modifiers vs target AC)
+    const highAcMon = await dm.action('spawn_monster', {
+      name: 'Adamantite Statue',
+      floor: 1,
+      maxHp: 50,
+      ac: 60,
+      dr: 0,
+      hiddenFromPlayers: false,
+    });
+    assert.strictEqual(highAcMon.status, 200);
+    const highAcAtk = await heroPlayer.action('inflict_damage', {
+      monsterId: highAcMon.data.monster.id,
+      diceFormula: '1d8+2',
+      damageType: 'Physical',
+      includeStatMod: true,
+      attackRoll: true,
+    });
+    assert.strictEqual(highAcAtk.status, 200);
+    assert.ok(highAcAtk.data.attackRoll);
+    if (highAcAtk.data.attackRoll.crit) {
+      assert.strictEqual(highAcAtk.data.hit, true);
+    } else {
+      assert.strictEqual(highAcAtk.data.miss, true);
+      assert.strictEqual(highAcAtk.data.finalDamage, 0);
+      assert.strictEqual(highAcAtk.data.monster.hp, 50);
+    }
+
+    const lowAcMon = await dm.action('spawn_monster', {
+      name: 'Target Dummy',
+      floor: 1,
+      maxHp: 50,
+      ac: 1,
+      dr: 0,
+      hiddenFromPlayers: false,
+    });
+    assert.strictEqual(lowAcMon.status, 200);
+    const lowAcAtk = await heroPlayer.action('inflict_damage', {
+      monsterId: lowAcMon.data.monster.id,
+      diceFormula: '1d8+2',
+      damageType: 'Physical',
+      includeStatMod: true,
+      attackRoll: true,
+    });
+    assert.strictEqual(lowAcAtk.status, 200);
+    assert.ok(lowAcAtk.data.attackRoll);
+    if (lowAcAtk.data.attackRoll.fumble) {
+      assert.strictEqual(lowAcAtk.data.miss, true);
+      assert.strictEqual(lowAcAtk.data.finalDamage, 0);
+    } else {
+      assert.strictEqual(lowAcAtk.data.hit, true);
+      assert.ok(lowAcAtk.data.finalDamage >= 1);
+      assert.ok(lowAcAtk.data.monster.hp < 50);
+    }
+
+    // 17b. Rest Spots are blocked while active beat still has living monsters, allowed after combat
+    const restSpotBeatRes = await dm.action('story_action', {
+      subAction: 'add_beat_rest_spot',
+      beatId,
+      x: 2,
+      y: 2,
+    });
+    assert.strictEqual(restSpotBeatRes.status, 200);
+    const restSpotId = restSpotBeatRes.data.beat.arena.restSpots[0].id;
+
+    // Beat `beatId` has an active Bridge Sentinel on its arena -> resting must fail with 400
+    const blockedRestUse = await heroPlayer.action('story_action', {
+      subAction: 'use_beat_rest_spot',
+      beatId,
+      restSpotId,
+      characterId: heroCharId,
+    });
+    assert.strictEqual(blockedRestUse.status, 400);
+    const blockedDmRest = await dm.action('story_action', { subAction: 'grant_rest_spot', beatId });
+    assert.strictEqual(blockedDmRest.status, 400);
+
+    // Defeat all monsters remaining on active arenas so combat ends
+    const stateBeforeRest = await dm.get('/api/state');
+    for (const m of stateBeforeRest.data.monsters || []) {
+      if (Number(m.hp ?? 0) > 0) {
+        await dm.action('update_monster', { monsterId: m.id, hp: 0 });
+      }
+    }
+    // Clear any leftover pending reactions so party is out of combat
+    for (const r of stateBeforeRest.data.pendingReactions || []) {
+      await dm.action('resolve_reaction', { reactionId: r.id, choice: 'accept' });
+    }
+
+    // Lower hero's HP/MP and verify Rest Spot restores +50% Max HP & MP once
+    const heroMaxHpNow = stateBeforeRest.data.characters[heroCharId].maxHp;
+    const heroMaxMpNow = stateBeforeRest.data.characters[heroCharId].maxMp;
+    await dm.action('update_character', { characterId: heroCharId, updates: { hp: 1, mp: 0 } });
+
+    const useRestRes = await heroPlayer.action('story_action', {
+      subAction: 'use_beat_rest_spot',
+      beatId,
+      restSpotId,
+      characterId: heroCharId,
+    });
+    assert.strictEqual(useRestRes.status, 200);
+    const afterRestState = await heroPlayer.get('/api/state');
+    assert.strictEqual(
+      afterRestState.data.characters[heroCharId].hp,
+      Math.min(heroMaxHpNow, 1 + Math.ceil(heroMaxHpNow * BALANCE.restSpot.hpPct)),
+    );
+    assert.strictEqual(
+      afterRestState.data.characters[heroCharId].mp,
+      Math.min(heroMaxMpNow, Math.ceil(heroMaxMpNow * BALANCE.restSpot.mpPct)),
+    );
+
+    // Cannot rest at the same Rest Spot a second time
+    const repeatRestRes = await heroPlayer.action('story_action', {
+      subAction: 'use_beat_rest_spot',
+      beatId,
+      restSpotId,
+      characterId: heroCharId,
+    });
+    assert.strictEqual(repeatRestRes.status, 400);
+
+    // DM can also grant a post-combat Rest Spot directly
+    const dmGrantRest = await dm.action('story_action', { subAction: 'grant_rest_spot', beatId });
+    assert.strictEqual(dmGrantRest.status, 200);
+
+    // ── SUITE 18: 200 Passive Skills Tier Rebalance, Sheet & Combat Integration ─
+    console.log('Running Suite 18: Passive Skills Tier Rebalance & Combat Integration...');
+    assert.strictEqual(PASSIVE_SKILL_POOL.length, 200);
+    const sparring = PASSIVE_SKILL_POOL.find((p) => p.name === 'Sparring Habit');
+    const eternalMonarch = PASSIVE_SKILL_POOL.find((p) => p.name === 'Eternal Monarch');
+    const unarmoredGrace = PASSIVE_SKILL_POOL.find((p) => p.name === 'Unarmored Grace');
+    const irregularAuth = PASSIVE_SKILL_POOL.find((p) => p.name === 'Irregular Authority');
+    const quickRecovery = PASSIVE_SKILL_POOL.find((p) => p.name === 'Quick Recovery');
+    assert.ok(sparring && sparring.description.includes('lvl 1-10 monsters'));
+    assert.ok(eternalMonarch && eternalMonarch.description.includes('Revive 100% HP & MP (1/combat)'));
+    assert.ok(unarmoredGrace && irregularAuth && quickRecovery);
+
+    // Grant Sparring Habit + Irregular Authority + Eternal Monarch + Quick Recovery to hero via DM update
+    await dm.action('update_character', {
+      characterId: heroCharId,
+      updates: {
+        passives: [sparring, irregularAuth, eternalMonarch, quickRecovery, unarmoredGrace],
+      },
+    });
+    const pStateRes = await heroPlayer.get('/api/state');
+    const pHero = pStateRes.data.characters[heroCharId];
+    const pMods = computePassiveModifiers(pHero);
+    assert.strictEqual(pMods.damageBonusVsLowLevel, 1);
+    assert.strictEqual(pMods.ignoreAllEnemyDr, true);
+    assert.strictEqual(pMods.revivePerCombatPct, 100);
+    assert.strictEqual(pMods.reviveMpAlso, true);
+    assert.strictEqual(pMods.restSpotBonusHp, 3);
+
+    // Verify Irregular Authority ignores enemy DR + Sparring Habit adds +1 vs Floor 1-10 monster
+    const drDummy = await dm.action('spawn_monster', {
+      name: 'Armored Dummy',
+      floor: 2,
+      maxHp: 50,
+      ac: 5,
+      dr: 10,
+    });
+    assert.strictEqual(drDummy.status, 200);
+    const dummyId = drDummy.data.monster.id;
+    const hitDummy = await heroPlayer.action('inflict_damage', {
+      monsterId: dummyId,
+      rawDamage: 5,
+      damageType: 'Physical',
+      includeStatMod: false,
+    });
+    assert.strictEqual(hitDummy.status, 200);
+    // 5 raw + 1 Sparring Habit (floor 2 <= 10) + floor(WEAPON_BONUS/2), 10 DR ignored by Irregular Authority
+    const expectedWeaponBonus = Math.floor(Number(pHero.equipment?.mainHand?.attackBonus || 0) / 2);
+    assert.strictEqual(hitDummy.data.finalDamage, 5 + 1 + expectedWeaponBonus);
+
+    // Verify Eternal Monarch revives at 100% HP & MP once per combat on fatal hit
+    await dm.action('update_character', { characterId: heroCharId, updates: { hp: 5, mp: 1 } });
+    const fatalHit = await dm.action('monster_attack', {
+      monsterId: dummyId,
+      targetCharacterId: heroCharId,
+      customDamage: 999,
+    });
+    assert.strictEqual(fatalHit.status, 200);
+    if (fatalHit.data.reactive && fatalHit.data.reaction?.id) {
+      const reactRes = await heroPlayer.action('resolve_reaction', {
+        reactionId: fatalHit.data.reaction.id,
+        choice: 'accept',
+      });
+      assert.strictEqual(reactRes.status, 200);
+    }
+    const postReviveState = await heroPlayer.get('/api/state');
+    const revivedHero = postReviveState.data.characters[heroCharId];
+    assert.strictEqual(revivedHero.hp, revivedHero.maxHp);
+    assert.strictEqual(revivedHero.mp, revivedHero.maxMp);
+
+    // Defeat dummyId and verify defeatSummary is returned for the MONSTER DEFEATED modal
+    const killDummy = await heroPlayer.action('inflict_damage', {
+      monsterId: dummyId,
+      rawDamage: 999,
+      damageType: 'Physical',
+      includeStatMod: false,
+    });
+    assert.strictEqual(killDummy.status, 200);
+    assert.ok(killDummy.data.defeatSummary);
+    assert.strictEqual(killDummy.data.defeatSummary.monsterName, 'Armored Dummy');
+    assert.ok(killDummy.data.defeatSummary.xpGained > 0);
+    assert.ok(killDummy.data.defeatSummary.goldGained >= 0);
+
+    console.log('ALL 18 PRODUCTION TEST SUITES PASSED!');
   } finally {
     await app.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

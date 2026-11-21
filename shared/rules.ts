@@ -1,13 +1,67 @@
+import { BALANCE } from './balance';
 import { evaluateFormula } from './formulas';
+import { computePassiveModifiers } from './passiveSkills';
 import type {
   Character,
   EquipmentItem,
+  GameState,
   MechanicsConfig,
   Spell,
   SpellCraftLimits,
   SpellElement,
   StatMilestone,
 } from './types';
+
+export interface FloorThemeOption {
+  id: string;
+  label: string;
+  group: 'Core Biomes' | 'Manhwa Tower Floors' | 'D&D Realms & Dungeons';
+}
+
+export const FLOOR_THEMES: FloorThemeOption[] = [
+  // Core Biomes
+  { id: 'forest', label: 'Forest (Gate of Trials)', group: 'Core Biomes' },
+  { id: 'desert', label: 'Desert (Scorching Wastes)', group: 'Core Biomes' },
+  { id: 'underworld', label: 'Underworld (Abyssal Cavern)', group: 'Core Biomes' },
+  { id: 'plains', label: 'Plains (Windy Highlands)', group: 'Core Biomes' },
+  { id: 'frost', label: 'Frost (Frozen Glacier)', group: 'Core Biomes' },
+  { id: 'obsidian', label: 'Obsidian (Volcanic Citadel)', group: 'Core Biomes' },
+  // Famous Manhwa Tower Floors
+  { id: 'shinsu_sea', label: 'Shinsu Sea (Tower of God)', group: 'Manhwa Tower Floors' },
+  { id: 'floor_of_tests', label: "Floor of Tests (Evankhell's Hell)", group: 'Manhwa Tower Floors' },
+  { id: 'hell_train', label: 'Hell Train Express', group: 'Manhwa Tower Floors' },
+  { id: 'floor_of_death', label: 'Floor of Death (Red Sea)', group: 'Manhwa Tower Floors' },
+  { id: 'hidden_floor', label: 'Hidden Data Floor', group: 'Manhwa Tower Floors' },
+  { id: 'red_gate', label: 'Red Gate (Frozen Snowfield)', group: 'Manhwa Tower Floors' },
+  { id: 'demon_castle', label: 'Demon Castle (100F Spire)', group: 'Manhwa Tower Floors' },
+  { id: 'double_dungeon', label: 'Double Dungeon (Cartenon Temple)', group: 'Manhwa Tower Floors' },
+  { id: 'jeju_nest', label: 'Crimson Ant Hive', group: 'Manhwa Tower Floors' },
+  { id: 'shadow_monarch', label: "Shadow Monarch's Domain", group: 'Manhwa Tower Floors' },
+  { id: 'murim_peaks', label: 'Murim Mist Peaks', group: 'Manhwa Tower Floors' },
+  { id: 'clockwork_aegis', label: 'Clockwork Tower (10-Day Trial)', group: 'Manhwa Tower Floors' },
+  { id: 'star_stream', label: 'Star Stream Scenario Arena', group: 'Manhwa Tower Floors' },
+  // Classic D&D Realms & Dungeons
+  { id: 'feywild', label: 'Feywild (Enchanted Glade)', group: 'D&D Realms & Dungeons' },
+  { id: 'shadowfell', label: 'Shadowfell (Gloomveil)', group: 'D&D Realms & Dungeons' },
+  { id: 'underdark', label: 'Underdark (Fungal Abyss)', group: 'D&D Realms & Dungeons' },
+  { id: 'astral_sea', label: 'Astral Sea (Starlight Void)', group: 'D&D Realms & Dungeons' },
+  { id: 'elemental_fire', label: 'Elemental Plane of Fire', group: 'D&D Realms & Dungeons' },
+  { id: 'elemental_water', label: 'Elemental Plane of Water', group: 'D&D Realms & Dungeons' },
+  { id: 'nine_hells', label: 'Nine Hells (Avernus)', group: 'D&D Realms & Dungeons' },
+  { id: 'dragon_lair', label: "Ancient Dragon's Lair", group: 'D&D Realms & Dungeons' },
+  { id: 'necropolis', label: 'Cursed Necropolis', group: 'D&D Realms & Dungeons' },
+  { id: 'sunken_temple', label: 'Sunken Arcane Temple', group: 'D&D Realms & Dungeons' },
+  { id: 'sky_citadel', label: 'Cloud & Storm Citadel', group: 'D&D Realms & Dungeons' },
+  { id: 'arcane_library', label: 'Grand Arcane Library', group: 'D&D Realms & Dungeons' },
+];
+
+export const VALID_FLOOR_THEME_IDS: string[] = FLOOR_THEMES.map((t) => t.id);
+
+export function getFloorThemeLabel(themeId: string): string {
+  const found = FLOOR_THEMES.find((t) => t.id === themeId);
+  if (found) return found.label;
+  return themeId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export const SPELL_ELEMENTS: SpellElement[] = ['Fire', 'Earth', 'Wind', 'Water', 'Light', 'Dark'];
 
@@ -52,7 +106,7 @@ export function clampSpellToFloor(
   bonus = Math.max(0, Math.min(bonus, lim.maxBonus));
   const clampedDice = `${count}d${sides}${bonus > 0 ? `+${bonus}` : ''}`;
   const avgDmg = count * ((sides + 1) / 2) + bonus;
-  const minMp = Math.max(2, Math.ceil(avgDmg / 3));
+  const minMp = Math.max(2, Math.ceil(avgDmg / BALANCE.spellMpDivisor));
   const rangeSpaces = Math.max(1, Math.min(lim.maxRange, Number(sp.rangeSpaces || lim.maxRange)));
   const mpCost = Math.max(minMp, Number(sp.mpCost || minMp));
   return { damageDice: clampedDice, rangeSpaces, mpCost, limits: lim, minMp };
@@ -64,6 +118,23 @@ export function isStatsAndEquipmentLocked(src: {
 }): boolean {
   return src.session?.status === 'active'
     && (src.storyBeats || []).some((b) => Boolean(b.presented) && b.status === 'active');
+}
+
+/**
+ * The party is "in combat" while any living monster stands on the arena of a live (presented,
+ * unresolved) story beat, or while a monster attack still awaits a reaction. Rest Potions are
+ * blocked during combat and become usable once the fight is over.
+ */
+export function isPartyInCombat(state: {
+  storyBeats?: GameState['storyBeats'];
+  monsters?: GameState['monsters'];
+  pendingReactions?: GameState['pendingReactions'];
+}): boolean {
+  if ((state.pendingReactions || []).length > 0) return true;
+  const aliveIds = new Set((state.monsters || []).filter((m) => Number(m.hp ?? 0) > 0).map((m) => m.id));
+  return (state.storyBeats || [])
+    .filter((b) => b.presented && b.status !== 'resolved')
+    .some((b) => (b.arena?.tokens || []).some((t) => t.type === 'monster' && aliveIds.has(t.id)));
 }
 
 export function getMaxAttacksForFloor(floor: number): number {
@@ -79,7 +150,8 @@ export function getWeaponAttackInfo(character?: Partial<Character> | null): { is
       || /ranged/i.test(wep.damageType || '')
     ),
   );
-  const maxRange = isRanged ? Math.max(3, Number(wep?.rangeSpaces || 3)) : 1;
+  const mods = character ? computePassiveModifiers(character) : null;
+  const maxRange = isRanged ? Math.max(3, Number(wep?.rangeSpaces || 3) + (mods?.bonusRangedRangeSpaces || 0)) : 1;
   return { isRanged, maxRange };
 }
 
@@ -179,5 +251,7 @@ export function computeStatModifier(
 ): number {
   const formula = mechanics?.statFormula || 'floor((SCORE - 10) / 2)';
   const scope = buildCharacterVarScope(character, mechanics, { SCORE: Number(score || 0) });
-  return Math.trunc(evaluateFormula(formula, scope));
+  const baseMod = Math.trunc(evaluateFormula(formula, scope));
+  const extra = character ? computePassiveModifiers(character).allAttributesInCombat : 0;
+  return baseMod + extra;
 }
