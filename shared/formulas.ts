@@ -182,6 +182,36 @@ export function getGridLineCells(x0: number, y0: number, x1: number, y1: number)
   return cells;
 }
 
+export function hasObserveLineOfSight({
+  startX,
+  startY,
+  targetX,
+  targetY,
+  blockers,
+}: {
+  startX: number;
+  startY: number;
+  targetX: number;
+  targetY: number;
+  blockers: Set<string>;
+}): boolean {
+  const midCells = getGridLineCells(startX, startY, targetX, targetY);
+  for (const c of midCells) {
+    if (blockers.has(`${c.x},${c.y}`)) return false;
+  }
+  const path = [{ x: startX, y: startY }, ...midCells, { x: targetX, y: targetY }];
+  for (let i = 1; i < path.length; i++) {
+    const prev = path[i - 1];
+    const next = path[i];
+    if (prev.x !== next.x && prev.y !== next.y) {
+      if (blockers.has(`${next.x},${prev.y}`) && blockers.has(`${prev.x},${next.y}`)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 export type ArenaCanvasVariant = 'modal' | 'detail' | 'draft';
 
 export function getArenaCellPx(cols: number, variant: ArenaCanvasVariant = 'modal'): number {
@@ -193,4 +223,76 @@ export function getArenaCellPx(cols: number, variant: ArenaCanvasVariant = 'moda
     return n <= 16 ? 34 : n <= 20 ? 28 : n <= 24 ? 25 : 22;
   }
   return n <= 16 ? 38 : n <= 20 ? 32 : n <= 24 ? 27 : 24;
+}
+
+export function resolveConsumableEffects(item: {
+  healHp?: number;
+  healMp?: number;
+  grantXp?: number;
+  notes?: string;
+}): { healHp: number; healMp: number; grantXp: number } {
+  let healHp = Math.max(0, Number(item.healHp || 0));
+  let healMp = Math.max(0, Number(item.healMp || 0));
+  let grantXp = Math.max(0, Number(item.grantXp || 0));
+
+  const notes = typeof item.notes === 'string' ? item.notes : '';
+  if (notes) {
+    if (healHp === 0) {
+      const m = notes.match(/(?:restores?|heals?|\+)\s*(\d+)\s*hp\b/i);
+      if (m) healHp = Number(m[1] || 0);
+    }
+    if (healMp === 0) {
+      const m = notes.match(/(?:restores?|recovers?|\+)\s*(\d+)\s*(?:mp|mana)\b/i);
+      if (m) healMp = Number(m[1] || 0);
+    }
+    if (grantXp === 0) {
+      const m = notes.match(/(?:grants?|gives?|restores?|\+)\s*(\d+)\s*(?:xp|exp)\b/i);
+      if (m) grantXp = Number(m[1] || 0);
+    }
+  }
+
+  return { healHp, healMp, grantXp };
+}
+
+export type ReactionStyle = 'parry' | 'block' | 'counter';
+
+export interface PlayerReactionStyleInfo {
+  style: ReactionStyle;
+  label: string;
+  statTag: string;
+  shortDesc: string;
+}
+
+export function resolvePlayerReactionStyle(ch?: { stats?: Record<string, number> } | null): PlayerReactionStyleInfo {
+  const str = Number(ch?.stats?.STR ?? 10);
+  const per = Number(ch?.stats?.PER ?? 10);
+  const vit = Number(ch?.stats?.VIT ?? 10);
+  const agi = Number(ch?.stats?.AGI ?? 10);
+
+  const parryScore = (str + per) / 2;
+  const blockScore = vit;
+  const counterScore = agi;
+
+  if (counterScore > parryScore && counterScore > blockScore) {
+    return {
+      style: 'counter',
+      label: 'Counter-Attack',
+      statTag: 'AGI',
+      shortDesc: 'Weapon riposte on win',
+    };
+  }
+  if (blockScore > parryScore && blockScore >= counterScore) {
+    return {
+      style: 'block',
+      label: 'Block',
+      statTag: 'VIT',
+      shortDesc: 'Absorb the incoming blow',
+    };
+  }
+  return {
+    style: 'parry',
+    label: 'Parry',
+    statTag: 'STR/PER',
+    shortDesc: 'Deflect the incoming strike',
+  };
 }

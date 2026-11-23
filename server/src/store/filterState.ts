@@ -20,17 +20,38 @@ export function computeMonsterHealthTier(hp: number | null, maxHp: number | null
   return 'Healthy';
 }
 
-export function maskMonsterForRole(mon: Monster, state: GameState, role: UserRole): Monster {
+export function maskMonsterForRole(
+  mon: Monster,
+  state: GameState,
+  role: UserRole,
+  characterId: string | null = null,
+): Monster {
   const healthTier = computeMonsterHealthTier(mon.hp, mon.maxHp);
-  const showExactHp = role === 'dm' || state.mechanics?.showExactMonsterHpToPlayers !== false;
-  if (showExactHp) {
-    return { ...mon, healthTier };
+  const hpPct =
+    mon.maxHp && mon.maxHp > 0
+      ? Math.max(0, Math.min(100, Math.round((Number(mon.hp ?? 0) / Number(mon.maxHp)) * 100)))
+      : 0;
+  if (role === 'dm') {
+    return { ...mon, healthTier, hpPct, observedByViewer: true };
+  }
+  const hasObserved = Boolean(
+    characterId && state.characters?.[characterId]?.observedMonsterIds?.includes(mon.id),
+  );
+  if (hasObserved) {
+    return { ...mon, healthTier, hpPct, observedByViewer: true };
   }
   return {
     ...mon,
     hp: null,
     maxHp: null,
-    healthTier,
+    ac: 0,
+    dr: 0,
+    attackFormula: '',
+    damageFormula: '',
+    skills: [],
+    healthTier: 'Unknown',
+    hpPct,
+    observedByViewer: false,
   };
 }
 
@@ -59,7 +80,9 @@ export function filterStateForRole(
 ): FilteredGameState {
   const isDm = role === 'dm';
   const fogSet = new Set(srcState.map?.fog || []);
-  const showExactHp = srcState.mechanics?.showExactMonsterHpToPlayers !== false;
+  const observedSet = new Set(
+    !isDm && characterId ? srcState.characters?.[characterId]?.observedMonsterIds || [] : [],
+  );
   const deadMonsterIds = new Set(
     (srcState.monsters || []).filter((m) => Number(m.hp) <= 0).map((m) => m.id),
   );
@@ -72,7 +95,7 @@ export function filterStateForRole(
       if (tok.type !== 'player' && fogSet.has(`${tok.x},${tok.y}`)) return false;
       return true;
     })
-    .map((tok) => (!isDm && !showExactHp && tok.type === 'monster' ? { ...tok, hp: null, maxHp: null } : tok));
+    .map((tok) => (!isDm && tok.type === 'monster' && !observedSet.has(tok.id) ? { ...tok, hp: null, maxHp: null } : tok));
 
   const filteredMonsters = (srcState.monsters || [])
     .filter((m) => {
@@ -82,7 +105,7 @@ export function filterStateForRole(
       if (tok && fogSet.has(`${tok.x},${tok.y}`)) return false;
       return true;
     })
-    .map((m) => maskMonsterForRole(m, srcState, role));
+    .map((m) => maskMonsterForRole(m, srcState, role, characterId));
 
   const filteredCombatants = (srcState.combat?.combatants || []).filter(
     (c) => isDm || !c.hiddenFromPlayers,
@@ -98,6 +121,9 @@ export function filterStateForRole(
     (isDm || !characterId || srcState.lastResolvedClash.targetCharacterId === characterId)
       ? srcState.lastResolvedClash
       : null;
+  const recentMonsterDefeats = (srcState.recentMonsterDefeats || []).filter(
+    (d) => isDm || (Boolean(characterId) && d.killerCharacterId === characterId),
+  );
 
   return {
     version: srcState.version,
@@ -122,6 +148,7 @@ export function filterStateForRole(
     monsters: filteredMonsters,
     pendingReactions: filteredReactions,
     lastResolvedClash,
+    recentMonsterDefeats,
     bestiary: isDm ? srcState.bestiary : [],
     npcRoster: isDm ? srcState.npcRoster || [] : [],
     treasureCatalog: isDm ? srcState.treasureCatalog || [] : [],
@@ -147,7 +174,7 @@ export function filterStateForRole(
             if (t.type === 'monster' && deadMonsterIds.has(t.id)) return false;
             return isDm || !t.hiddenFromPlayers;
           })
-          .map((t) => (!isDm && !showExactHp && t.type === 'monster' ? { ...t, hp: null, maxHp: null } : t));
+          .map((t) => (!isDm && t.type === 'monster' && !observedSet.has(t.id) ? { ...t, hp: null, maxHp: null } : t));
         const mapped = { ...b, arena: { ...arena, tokens: arenaTokens } };
         return isDm ? mapped : { ...mapped, dmSecret: null };
       }),

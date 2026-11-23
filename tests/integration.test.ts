@@ -8,6 +8,7 @@ import {
   PASSIVE_GACHA_ODDS,
   TOWER_DAMAGE_FORMULA,
   TOWER_STAT_FORMULA,
+  computeCharacterMoveSpaces,
   buildStarterEquipment,
   clampSpellToFloor,
   computePassiveModifiers,
@@ -516,14 +517,19 @@ async function runTests(): Promise<void> {
       damageType: 'Slashing',
       includeStatMod: false,
     });
-    // max(1, (17 * 1) + 0 - 2 DR) = 15 -> 50 - 15 = 35 HP
+    // max(1, (17 * 1) + 0 - 2 DR) = 15 -> 50 - 15 = 35 HP (masked for unobserved player, visible to DM)
     assert.strictEqual(dmgRes.data.finalDamage, 15);
-    assert.strictEqual(dmgRes.data.monster.hp, 35);
+    assert.strictEqual(dmgRes.data.monster.hp, null);
 
     const playerState = await heroPlayer.get('/api/state');
     assert.strictEqual(playerState.data.notes.dmPrivate, null);
     const playerSeenMonster = playerState.data.monsters.find((m: any) => m.id === monId);
-    assert.strictEqual(playerSeenMonster.hp, 35);
+    assert.strictEqual(playerSeenMonster.hp, null);
+    assert.strictEqual(playerSeenMonster.observedByViewer, false);
+
+    const dmAfterDmgState = await dm.get('/api/state');
+    const dmSeenMonster = dmAfterDmgState.data.monsters.find((m: any) => m.id === monId);
+    assert.strictEqual(dmSeenMonster.hp, 35);
 
     // --- Suite 6: Reactive Combat Counter-Attack & Shared DM/Player Clash Summary ---
     const monAtk = await dm.action('monster_attack', {
@@ -771,10 +777,12 @@ async function runTests(): Promise<void> {
     assert.strictEqual(overMove.status, 400);
 
     // Valid open cell within BFS movement range succeeds once, second move same turn fails
+    assert.strictEqual(computeCharacterMoveSpaces({ agi: 10, floor: 1 }).total, 3);
+    assert.strictEqual(computeCharacterMoveSpaces({ agi: 18, floor: 15 }).total, 7);
     const reachableNow = computeReachableMoveCells({
       startX: heroTokNow.x,
       startY: heroTokNow.y,
-      maxSpaces: 6,
+      maxSpaces: 3,
       cols: arenaStateNow.cols,
       rows: arenaStateNow.rows,
       terrain: arenaStateNow.terrain,
@@ -822,19 +830,15 @@ async function runTests(): Promise<void> {
     assert.ok(npcTok);
     assert.strictEqual(npcTok.npcRole, 'Quest Giver');
 
-    const npcBlocked = new Set<string>((addNpcRes.data.beat.arena.terrain || []).map((t: any) => `${t.x},${t.y}`));
-    let npcDest = { x: 4, y: 4 };
-    if (npcBlocked.has(`${npcDest.x},${npcDest.y}`)) {
-      for (let yy = 0; yy < 10; yy++) {
-        for (let xx = 0; xx < 10; xx++) {
-          if (!npcBlocked.has(`${xx},${yy}`) && (xx !== npcTok.x || yy !== npcTok.y)) {
-            npcDest = { x: xx, y: yy };
-            break;
-          }
-        }
-        if (!npcBlocked.has(`${npcDest.x},${npcDest.y}`)) break;
-      }
-    }
+    const npcReachable = computeReachableMoveCells({
+      startX: npcTok.x,
+      startY: npcTok.y,
+      maxSpaces: 6,
+      cols: addNpcRes.data.beat.arena.cols,
+      rows: addNpcRes.data.beat.arena.rows,
+      terrain: addNpcRes.data.beat.arena.terrain,
+    });
+    const npcDest = npcReachable.cells[0] || { x: npcTok.x, y: npcTok.y };
     const moveNpcRes = await dm.action('story_action', {
       subAction: 'move_beat_token',
       beatId,
@@ -857,6 +861,29 @@ async function runTests(): Promise<void> {
     });
     assert.strictEqual(sageRes.status, 200);
     const sageTok = sageRes.data.beat.arena.tokens.find((t: any) => t.name === 'Master Jin');
+    // Out-of-range (> 1 Space) player talk_beat_npc is rejected
+    const farTalkRes = await heroPlayer.action('story_action', {
+      subAction: 'talk_beat_npc',
+      beatId,
+      tokenId: sageTok.id,
+      characterId: heroCharId,
+    });
+    assert.strictEqual(farTalkRes.status, 400);
+
+    // Move Master Jin adjacent to heroTok, then interact
+    const heroTok = sageRes.data.beat.arena.tokens.find((t: any) => t.id === heroCharId && t.type === 'player');
+    const adjX = Math.min(sageRes.data.beat.arena.cols - 1, Number(heroTok?.x || 0) + 1);
+    const adjY = Number(heroTok?.y || 0);
+    const moveSageRes = await dm.action('story_action', {
+      subAction: 'move_beat_token',
+      beatId,
+      tokenId: sageTok.id,
+      x: adjX,
+      y: adjY,
+      forceMove: true,
+    });
+    assert.strictEqual(moveSageRes.status, 200);
+
     const talkRes = await heroPlayer.action('story_action', {
       subAction: 'talk_beat_npc',
       beatId,
@@ -1212,8 +1239,87 @@ async function runTests(): Promise<void> {
     assert.strictEqual(maskedDmg.status, 200);
     assert.strictEqual(maskedDmg.data.monster.hp, null);
     assert.strictEqual(maskedDmg.data.monster.maxHp, null);
+    assert.strictEqual(maskedDmg.data.monster.ac, 0);
+    assert.strictEqual(maskedDmg.data.monster.observedByViewer, false);
     assert.ok(maskedDmg.data.monster.healthTier);
     assert.ok(maskedDmg.data.logEntry?.rollDetails?.breakdown);
+
+    // 16g. Per-player Observe reveals monster HP & stats only to that player, limited to once per turn
+    const preObsPlayerState = await heroPlayer.get('/api/state');
+    const preObsMon = preObsPlayerState.data.monsters.find((m: any) => m.id === maskedMonSpawn.data.monster.id);
+    assert.strictEqual(preObsMon.hp, null);
+    assert.strictEqual(preObsMon.ac, 0);
+    assert.strictEqual(preObsMon.observedByViewer, false);
+
+    const obsBeatRes = await dm.action('story_action', {
+      subAction: 'add_beat',
+      title: 'Observe Trial',
+      floor: 1,
+      beatType: 'combat',
+      presentNow: true,
+      encounters: [{ name: 'Scout Hound', floor: 1, maxHp: 30, ac: 13, dr: 2, attackFormula: '1d20+4', damageFormula: '1d6+2' }],
+    });
+    assert.strictEqual(obsBeatRes.status, 200);
+    const obsSpawnRes = await dm.action('story_action', {
+      subAction: 'spawn_beat_monsters',
+      beatId: obsBeatRes.data.beat.id,
+    });
+    assert.strictEqual(obsSpawnRes.status, 200);
+    const obsBeatState = await dm.get('/api/state');
+    const obsBeat = obsBeatState.data.storyBeats.find((b: any) => b.id === obsBeatRes.data.beat.id);
+    const obsHeroTok = obsBeat.arena.tokens.find((t: any) => t.id === heroCharId && t.type === 'player');
+    const obsMonTok = obsBeat.arena.tokens.find((t: any) => t.type === 'monster');
+    assert.ok(obsHeroTok && obsMonTok);
+    const adjMonX = Math.min(obsBeat.arena.cols - 1, Number(obsHeroTok.x || 0) + 1);
+    const adjMonY = Number(obsHeroTok.y || 0);
+    await dm.action('story_action', {
+      subAction: 'move_beat_token',
+      beatId: obsBeat.id,
+      tokenId: obsMonTok.id,
+      x: adjMonX,
+      y: adjMonY,
+      forceMove: true,
+    });
+    // Ensure heroCharId's turn in initiative
+    let obsInitState = await dm.get('/api/state');
+    const obsMaxTurns = (obsInitState.data.combat?.combatants || []).length || 1;
+    for (let s = 0; s < obsMaxTurns; s++) {
+      const curComb = obsInitState.data.combat?.combatants?.[obsInitState.data.combat?.turnIndex ?? 0];
+      if (!curComb || curComb.id === heroCharId) break;
+      await dm.action('initiative_action', { subAction: 'next_turn' });
+      obsInitState = await dm.get('/api/state');
+    }
+    const obsActionRes = await heroPlayer.action('story_action', {
+      subAction: 'observe_beat_cell',
+      beatId: obsBeat.id,
+      tokenId: heroCharId,
+      x: adjMonX,
+      y: adjMonY,
+    });
+    assert.strictEqual(obsActionRes.status, 200, `Expected 200 for observe_beat_cell, got ${obsActionRes.status}: ${obsActionRes.data?.error}`);
+    assert.strictEqual(obsActionRes.data.observedMonster, true);
+    assert.strictEqual(obsActionRes.data.monster.observedByViewer, true);
+    assert.strictEqual(obsActionRes.data.monster.maxHp, 30);
+    assert.strictEqual(obsActionRes.data.monster.ac, 13);
+    assert.strictEqual(obsActionRes.data.monster.dr, 2);
+
+    const postObsPlayerState = await heroPlayer.get('/api/state');
+    const postObsMon = postObsPlayerState.data.monsters.find((m: any) => m.id === obsMonTok.id);
+    assert.strictEqual(postObsMon.observedByViewer, true);
+    assert.strictEqual(postObsMon.hp, 30);
+    assert.strictEqual(postObsMon.ac, 13);
+
+    // Second Observe on the same turn is rejected
+    const secondObsRes = await heroPlayer.action('story_action', {
+      subAction: 'observe_beat_cell',
+      beatId: obsBeat.id,
+      tokenId: heroCharId,
+      x: adjMonX,
+      y: adjMonY,
+    });
+    assert.strictEqual(secondObsRes.status, 400);
+
+    await dm.action('story_action', { subAction: 'delete_beat', beatId: obsBeat.id });
 
     // --- Suite 17: Attack Roll vs Monster AC & Post-Combat Rest Spots ---
     await dm.action('update_mechanics', { showExactMonsterHpToPlayers: true });
@@ -1241,7 +1347,9 @@ async function runTests(): Promise<void> {
     } else {
       assert.strictEqual(highAcAtk.data.miss, true);
       assert.strictEqual(highAcAtk.data.finalDamage, 0);
-      assert.strictEqual(highAcAtk.data.monster.hp, 50);
+      assert.strictEqual(highAcAtk.data.monster.hp, null);
+      const dmHighAcState = await dm.get('/api/state');
+      assert.strictEqual(dmHighAcState.data.monsters.find((m: any) => m.id === highAcMon.data.monster.id).hp, 50);
     }
 
     const lowAcMon = await dm.action('spawn_monster', {
@@ -1268,7 +1376,9 @@ async function runTests(): Promise<void> {
     } else {
       assert.strictEqual(lowAcAtk.data.hit, true);
       assert.ok(lowAcAtk.data.finalDamage >= 1);
-      assert.ok(lowAcAtk.data.monster.hp < 50);
+      assert.strictEqual(lowAcAtk.data.monster.hp, null);
+      const dmLowAcState = await dm.get('/api/state');
+      assert.ok(dmLowAcState.data.monsters.find((m: any) => m.id === lowAcMon.data.monster.id).hp < 50);
     }
 
     // 17b. Rest Spots are blocked while active beat still has living monsters, allowed after combat

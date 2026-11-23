@@ -74,7 +74,7 @@ export function TurnNotificationModal() {
     }
   }, [session, state, isCombatBeat, activeCombatant, turnKey, currentBeat, isDm, myCharId, combat?.round]);
 
-  if (!session || !state || !notice) return null;
+  if (!session || !state || !notice || activeBeatDetailId) return null;
 
   const isMonsterTurn = notice.combatantType === 'monster';
   const borderColor = isMonsterTurn ? '#ef4444' : '#38bdf8';

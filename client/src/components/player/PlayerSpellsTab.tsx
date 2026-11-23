@@ -123,7 +123,7 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
             <select value={defaultMonsterId} onChange={(e) => setTargetMonsterId(e.target.value)} style={{ maxWidth: '240px' }}>
               {livingMonsters.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name} ({m.hp !== null ? `${m.hp}/${m.maxHp} HP` : m.healthTier || 'Active'})
+                  {m.observedByViewer && m.hp !== null ? `${m.name} (${m.hp}/${m.maxHp} HP)` : m.name}
                 </option>
               ))}
             </select>

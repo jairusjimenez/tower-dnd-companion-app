@@ -56,6 +56,7 @@ export function broadcastToastAction(ctx: ActionRequestContext, payload: Record<
     category,
     target: payload.target ? String(payload.target) : 'all',
     sender: 'SYSTEM / DM',
+    isDmBroadcast: true,
   });
   commitState(ctx);
   return { ok: true, toast };

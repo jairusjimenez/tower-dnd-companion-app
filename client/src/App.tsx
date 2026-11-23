@@ -11,8 +11,11 @@ import { DmView } from './components/dm/DmView';
 import { AttackRollModal } from './components/modals/AttackRollModal';
 import { ChestRevealModal } from './components/modals/ChestRevealModal';
 import { CombatClashModal } from './components/modals/CombatClashModal';
+import { ConsumableConfirmModal } from './components/modals/ConsumableConfirmModal';
 import { DiceRollModal } from './components/modals/DiceRollModal';
 import { MonsterDefeatedModal } from './components/modals/MonsterDefeatedModal';
+import { NpcDialogueModal } from './components/modals/NpcDialogueModal';
+import { ObserveModal } from './components/modals/ObserveModal';
 import { PassiveGachaModal } from './components/modals/PassiveGachaModal';
 import { StoryPromptModal } from './components/modals/StoryPromptModal';
 import { TradeModal } from './components/modals/TradeModal';
@@ -69,8 +72,11 @@ export function App() {
       <AttackRollModal />
       <ChestRevealModal />
       <CombatClashModal />
+      <ConsumableConfirmModal />
       <DiceRollModal />
       <MonsterDefeatedModal />
+      <NpcDialogueModal />
+      <ObserveModal />
       <PassiveGachaModal />
       <StoryPromptModal />
       <TradeModal />

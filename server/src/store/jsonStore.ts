@@ -31,6 +31,7 @@ export function migrateGameState(raw: unknown): GameState {
   if (!Array.isArray(parsed.combatLog)) parsed.combatLog = [];
   if (!Array.isArray(parsed.systemMessages)) parsed.systemMessages = [];
   if (!Array.isArray(parsed.pendingReactions)) parsed.pendingReactions = [];
+  if (!Array.isArray(parsed.recentMonsterDefeats)) parsed.recentMonsterDefeats = [];
   if (!Array.isArray(parsed.storyBeats)) {
     parsed.storyBeats = fresh.storyBeats;
   } else {

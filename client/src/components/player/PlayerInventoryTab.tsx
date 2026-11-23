@@ -14,7 +14,7 @@ import { DiabloEquipmentGrid } from '../common/DiabloEquipmentGrid';
 import { InventoryItemSvg } from '../common/EquipmentIcons';
 
 export function PlayerInventoryTab({ ch }: { ch: Character }) {
-  const { state, sendAction, pushLocalToast, setTradeItemId } = useVtt();
+  const { state, sendAction, pushLocalToast, setTradeItemId, setPendingConsumableUse } = useVtt();
   const [invFilter, setInvFilter] = useState<'all' | 'weapon' | 'armor' | 'consumable' | 'relic'>('all');
 
   if (!state) return null;
@@ -198,7 +198,7 @@ export function PlayerInventoryTab({ ch }: { ch: Character }) {
                     <button
                       type="button"
                       className="btn btn-xs btn-cyan"
-                      onClick={() => sendAction('inventory_action', { characterId: ch.id, subAction: 'use_consumable', itemId: it.id })}
+                      onClick={() => setPendingConsumableUse({ characterId: ch.id, item: it })}
                     >
                       Use
                     </button>

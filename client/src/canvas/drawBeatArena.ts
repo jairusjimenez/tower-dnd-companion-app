@@ -1,15 +1,19 @@
 import {
   computeActiveEffectModifiers,
   computeAttackAreaCells,
+  computeCharacterMoveSpaces,
   computeMonsterAttackCells,
+  computePassiveModifiers,
   computeReachableMoveCells,
   inferDefaultAttackAreaForMonster,
   type AttackArea,
   type MonsterAttackArea,
   getMaxAttacksForFloor,
   getWeaponAttackInfo,
+  hasObserveLineOfSight,
   type FilteredGameState,
   type SessionIdentity,
+  type Spell,
   type StoryBeat,
 } from '@shared/index';
 import {
@@ -23,6 +27,7 @@ import {
 export type BeatActionMode =
   | 'move'
   | 'attack'
+  | 'spell'
   | 'observe'
   | 'chest'
   | 'npc'
@@ -41,8 +46,10 @@ export interface DrawBeatArenaOptions {
   previewAttackArea?: AttackArea | null;
   previewAttackAreaModifier?: number;
   previewAimCell?: { x: number; y: number } | null;
+  previewSpell?: Spell | null;
   session?: SessionIdentity | null;
   state?: FilteredGameState | null;
+  hideAxisLabels?: boolean;
   onPortraitLoaded?: () => void;
 }
 
@@ -55,14 +62,16 @@ export function drawBeatArenaCanvas({
   previewAttackArea = null,
   previewAttackAreaModifier = undefined,
   previewAimCell = null,
+  previewSpell = null,
   session = null,
   state = null,
+  hideAxisLabels = false,
   onPortraitLoaded,
 }: DrawBeatArenaOptions): void {
   const arena = beat.arena || { cols: 20, rows: 20, biome: 'obsidian', terrain: [], tokens: [], chests: [] };
   const cols = arena.cols || 20;
   const rows = arena.rows || 20;
-  const axisPad = 24;
+  const axisPad = hideAxisLabels ? 0 : 24;
   const w = axisPad + cols * cellPx;
   const h = axisPad + rows * cellPx;
   if (canvas.width !== w || canvas.height !== h) {
@@ -75,6 +84,7 @@ export function drawBeatArenaCanvas({
 
   const biome = arena.biome || 'obsidian';
   drawArenaBackground(ctx, biome, axisPad, cols, rows, cellPx, w, h);
+  const terrainSet = new Set((arena.terrain || []).map((t) => `${t.x},${t.y}`));
 
   const beatHasMonsters = (arena.tokens || []).some((t) => t.type === 'monster');
   const combatList = state?.combat?.combatants || [];
@@ -87,21 +97,32 @@ export function drawBeatArenaCanvas({
     session?.role !== 'dm'
     && session?.characterId
     && isPlayerTurnOnCanvas
-    && (beatActionMode === 'move' || beatActionMode === 'attack' || beatActionMode === 'observe')
+    && (beatActionMode === 'move' || beatActionMode === 'attack' || beatActionMode === 'spell' || beatActionMode === 'observe')
   ) {
     const myTok = (arena.tokens || []).find((t) => t.id === session.characterId);
     const me = state?.characters?.[session.characterId];
     const meEff = computeActiveEffectModifiers(me?.activeEffects);
 
     if (myTok && me && !meEff.stunned && beatActionMode === 'move' && !myTok.hasMovedThisTurn) {
-      const maxSpaces = Math.max(1, Number(me.speedSpaces || 6) + meEff.speedDelta);
+      const pMods = computePassiveModifiers(me);
+      const r1Bonus = (state?.combat?.round ?? 1) <= 1 ? (pMods.round1MoveBonus || 0) : 0;
+      const maxSpaces = computeCharacterMoveSpaces({
+        agi: me.stats?.AGI ?? me.stats?.DEX ?? 10,
+        floor: beat.floor || 1,
+        passiveSpeedBonus: pMods.bonusSpeedSpaces,
+        round1Bonus: r1Bonus,
+        effectSpeedDelta: meEff.speedDelta,
+      }).total;
+      const monsterBlockers = (arena.tokens || [])
+        .filter((t) => t.id !== myTok.id && (t.type === 'monster' || t.type === 'npc'))
+        .map((t) => ({ x: t.x, y: t.y }));
       const { cells } = computeReachableMoveCells({
         startX: myTok.x,
         startY: myTok.y,
         maxSpaces,
         cols,
         rows,
-        terrain: arena.terrain,
+        terrain: [...(arena.terrain || []), ...monsterBlockers],
       });
       ctx.save();
       ctx.fillStyle = 'rgba(56, 189, 248, 0.14)';
@@ -149,7 +170,8 @@ export function drawBeatArenaCanvas({
         ctx.strokeStyle = 'rgba(239, 68, 68, 0.42)';
         ctx.lineWidth = 1;
         for (const c of allReachableCells) {
-          if (affSet.has(`${c.x},${c.y}`)) continue;
+          const key = `${c.x},${c.y}`;
+          if (affSet.has(key) || terrainSet.has(key)) continue;
           const px = axisPad + c.x * cellPx;
           const py = axisPad + c.y * cellPx;
           ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
@@ -159,6 +181,7 @@ export function drawBeatArenaCanvas({
         ctx.strokeStyle = 'rgba(248, 113, 113, 0.95)';
         ctx.lineWidth = 1.6;
         for (const c of affectedCells) {
+          if (terrainSet.has(`${c.x},${c.y}`)) continue;
           const px = axisPad + c.x * cellPx;
           const py = axisPad + c.y * cellPx;
           ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
@@ -166,8 +189,75 @@ export function drawBeatArenaCanvas({
         }
         ctx.restore();
       }
+    } else if (myTok && me && !meEff.stunned && beatActionMode === 'spell' && previewSpell) {
+      const spRange = Math.max(1, Number(previewSpell.rangeSpaces || 3));
+      const spArea: AttackArea = previewSpell.attackArea || 'single';
+      const spMod = previewSpell.attackAreaModifier ?? 0;
+      let nearestMon: { x: number; y: number } | null = null;
+      let bestD = Infinity;
+      for (const t of arena.tokens || []) {
+        if (t.type !== 'monster') continue;
+        const d = Math.max(Math.abs(t.x - myTok.x), Math.abs(t.y - myTok.y));
+        if (d < bestD) {
+          bestD = d;
+          nearestMon = { x: t.x, y: t.y };
+        }
+      }
+      const aimTarget = previewAimCell ?? nearestMon;
+      const { allReachableCells, affectedCells } = computeAttackAreaCells({
+        monsterX: myTok.x,
+        monsterY: myTok.y,
+        targetX: aimTarget?.x ?? null,
+        targetY: aimTarget?.y ?? null,
+        attackArea: spArea,
+        areaModifier: spMod,
+        rangeSpaces: spRange,
+        cols,
+        rows,
+      });
+      const affSet = new Set(affectedCells.map((c) => `${c.x},${c.y}`));
+      ctx.save();
+      ctx.fillStyle = 'rgba(168, 85, 247, 0.16)';
+      ctx.strokeStyle = 'rgba(192, 132, 252, 0.5)';
+      ctx.lineWidth = 1;
+      for (const c of allReachableCells) {
+        const key = `${c.x},${c.y}`;
+        if (affSet.has(key) || terrainSet.has(key)) continue;
+        const px = axisPad + c.x * cellPx;
+        const py = axisPad + c.y * cellPx;
+        ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
+        ctx.strokeRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
+      }
+      ctx.fillStyle = 'rgba(168, 85, 247, 0.45)';
+      ctx.strokeStyle = '#d8b4fe';
+      ctx.lineWidth = 1.6;
+      for (const c of affectedCells) {
+        if (terrainSet.has(`${c.x},${c.y}`)) continue;
+        const px = axisPad + c.x * cellPx;
+        const py = axisPad + c.y * cellPx;
+        ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
+        ctx.strokeRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
+      }
+      const canSelfCast = Boolean(previewSpell.healFormula)
+        || previewSpell.effectSpec?.target === 'self'
+        || previewSpell.effectSpec?.target === 'all_allies';
+      if (canSelfCast) {
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.35)';
+        ctx.strokeStyle = '#34d399';
+        ctx.lineWidth = 1.8;
+        const px = axisPad + myTok.x * cellPx;
+        const py = axisPad + myTok.y * cellPx;
+        ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
+        ctx.strokeRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
+      }
+      ctx.restore();
     } else if (myTok && me && beatActionMode === 'observe' && !myTok.hasObservedThisTurn) {
-      const obsRange = 3;
+      const pMods = computePassiveModifiers(me);
+      const obsRange = 3 + (pMods.bonusObserveRangeSpaces || 0);
+      const obsBlockers = new Set<string>([
+        ...terrainSet,
+        ...(arena.tokens || []).filter((t) => t.type === 'monster').map((t) => `${t.x},${t.y}`),
+      ]);
       ctx.save();
       ctx.fillStyle = 'rgba(34, 197, 94, 0.14)';
       ctx.strokeStyle = 'rgba(34, 197, 94, 0.45)';
@@ -178,6 +268,10 @@ export function drawBeatArenaCanvas({
           const gx = myTok.x + dx;
           const gy = myTok.y + dy;
           if (gx < 0 || gx >= cols || gy < 0 || gy >= rows) continue;
+          if (terrainSet.has(`${gx},${gy}`)) continue;
+          if (!hasObserveLineOfSight({ startX: myTok.x, startY: myTok.y, targetX: gx, targetY: gy, blockers: obsBlockers })) {
+            continue;
+          }
           const px = axisPad + gx * cellPx;
           const py = axisPad + gy * cellPx;
           ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
@@ -256,7 +350,8 @@ export function drawBeatArenaCanvas({
       ctx.strokeStyle = isSkill ? 'rgba(244, 63, 94, 0.45)' : 'rgba(239, 68, 68, 0.45)';
       ctx.lineWidth = 1;
       for (const c of allReachableCells) {
-        if (affSet.has(`${c.x},${c.y}`)) continue;
+        const key = `${c.x},${c.y}`;
+        if (affSet.has(key) || terrainSet.has(key)) continue;
         const px = axisPad + c.x * cellPx;
         const py = axisPad + c.y * cellPx;
         ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
@@ -267,6 +362,7 @@ export function drawBeatArenaCanvas({
       ctx.strokeStyle = isSkill ? 'rgba(244, 63, 94, 0.95)' : 'rgba(239, 68, 68, 0.95)';
       ctx.lineWidth = 1.8;
       for (const c of affectedCells) {
+        if (terrainSet.has(`${c.x},${c.y}`)) continue;
         const px = axisPad + c.x * cellPx;
         const py = axisPad + c.y * cellPx;
         ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
@@ -314,7 +410,7 @@ export function drawBeatArenaCanvas({
 
   for (const tok of arena.tokens || []) {
     const liveMon = tok.type === 'monster' ? (state?.monsters || []).find((m) => m.id === tok.id) : undefined;
-    if (liveMon && Number(liveMon.hp) <= 0) continue;
+    if (liveMon && ((liveMon.hp !== null && liveMon.hp <= 0) || liveMon.healthTier === 'Defeated')) continue;
     const cx = axisPad + tok.x * cellPx + cellPx / 2;
     const cy = axisPad + tok.y * cellPx + cellPx / 2;
     const r = Math.max(9, Math.floor(cellPx * 0.4));
@@ -322,9 +418,12 @@ export function drawBeatArenaCanvas({
     const drawTok = liveMon?.iconId && !tok.iconId ? { ...tok, iconId: liveMon.iconId } : tok;
     drawTokenAvatar(ctx, drawTok, cx, cy, r, selectedTokenId === tok.id, state?.characters, onPortraitLoaded);
 
-    if (tok.maxHp && tok.maxHp > 0 && tok.hp !== null) {
+    const showHpBar = session?.role === 'dm' || (tok.type === 'monster' && Boolean(liveMon?.observedByViewer));
+    const barHp = liveMon?.hp !== undefined ? liveMon.hp : tok.hp;
+    const barMaxHp = liveMon?.maxHp !== undefined ? liveMon.maxHp : tok.maxHp;
+    if (showHpBar && barMaxHp && barMaxHp > 0 && barHp !== null && barHp !== undefined) {
       const bw = cellPx - 6;
-      const pct = Math.max(0, Math.min(1, tok.hp / tok.maxHp));
+      const pct = Math.max(0, Math.min(1, barHp / barMaxHp));
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(cx - bw / 2, cy + r + 2, bw, 4);
       ctx.fillStyle = tok.type === 'monster' ? '#ef4444' : '#22c55e';

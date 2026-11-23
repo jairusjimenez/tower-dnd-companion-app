@@ -1,4 +1,4 @@
-# The Tower — DnD Companion App (`v0.6`)
+# The Tower — DnD Companion App (`v0.7`)
 
 A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** virtual tabletop and companion app built with **Full-Stack TypeScript, React 18 (Vite), and Fastify**, synchronized live across Dungeon Masters and Players via **Server-Sent Events (SSE)**.
 
@@ -15,9 +15,18 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 ### Story Beat Tactical Arena Map (`20×20` Default, Biomes, Terrain, NPCs & Chests)
 ![Story Beat Tactical Arena Map](docs/images/beat-map.png)
 
+### Version 0.7 Showcase — Mobile Combat HUD, 3-Column Attack Roll & Streamlined Opposed Clash
+| Mobile Combat HUD & Observe Line-of-Sight | 3-Column Attack & Damage Roll Modal |
+| :---: | :---: |
+| ![Mobile Combat HUD & Observe LoS](docs/images/v07-mobile-hud-observe.jpg) | ![3-Column Attack Roll Modal](docs/images/v07-attack-roll.jpg) |
+
+| Streamlined Opposed Clash (3 Choices) | Clash Resolved (Player & Masked Monster HP Bars) |
+| :---: | :---: |
+| ![Opposed Clash Choices](docs/images/v07-opposed-clash-choices.jpg) | ![Opposed Clash Resolved](docs/images/v07-opposed-clash-resolved.jpg) |
+
 ---
 
-## What's Implemented (`Version 0.6`)
+## What's Implemented (`Version 0.7`)
 
 ### 1. Security, Signed Cookie Sessions & RBAC Onboarding
 - **Two-Step Authentication (`The Tower — DnD Companion App`)**: Clean glassmorphic **Username or Email -> Password** login flow with **no mock accounts or demo quick-login shortcuts**.
@@ -58,6 +67,24 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 - **Combat Round Limits & Timeout Penalties**: Default `20`-round limit (DM-editable per combat beat) with live `ROUND X / Y` HUD pills, urgent warnings in the final 3 rounds, Standard Tower timeout defeat penalties (`-25%` HP min 1, `-25%` MP, `-20%` Gold, `-15%` XP), Defeat Summary banner, and DM **Retry Battle** reset.
 - **Vector Monster & NPC Icons**: Crisp auto-matched vector silhouettes (13 monster archetypes + 8 NPC archetypes) rendered on the arena canvas, Spawned Monster cards, Initiative Order, and Bestiary/NPC editors, complete with golden Boss crowns/auras, `#1`/`#2` numbered corner pips, and DM icon overrides.
 
+### 6. Mobile Combat HUD, Opposed Clash, Observe LoS, NPC Dialogue & Progression Balance (`v0.7`)
+- **Mobile-First Combat HUD (`PlayerCombatHud`)**: Viewport-locked (`100dvh`) combat layout with stacked HP/MP/EXP bars at the top, a `150%` default zoomable & draggable arena map (with two-finger pinch-to-zoom, zoom controls, hidden axis numbers, and automatic recentering on beat open & turn changes), a 5-button bottom action dock (**Move / Attack / Spells / Observe / Items**), modern dark-obsidian scrollbars, slide-up sheets, and an auto-fading full-message status banner.
+- **3-Column Attack & Spell Roll Modal (`AttackRollModal`)**: Displays **Accuracy Roll `[1d20]`**, **Damage Roll `[{formula}]`** (showing individual rolled dice + modifier), and **Final Damage** side by side with animated dice cubes, plus a client-side weapon range pre-check that warns players instead of opening the modal when out of range.
+- **Interactive Spell Aiming & Turn Mutual Exclusion**: Selecting a spell enters `spell` aiming mode with a purple range overlay (`terrain`-filtered) and confirmation dialog before rolling spell accuracy; attacking locks non-reaction spells and casting a non-reaction spell locks Attack for that turn (`hasCastSpellThisTurn`).
+- **Streamlined Opposed Dice Clash (`CombatClashModal`)**: Removes Close/Minimize buttons while unresolved and presents **3 clear options**:
+  1. **React** (combined stat-driven response: high `STR/PER` → **Parry**, high `VIT` → **Block**, high `AGI` → **Counter-Attack**).
+  2. **Use Spell** (strictly Reaction spells via an inline picker; rolls `INT` accuracy vs monster AC and only rolls/animates spell damage if it hits).
+  3. **Dodge** (opposed `AGI` roll: `0` damage on win, full incoming damage on fail).
+  Resolved clashes display both the player's HP bar and the monster's HP bar (hiding monster HP numbers if the viewing player has not observed that monster).
+- **Per-Player Observe Fog-of-Info & Line-of-Sight (`ObserveModal`)**:
+  - Hides unit HP bars on the arena & Tower maps for players (keeping them visible to the DM) and masks unobserved monster HP, AC, DR, attack/damage formulas, and skills per player (`observedMonsterIds`), showing only name and icon until that player uses **Observe** (once per turn).
+  - Enforces Observe Line-of-Sight (`hasObserveLineOfSight`) so impassable terrain and monster units obstruct sightlines behind them, and opens a structured **Observe Details Modal** (`ObserveModal`) with weak-spot results, stats, and skills.
+- **NPC 1-Space Proximity & RPG Dialogue Modal (`NpcDialogueModal`)**: Enforces 1-space proximity for `talk_beat_npc`; tapping an NPC within movement reach in Move mode prompts a **Move & Interact** confirmation (`findClosestNpcInteractCell`) to move to the closest adjacent space and open the RPG dialogue box with gift/reward claiming.
+- **Redesigned Consumable Confirmation Modal (`ConsumableConfirmModal`)**: Compact `52×52px` themed icon medallion and dynamic dual-layer **HP / MP / EXP** preview bars (`resolveConsumableEffects` supporting structured fields and item notes).
+- **AGI & Floor-Scaled Movement + Floor-Scaled Loot & Boss Chests**:
+  - Lowered Level 1 / 1F base movement to `3 Spaces`, scaling with **AGI** (`+1` per `+4 AGI` above `10`) and **Floor Level** (`+1` at `5F`, `+2` at `15F`, etc.) via `computeCharacterMoveSpaces`.
+  - Added floor-scaled monster loot (`getFloorLootProfile`, `scaleLootDropForFloor`), restricted automatic chest drops exclusively to Boss/Mini-Boss monsters (`shouldMonsterDropChest`), added glowing halos on unopened chests, added AI DM turn execution (`aiDm.ts`), and attributed DoT (`burn`/`poison`) defeat rewards & modals (`MonsterDefeatedModal`) accurately.
+
 ---
 
 ## Tech Stack & Project Structure
@@ -83,9 +110,9 @@ dnd-vtt/
 │   ├── auth/                   # scrypt passwords & HMAC-SHA256 HttpOnly cookie sessions
 │   ├── routes/                 # /health, /api/auth/*, /api/state, /api/events, /api/action
 │   ├── actions/                # Zod-validated handlers (session, combat, character, item, map, story)
-│   ├── services/               # dice, art, deities & shared state mutation helpers
+│   ├── services/               # dice, art, deities, aiDm & shared state mutation helpers
 │   ├── realtime/               # Role- & character-filtered SSE broadcaster
-│   └── store/                  # initialState, filterState/HP masking, JsonStateRepository
+│   └── store/                  # initialState, filterState/per-player masking, JsonStateRepository
 ├── client/                     # React + Vite frontend
 │   ├── index.html
 │   ├── vite.config.ts / tsconfig.json
@@ -93,8 +120,9 @@ dnd-vtt/
 │       ├── main.tsx / App.tsx
 │       ├── context/            # VttContext (cookie bootstrap, SSE sync, toasts, modals)
 │       ├── services/           # apiFetch & sendGameAction
+│       ├── utils/              # npcInteraction (Move & Interact reachability)
 │       ├── canvas/             # Scaled canvas coordinates & Tower / Beat arena renderers
-│       ├── components/         # auth/, onboarding/, player/, dm/, arena/, modals/, common/
+│       ├── components/         # auth/, onboarding/, player/, dm/, arena/ (PlayerCombatHud), modals/, common/
 │       └── styles/             # base.css, login.css, layout.css, game.css, index.css
 ├── tests/
 │   └── integration.test.ts     # 18 unit, persistence, RBAC & full campaign integration suites
@@ -112,7 +140,7 @@ Climbers start fragile and every early fight is tense, then power compounds as t
 
 | Lever | Early game (Lv 1) | Growth |
 | :--- | :--- | :--- |
-| **Starting stats** | `24 HP`, `15 MP`, all attributes `10`, `6` free stat points, `60 Gold`, `1 Mana Stone`, 2 Healing Vials (`+8 HP`) | Each point in `VIT` = `+2 Max HP`, each point in `INT` = `+1 Max MP` |
+| **Starting stats** | `24 HP`, `15 MP`, `3 Spaces` Move, all attributes `10`, `6` free stat points, `60 Gold`, `1 Mana Stone`, 2 Healing Vials (`+8 HP`) | Each point in `VIT` = `+2 Max HP`, `INT` = `+1 Max MP`; Move scales with `AGI` (`+1` / 4 AGI > 10) & Floor (`+1` at 5F, `+2` at 15F...) |
 | **Stat modifier** | `floor((SCORE - 10) / 3) + floor(SCORE / 30)` (flat early: `16 -> +2`) | Bigger swings late (`20 -> +3`, `100 -> +33`) |
 | **Damage** | `max(1, RAW_DMG * CRIT_MULT + STAT_MOD + floor(LEVEL / 3) - TARGET_DR)` | `+1` damage every 3 character levels |
 | **Level-up** | XP to next level = `100 + (level - 1) * 60` | `+2` stat points (`+3` on every 3rd level), `+5 Max HP` (+VIT mod), `+2 Max MP` (+half INT mod), `+1` Passive Ticket |
@@ -150,7 +178,7 @@ npm run dev:client
 npm run typecheck
 npm test
 ```
-(`npm test` runs `tsx tests/integration.test.ts` across all 16 suites: shared rules/determinism, `JsonStateRepository` atomic persistence & backup recovery, HttpOnly cookie RBAC & security headers, and full DM/Player campaign workflows.)
+(`npm test` runs `tsx tests/integration.test.ts` across all 18 suites: shared rules/determinism, `JsonStateRepository` atomic persistence & backup recovery, HttpOnly cookie RBAC & security headers, per-player Observe masking, NPC proximity, and full DM/Player campaign workflows.)
 
 ---
 

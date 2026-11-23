@@ -101,3 +101,17 @@ export function extractTokenNumberBadge(name: string): string | null {
   const m = String(name || '').match(/#(\d+)\s*$/);
   return m ? `#${m[1]}` : null;
 }
+
+export function shouldMonsterDropChest(spec: {
+  name: string;
+  iconId?: string;
+  category?: string;
+  dropsChest?: boolean;
+}): boolean {
+  if (spec.dropsChest === true) return true;
+  if (spec.dropsChest === false) return false;
+  return (
+    isBossToken(spec.name, spec.iconId, spec.category) ||
+    /\b(mini[\s-]?boss|boss|commander|monarch|king|lord|overlord|warlord)\b/i.test(String(spec.name || ''))
+  );
+}

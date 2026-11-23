@@ -44,18 +44,33 @@ export function TowerOverviewList({
         const defeatedMons = (state.monsters || []).filter(
           (m) => Number(m.floor) === Number(fl.number) && ((m.hp !== null && m.hp <= 0) || m.healthTier === 'Defeated'),
         ).length;
+        const livingMonsCount = beats.reduce((sum, b) => {
+          const monTokens = (b.arena?.tokens || []).filter((t) => {
+            if (t.type !== 'monster') return false;
+            const liveMon = (state.monsters || []).find((m) => m.id === t.id);
+            return liveMon ? (liveMon.hp === null || liveMon.hp > 0) : (t.hp === null || t.hp > 0);
+          });
+          return sum + monTokens.length;
+        }, 0);
         const floorLogs = (state.combatLog || [])
           .filter((l) => (l.summary || '').includes(`${fl.number}F`))
           .slice(0, 3);
 
-        const summaryParts = [
-          `${beats.length} Story Beat${beats.length === 1 ? '' : 's'} (${activeBeats.length} active, ${resolvedBeats.length} resolved)`,
-          defeatedMons ? `${defeatedMons} monster${defeatedMons === 1 ? '' : 's'} defeated` : '',
-          openedChests ? `${openedChests} chest${openedChests === 1 ? '' : 's'} opened` : '',
-          talkedNpcs ? `${talkedNpcs} NPC reward${talkedNpcs === 1 ? '' : 's'} claimed` : '',
-        ]
-          .filter(Boolean)
-          .join(' • ');
+        const summaryParts = isDmView
+          ? [
+              `${beats.length} Story Beat${beats.length === 1 ? '' : 's'} (${activeBeats.length} active, ${resolvedBeats.length} resolved)`,
+              defeatedMons ? `${defeatedMons} monster${defeatedMons === 1 ? '' : 's'} defeated` : '',
+              openedChests ? `${openedChests} chest${openedChests === 1 ? '' : 's'} opened` : '',
+              talkedNpcs ? `${talkedNpcs} NPC reward${talkedNpcs === 1 ? '' : 's'} claimed` : '',
+            ]
+              .filter(Boolean)
+              .join(' • ')
+          : [
+              `${beats.length} Active Scene${beats.length === 1 ? '' : 's'}`,
+              livingMonsCount > 0
+                ? `${livingMonsCount} Monster${livingMonsCount === 1 ? '' : 's'} detected`
+                : 'No active monsters detected',
+            ].join(' • ');
 
         return (
           <div key={fl.number} className="panel" style={{ padding: '10px 12px' }}>
@@ -83,7 +98,7 @@ export function TowerOverviewList({
             <div className="small" style={{ marginTop: '6px' }}>
               <b>Overview:</b> {summaryParts}
             </div>
-            {floorLogs.length > 0 && (
+            {isDmView && floorLogs.length > 0 && (
               <div className="muted small" style={{ marginTop: '3px' }}>
                 Recent: {floorLogs.map((l) => l.summary).join(' | ')}
               </div>
@@ -126,6 +141,11 @@ export function TowerOverviewList({
             {beats.length > 0 ? (
               beats.map((b) => {
                 const isCurrent = Boolean(b.presented) || b.status === 'active';
+                const beatMonCount = (b.arena?.tokens || []).filter((t) => {
+                  if (t.type !== 'monster') return false;
+                  const liveMon = (state.monsters || []).find((m) => m.id === t.id);
+                  return liveMon ? (liveMon.hp === null || liveMon.hp > 0) : (t.hp === null || t.hp > 0);
+                }).length;
                 return (
                   <div key={b.id} className={`item-card ${isCurrent ? 'card-glow-cyan' : ''}`} style={{ marginTop: '6px' }}>
                     <div className="item-card-top">
@@ -135,6 +155,11 @@ export function TowerOverviewList({
                           <span className="tag tag-cyan">CURRENT BEAT</span>
                         ) : (
                           <span className="tag tag-gold">{String(b.status || 'upcoming').toUpperCase()}</span>
+                        )}
+                        {!isDmView && beatMonCount > 0 && (
+                          <span className="tag tag-crimson" style={{ marginLeft: '6px' }}>
+                            {beatMonCount} Monster{beatMonCount === 1 ? '' : 's'}
+                          </span>
                         )}
                       </strong>
                       <button type="button" className="btn btn-xs btn-gold" onClick={() => onOpenBeat(b.id)}>

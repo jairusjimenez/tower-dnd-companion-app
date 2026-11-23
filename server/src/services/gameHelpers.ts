@@ -5,8 +5,10 @@ import {
   UNIT_EFFECT_META,
   VALID_FLOOR_THEME_IDS,
   computeActiveEffectModifiers,
+  computeCharacterMoveSpaces,
   computePassiveModifiers,
   getFloorThemeLabel,
+  getPartyFloor,
   xpToNextForLevel,
   computeStatModifier,
   getEquippedTotals,
@@ -18,6 +20,7 @@ import {
   type GameState,
   type InventoryItem,
   type Monster,
+  type StoryBeat,
   type ToastMessage,
   type UnitEffectSpec,
 } from '../../../shared';
@@ -45,7 +48,8 @@ export function pushSystemToast(
     category = 'info',
     target = 'all',
     sender = 'SYSTEM / DM',
-  }: { title?: string; message: string; category?: string; target?: string; sender?: string },
+    isDmBroadcast = false,
+  }: { title?: string; message: string; category?: string; target?: string; sender?: string; isDmBroadcast?: boolean },
 ): ToastMessage {
   const rawMsg = String(message || '').trim();
   const formattedMsg = /^SYSTEM:/i.test(rawMsg) ? rawMsg : `SYSTEM: ${rawMsg}`;
@@ -57,6 +61,7 @@ export function pushSystemToast(
     message: formattedMsg.slice(0, 500),
     target: target || 'all',
     sender,
+    ...(isDmBroadcast ? { isDmBroadcast: true } : {}),
   };
   ctx.state.systemMessages.unshift(entry);
   ctx.state.systemMessages = ctx.state.systemMessages.slice(0, 40);
@@ -115,6 +120,7 @@ export function createInventoryItem(spec: Partial<InventoryItem> & { name: strin
     qty: Math.max(1, Number(spec.qty || 1)),
     healHp: Number(spec.healHp || 0),
     healMp: Number(spec.healMp || 0),
+    ...(Number(spec.grantXp || 0) > 0 ? { grantXp: Math.max(0, Number(spec.grantXp)) } : {}),
     slot: (spec.slot ?? defaultSlot) as EquipmentSlot | '',
     attackBonus: Number(spec.attackBonus || 0),
     damageDice: String(spec.damageDice || ''),
@@ -168,6 +174,8 @@ export function resetArenaTurnFlags(state: GameState, targetIds?: string[] | nul
       if (!idSet || idSet.has(t.id)) {
         t.hasMovedThisTurn = false;
         t.hasObservedThisTurn = false;
+        t.hasUsedConsumableThisTurn = false;
+        t.hasCastSpellThisTurn = false;
         t.attacksUsedThisTurn = 0;
       }
     }
@@ -245,6 +253,14 @@ export function recalculateCharacterAcAndDr(state: GameState, ch: Character): vo
   const effMods = computeActiveEffectModifiers(ch.activeEffects);
   ch.ac = Math.max(1, 10 + Math.max(0, computeStatModifier(agiScore, state.mechanics, ch)) + totals.armorAc + pMods.bonusAc + awkAc + effMods.acDelta);
   ch.dr = Math.max(0, totals.armorDr + pMods.bonusDr + awkDr + tempDr + effMods.drDelta);
+  const moveInfo = computeCharacterMoveSpaces({
+    agi: agiScore,
+    floor: getPartyFloor(state),
+    passiveSpeedBonus: pMods.bonusSpeedSpaces,
+    effectSpeedDelta: effMods.speedDelta,
+  });
+  ch.speedSpaces = moveInfo.total;
+  ch.speed = moveInfo.total * 5;
 }
 
 export function applyGoldBonus(ch: Character, baseGold: number, isChest = false): number {
@@ -488,7 +504,11 @@ export function syncCharacterDerived(ctx: ActionRequestContext, charId: string):
   }
 }
 
-export function syncMonsterDerived(ctx: ActionRequestContext, monsterId: string): void {
+export function syncMonsterDerived(
+  ctx: ActionRequestContext,
+  monsterId: string,
+  opts?: { skipAutoLoot?: boolean },
+): void {
   const mon: Monster | undefined = ctx.state.monsters.find((m) => m.id === monsterId);
   if (!mon) return;
   const monHp = Number(mon.hp ?? 0);
@@ -519,7 +539,7 @@ export function syncMonsterDerived(ctx: ActionRequestContext, monsterId: string)
     cb.hiddenFromPlayers = Boolean(mon.hiddenFromPlayers);
   }
 
-  if (monHp <= 0 && mon.loot && !mon.loot.dropped) {
+  if (!opts?.skipAutoLoot && monHp <= 0 && mon.loot && !mon.loot.dropped) {
     const hasDrop = Boolean(mon.loot.itemName || mon.loot.gold > 0 || mon.loot.manaStones > 0 || mon.loot.xp > 0);
     if (hasDrop) {
       mon.loot.dropped = true;
@@ -528,26 +548,7 @@ export function syncMonsterDerived(ctx: ActionRequestContext, monsterId: string)
           grantXpToCharacter(ctx.state, ch, mon.loot.xp);
         }
       }
-      let droppedOnArena = false;
-      for (const beat of ctx.state.storyBeats || []) {
-        const btok = beat.arena?.tokens?.find((t) => t.id === monsterId);
-        if (btok && (mon.loot.itemName || mon.loot.gold > 0 || mon.loot.manaStones > 0)) {
-          beat.arena.chests = beat.arena.chests || [];
-          beat.arena.chests.push({
-            id: `loot-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
-            name: `${mon.name} Loot`,
-            x: btok.x,
-            y: btok.y,
-            gold: Number(mon.loot.gold || 0),
-            manaStones: Number(mon.loot.manaStones || 0),
-            itemName: mon.loot.itemName || '',
-            itemCategory: mon.loot.itemCategory || 'relic',
-            opened: false,
-          });
-          droppedOnArena = true;
-        }
-      }
-      if (!droppedOnArena && (mon.loot.itemName || mon.loot.gold > 0 || mon.loot.manaStones > 0)) {
+      if (mon.loot.itemName || mon.loot.gold > 0 || mon.loot.manaStones > 0) {
         for (const ch of Object.values(ctx.state.characters)) {
           ch.currency = ch.currency || { gold: 0, manaStones: 0 };
           ch.currency.gold = Number(ch.currency.gold || 0) + Number(mon.loot.gold || 0);
@@ -572,7 +573,7 @@ export function syncMonsterDerived(ctx: ActionRequestContext, monsterId: string)
       ].filter(Boolean).join(', ');
       pushSystemToast(ctx, {
         title: 'MONSTER LOOT DROPPED!',
-        message: `${mon.name} was defeated and dropped: ${dropParts}${droppedOnArena ? ' (Tap loot chest on arena!)' : ''}`,
+        message: `${mon.name} was defeated and dropped: ${dropParts}`,
         category: 'loot',
       });
     }
@@ -719,6 +720,7 @@ export function applyUnitEffect(
   target: { name: string; activeEffects?: ActiveUnitEffect[] },
   spec: UnitEffectSpec,
   sourceName: string,
+  sourceCharacterId?: string,
 ): ActiveUnitEffect {
   const meta = UNIT_EFFECT_META[spec.kind];
   const potency = Math.max(1, Math.trunc(Number(spec.potency ?? meta.defaultPotency)));
@@ -731,6 +733,7 @@ export function applyUnitEffect(
     potency,
     turnsRemaining: duration,
     sourceName,
+    ...(sourceCharacterId ? { sourceCharacterId } : {}),
   };
   target.activeEffects = target.activeEffects || [];
   const existingIdx = target.activeEffects.findIndex((e) => e.kind === spec.kind);
@@ -738,6 +741,9 @@ export function applyUnitEffect(
     const prev = target.activeEffects[existingIdx];
     next.potency = Math.max(prev.potency, next.potency);
     next.turnsRemaining = Math.max(prev.turnsRemaining, next.turnsRemaining);
+    if (!next.sourceCharacterId && prev.sourceCharacterId) {
+      next.sourceCharacterId = prev.sourceCharacterId;
+    }
     target.activeEffects[existingIdx] = next;
   } else {
     target.activeEffects.push(next);
@@ -745,18 +751,29 @@ export function applyUnitEffect(
   return next;
 }
 
+export interface TickUnitEffectsResult {
+  dotKilledMonster?: {
+    monster: Monster;
+    killerCharacterId?: string;
+    effectNames: string[];
+    dropBeat: StoryBeat | null;
+    monTokPos: { x: number; y: number } | null;
+  };
+}
+
 export function tickUnitEffectsOnTurnStart(
   ctx: ActionRequestContext,
   unitId: string,
   unitType: 'player' | 'monster',
-): void {
+): TickUnitEffectsResult {
   const unit = unitType === 'player'
     ? ctx.state.characters[unitId]
     : (ctx.state.monsters || []).find((m) => m.id === unitId);
-  if (!unit || !Array.isArray(unit.activeEffects) || unit.activeEffects.length === 0) return;
+  if (!unit || !Array.isArray(unit.activeEffects) || unit.activeEffects.length === 0) return {};
 
   const mods = computeActiveEffectModifiers(unit.activeEffects);
   const notes: string[] = [];
+  let dotKilledMonster: TickUnitEffectsResult['dotKilledMonster'];
 
   if (mods.regenPerTurn > 0 && Number(unit.hp ?? 0) > 0 && unit.maxHp) {
     const prevHp = Number(unit.hp ?? 0);
@@ -769,7 +786,42 @@ export function tickUnitEffectsOnTurnStart(
     const prevHp = Number(unit.hp ?? 0);
     unit.hp = Math.max(0, prevHp - mods.dotPerTurn);
     notes.push(`-${mods.dotPerTurn} HP (Burn/Poison)`);
-    if (unitType === 'monster' && unit.hp <= 0) {
+    if (unitType === 'monster' && prevHp > 0 && unit.hp <= 0) {
+      let dropBeat: StoryBeat | null = null;
+      let monTokPos: { x: number; y: number } | null = null;
+      for (const b of ctx.state.storyBeats || []) {
+        const foundTok = b.arena?.tokens?.find((t) => t.id === unit.id);
+        if (foundTok) {
+          dropBeat = b;
+          monTokPos = { x: foundTok.x, y: foundTok.y };
+          break;
+        }
+      }
+      const dotEffects = unit.activeEffects.filter((e) => e.kind === 'burn' || e.kind === 'poison');
+      const sortedDots = [...dotEffects].sort((a, b) => Number(b.potency || 0) - Number(a.potency || 0));
+      let killerCharacterId = sortedDots.find(
+        (e) => e.sourceCharacterId && Boolean(ctx.state.characters[e.sourceCharacterId]),
+      )?.sourceCharacterId;
+      if (!killerCharacterId) {
+        for (const eff of sortedDots) {
+          if (!eff.sourceName) continue;
+          const matchedChar = Object.values(ctx.state.characters || {}).find(
+            (c) => c.name.toLowerCase() === eff.sourceName!.trim().toLowerCase(),
+          );
+          if (matchedChar) {
+            killerCharacterId = matchedChar.id;
+            break;
+          }
+        }
+      }
+      const effectNames = Array.from(new Set(dotEffects.map((e) => e.name)));
+      dotKilledMonster = {
+        monster: unit as Monster,
+        killerCharacterId,
+        effectNames,
+        dropBeat,
+        monTokPos,
+      };
       removeMonsterTokensFromMaps(ctx.state, unit.id);
     }
   }
@@ -795,7 +847,7 @@ export function tickUnitEffectsOnTurnStart(
     recalculateCharacterAcAndDr(ctx.state, unit as Character);
     syncCharacterDerived(ctx, unit.id);
   } else {
-    syncMonsterDerived(ctx, unit.id);
+    syncMonsterDerived(ctx, unit.id, { skipAutoLoot: true });
   }
 
   if (notes.length > 0 || expiredNames.length > 0) {
@@ -822,6 +874,10 @@ export function tickUnitEffectsOnTurnStart(
     });
     ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
   }
+
+  return {
+    ...(dotKilledMonster ? { dotKilledMonster } : {}),
+  };
 }
 
 export { VALID_BIOME_THEMES };

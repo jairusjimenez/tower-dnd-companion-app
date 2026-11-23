@@ -31,7 +31,7 @@ export const BALANCE = {
   start: {
     maxHp: 24,
     maxMp: 15,
-    speedSpaces: 6,
+    speedSpaces: 3,
     unspentStatPoints: 6,
     defaultStat: 10,
     gold: 60,
@@ -88,6 +88,46 @@ export function restSpotRestore(maxHp: number, maxMp: number): { hp: number; mp:
   return {
     hp: Math.ceil(Math.max(0, Number(maxHp) || 0) * BALANCE.restSpot.hpPct),
     mp: Math.ceil(Math.max(0, Number(maxMp) || 0) * BALANCE.restSpot.mpPct),
+  };
+}
+
+/** +1 Space per +4 AGI above 10 (capped at +8). */
+export function computeAgiMoveBonus(agi: number): number {
+  return Math.max(0, Math.min(8, Math.floor((Number(agi ?? 10) - 10) / 4)));
+}
+
+/** +0 on 1F-4F, +1 at 5F, +2 at 15F, ... up to +8 at 75F-100F. */
+export function computeFloorMoveBonus(floor: number): number {
+  const f = Math.max(1, Math.trunc(Number(floor) || 1));
+  if (f < 5) return 0;
+  return Math.min(8, 1 + Math.floor((f - 5) / 10));
+}
+
+export function computeCharacterMoveSpaces(opts: {
+  agi?: number;
+  floor?: number;
+  passiveSpeedBonus?: number;
+  round1Bonus?: number;
+  effectSpeedDelta?: number;
+}): {
+  base: number;
+  agiBonus: number;
+  floorBonus: number;
+  passiveBonus: number;
+  total: number;
+} {
+  const base = BALANCE.start.speedSpaces;
+  const agiBonus = computeAgiMoveBonus(Number(opts.agi ?? 10));
+  const floorBonus = computeFloorMoveBonus(Number(opts.floor ?? 1));
+  const passiveBonus = Math.max(0, Math.trunc(Number(opts.passiveSpeedBonus || 0)));
+  const round1Bonus = Math.trunc(Number(opts.round1Bonus || 0));
+  const effectSpeedDelta = Math.trunc(Number(opts.effectSpeedDelta || 0));
+  return {
+    base,
+    agiBonus,
+    floorBonus,
+    passiveBonus,
+    total: Math.max(1, base + agiBonus + floorBonus + passiveBonus + round1Bonus + effectSpeedDelta),
   };
 }
 
@@ -253,19 +293,63 @@ export function inferItemTier(
   return 'Common';
 }
 
+export interface FloorLootProfile {
+  dropChanceMult: number;
+  maxItems: number;
+  goldMult: number;
+  baseKillGold: number;
+  manaStoneDropChancePct: number;
+}
+
+export function getFloorLootProfile(floor: number, isBoss = false): FloorLootProfile {
+  const f = Math.max(1, Math.trunc(Number(floor) || 1));
+  const baseDropMult = f === 1 ? 0.35 : Math.min(1.0, 0.35 + Math.sqrt(f - 1) * 0.16);
+  const dropChanceMult = isBoss ? Math.min(1.0, baseDropMult + 0.25) : baseDropMult;
+  const maxItems = isBoss
+    ? f <= 3 ? 2 : f <= 10 ? 3 : 4
+    : f <= 2 ? 1 : f <= 15 ? 2 : 3;
+  const goldMult = f === 1 ? 0.35 : 0.35 + (f - 1) * 0.22;
+  const baseKillGold = Math.round((4 + f * 3) * (isBoss ? 2.5 : 1));
+  const manaStoneDropChancePct = isBoss
+    ? 100
+    : f === 1 ? 20 : f === 2 ? 30 : f <= 5 ? 45 : f <= 10 ? 65 : 85;
+  return {
+    dropChanceMult,
+    maxItems,
+    goldMult,
+    baseKillGold,
+    manaStoneDropChancePct,
+  };
+}
+
 export function scaleLootDropForFloor(
   drop: BestiaryLootDrop,
   floor: number,
-): BestiaryLootDrop & { tier: ChestTier; scaledGold: number; scaledManaStones: number; unlocked: boolean } {
+  isBoss = false,
+): BestiaryLootDrop & {
+  tier: ChestTier;
+  scaledGold: number;
+  scaledManaStones: number;
+  scaledDropChancePct: number;
+  unlocked: boolean;
+} {
   const f = Math.max(1, Math.trunc(Number(floor) || 1));
   const climbed = f - 1;
   const minFloor = Math.max(1, Number(drop.minFloor || 1));
+  const profile = getFloorLootProfile(f, isBoss);
+  const rawStones = Number(drop.baseManaStones || 0);
+  const scaledManaStones =
+    rawStones <= 0
+      ? 0
+      : !isBoss && f <= 2
+        ? rawStones >= 2 ? 1 : 0
+        : Math.max(1, Math.round(rawStones * (f >= 6 ? 1 : 0.5)) + Math.floor(climbed / 4));
   return {
     ...drop,
     tier: inferItemTier(drop),
-    scaledGold: Math.max(0, Math.round(Number(drop.baseGold || 0) * (1 + climbed * 0.45))),
-    scaledManaStones:
-      Number(drop.baseManaStones || 0) > 0 ? Number(drop.baseManaStones) + Math.floor(climbed / 3) : 0,
+    scaledGold: Math.max(0, Math.round(Number(drop.baseGold || 0) * profile.goldMult)),
+    scaledManaStones,
+    scaledDropChancePct: Math.max(5, Math.min(100, Math.round(Number(drop.dropChancePct || 50) * profile.dropChanceMult))),
     unlocked: f >= minFloor,
   };
 }
@@ -394,15 +478,15 @@ const ICONIC_LOOT_BY_ID: Record<string, BestiaryLootDrop[]> = {
 };
 
 export const BLACKSMITH_CRAFTING_MATERIALS: BestiaryLootDrop[] = [
-  { itemName: 'Tough Monster Leather', category: 'material', dropChancePct: 75, baseGold: 6, baseManaStones: 0, notes: 'Blacksmith material: Light/Medium armor & grips' },
-  { itemName: 'Monster Bone', category: 'material', dropChancePct: 75, baseGold: 5, baseManaStones: 0, notes: 'Blacksmith material: Bone blades, bows & reinforcement' },
-  { itemName: 'Tower Iron Ore', category: 'material', dropChancePct: 65, baseGold: 8, baseManaStones: 0, notes: 'Blacksmith material: Forging weapons & heavy plate' },
-  { itemName: 'Beast Sinew', category: 'material', dropChancePct: 65, baseGold: 5, baseManaStones: 0, notes: 'Blacksmith material: Bowstrings & weapon bindings' },
-  { itemName: 'Cracked Mana Crystal', category: 'material', dropChancePct: 60, baseGold: 10, baseManaStones: 1, notes: 'Blacksmith/Manhwa material: Magic-infused forging core' },
-  { itemName: 'Chitin Carapace', category: 'material', dropChancePct: 60, baseGold: 9, baseManaStones: 0, notes: 'Blacksmith material: Light high-DR armor plating' },
-  { itemName: 'Runic Mithril Scrap', category: 'material', dropChancePct: 40, baseGold: 22, baseManaStones: 1, minFloor: 3, notes: 'D&D/Manhwa material: Masterwork weapon & armor alloy' },
-  { itemName: 'Abyssal Shadow Ash', category: 'material', dropChancePct: 45, baseGold: 18, baseManaStones: 1, minFloor: 3, notes: 'Blacksmith material: Dark-forged weapon tempering' },
-  { itemName: 'Dragonbone Shard', category: 'material', dropChancePct: 40, baseGold: 32, baseManaStones: 2, minFloor: 4, notes: 'D&D/Manhwa material: Legendary dragonbone forging' },
+  { itemName: 'Tough Monster Leather', category: 'material', dropChancePct: 45, baseGold: 6, baseManaStones: 0, notes: 'Blacksmith material: Light/Medium armor & grips' },
+  { itemName: 'Monster Bone', category: 'material', dropChancePct: 45, baseGold: 5, baseManaStones: 0, notes: 'Blacksmith material: Bone blades, bows & reinforcement' },
+  { itemName: 'Tower Iron Ore', category: 'material', dropChancePct: 40, baseGold: 8, baseManaStones: 0, notes: 'Blacksmith material: Forging weapons & heavy plate' },
+  { itemName: 'Beast Sinew', category: 'material', dropChancePct: 40, baseGold: 5, baseManaStones: 0, notes: 'Blacksmith material: Bowstrings & weapon bindings' },
+  { itemName: 'Cracked Mana Crystal', category: 'material', dropChancePct: 35, baseGold: 10, baseManaStones: 1, notes: 'Blacksmith/Manhwa material: Magic-infused forging core' },
+  { itemName: 'Chitin Carapace', category: 'material', dropChancePct: 35, baseGold: 9, baseManaStones: 0, notes: 'Blacksmith material: Light high-DR armor plating' },
+  { itemName: 'Runic Mithril Scrap', category: 'material', dropChancePct: 35, baseGold: 22, baseManaStones: 1, minFloor: 3, notes: 'D&D/Manhwa material: Masterwork weapon & armor alloy' },
+  { itemName: 'Abyssal Shadow Ash', category: 'material', dropChancePct: 38, baseGold: 18, baseManaStones: 1, minFloor: 3, notes: 'Blacksmith material: Dark-forged weapon tempering' },
+  { itemName: 'Dragonbone Shard', category: 'material', dropChancePct: 35, baseGold: 32, baseManaStones: 2, minFloor: 4, notes: 'D&D/Manhwa material: Legendary dragonbone forging' },
 ];
 
 export function getCommonCraftingDropsForMonster(entry: Partial<BestiaryEntry>): BestiaryLootDrop[] {

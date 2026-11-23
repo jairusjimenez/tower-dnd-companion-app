@@ -5,13 +5,58 @@ import type {
   ChestLootSummary,
   EquipmentItem,
   FilteredGameState,
+  InventoryItem,
   MapToken,
+  Monster,
   MonsterDefeatSummary,
   RollLogEntry,
   SessionIdentity,
   ToastMessage,
+  TokenIconId,
 } from '@shared/index';
 import { apiFetch, sendGameAction } from '../services/api';
+
+export interface NpcDialogueState {
+  beatId: string;
+  tokenId: string;
+  npcName: string;
+  npcRole: string;
+  iconId?: TokenIconId;
+  dialogue: string;
+  rewardType?: MapToken['rewardType'];
+  rewardXp?: number;
+  rewardGold?: number;
+  rewardItemName?: string;
+  rewardSkillDesc?: string;
+  rewardClaimed?: boolean;
+  claimedNotes?: string[];
+}
+
+export interface ObserveResultState {
+  kind: 'monster' | 'player' | 'npc' | 'chest' | 'terrain';
+  title: string;
+  subtitle?: string;
+  x: number;
+  y: number;
+  iconId?: TokenIconId;
+  monster?: Monster | null;
+  weakSpotFound?: boolean;
+  successChancePct?: number;
+  rollPct?: number;
+  bonusDamage?: number;
+  bonusCritDamage?: number;
+  floor?: number;
+  player?: Character | null;
+  npcRole?: string;
+  dialogue?: string;
+  chestName?: string;
+  chestTier?: string;
+  chestOpened?: boolean;
+  terrainType?: string;
+  description?: string;
+  rollTotal?: number;
+  rollFormula?: string;
+}
 
 export interface AttackRollOutcome {
   rawRoll: number;
@@ -34,6 +79,8 @@ export interface AttackRollRequest {
   diceFormulaOverride?: string;
   damageTypeOverride?: string;
   isSkill?: boolean;
+  spell?: import('@shared/index').Spell | null;
+  isSelfSpell?: boolean;
   healFormula?: string;
   effectSpec?: import('@shared/index').UnitEffectSpec | null;
   onComplete: (outcome: AttackRollOutcome | null) => void;
@@ -48,6 +95,7 @@ interface VttContextValue {
   toasts: ToastMessage[];
   dismissToast: (id: string) => void;
   pushLocalToast: (toast: Partial<ToastMessage> & { message: string }) => void;
+  latestStatus: { title: string; message: string; category: string; timestamp: string } | null;
   refreshState: () => Promise<void>;
   enterSession: (newSession: SessionIdentity, opts?: { showOnboarding?: boolean }) => Promise<void>;
   updateSessionIdentity: (nextSession: SessionIdentity) => void;
@@ -71,6 +119,8 @@ interface VttContextValue {
   setDmSessionModalOpen: (v: boolean) => void;
   tradeItemId: string | null;
   setTradeItemId: (id: string | null) => void;
+  pendingConsumableUse: { characterId: string; item: InventoryItem } | null;
+  setPendingConsumableUse: (req: { characterId: string; item: InventoryItem } | null) => void;
   attackRollRequest: AttackRollRequest | null;
   requestAttackRoll: (req: Omit<AttackRollRequest, 'onComplete'>) => Promise<AttackRollOutcome | null>;
   gachaModalOpen: boolean;
@@ -83,6 +133,10 @@ interface VttContextValue {
   setChestReveal: (c: ChestLootSummary | null) => void;
   activePromptModal: { beatId: string; promptId: string } | null;
   setActivePromptModal: (m: { beatId: string; promptId: string } | null) => void;
+  activeNpcDialogue: NpcDialogueState | null;
+  setActiveNpcDialogue: (d: NpcDialogueState | null) => void;
+  activeObserveResult: ObserveResultState | null;
+  setActiveObserveResult: (r: ObserveResultState | null) => void;
   diceRollModal: RollLogEntry | null;
   setDiceRollModal: (r: RollLogEntry | null) => void;
   tooltip: { tok: Partial<MapToken>; x: number; y: number } | null;
@@ -104,26 +158,58 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [latestStatus, setLatestStatus] = useState<{ title: string; message: string; category: string; timestamp: string } | null>(null);
 
   const [activeBeatDetailId, setActiveBeatDetailId] = useState<string | null>(null);
+  const activeBeatIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeBeatIdRef.current = activeBeatDetailId;
+  }, [activeBeatDetailId]);
   const [lastAutoOpenedBeatId, setLastAutoOpenedBeatId] = useState<string | null>(null);
   const [activeBeatMapId, setActiveBeatMapId] = useState<string | null>(null);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [dmCharModalId, setDmCharModalId] = useState<string | null>(null);
   const [dmSessionModalOpen, setDmSessionModalOpen] = useState(false);
   const [tradeItemId, setTradeItemId] = useState<string | null>(null);
+  const [pendingConsumableUse, setPendingConsumableUse] = useState<{ characterId: string; item: InventoryItem } | null>(null);
   const [attackRollRequest, setAttackRollRequest] = useState<AttackRollRequest | null>(null);
   const [gachaModalOpen, setGachaModalOpen] = useState(false);
   const [gachaSpinData, setGachaSpinData] = useState<Record<string, unknown> | null>(null);
-  const [defeatedMonster, setDefeatedMonster] = useState<MonsterDefeatSummary | null>(null);
+  const [defeatQueue, setDefeatQueue] = useState<MonsterDefeatSummary[]>([]);
+  const defeatedMonster = defeatQueue[0] ?? null;
+  const setDefeatedMonster = useCallback((next: MonsterDefeatSummary | null) => {
+    if (next === null) {
+      setDefeatQueue((prev) => prev.slice(1));
+    } else {
+      setDefeatQueue((prev) => {
+        if (next.id && prev.some((item) => item.id === next.id)) return prev;
+        return [...prev, next];
+      });
+    }
+  }, []);
   const [chestReveal, setChestReveal] = useState<ChestLootSummary | null>(null);
   const [activePromptModal, setActivePromptModal] = useState<{ beatId: string; promptId: string } | null>(null);
+  const [activeNpcDialogue, setActiveNpcDialogue] = useState<NpcDialogueState | null>(null);
+  const [activeObserveResult, setActiveObserveResult] = useState<ObserveResultState | null>(null);
   const [diceRollModal, setDiceRollModal] = useState<RollLogEntry | null>(null);
   const [tooltip, setTooltip] = useState<{ tok: Partial<MapToken>; x: number; y: number } | null>(null);
 
   const sseRef = useRef<EventSource | null>(null);
   const seenToastIdsRef = useRef<Set<string>>(new Set());
   const seenRollIdRef = useRef<string | null>(null);
+  const seenDefeatIdsRef = useRef<Set<string>>(new Set());
+  const seededDefeatsRef = useRef<boolean>(false);
+
+  const presentDefeatSummary = useCallback((summary: MonsterDefeatSummary) => {
+    if (summary.id) {
+      if (seenDefeatIdsRef.current.has(summary.id)) return;
+      seenDefeatIdsRef.current.add(summary.id);
+    }
+    setDefeatQueue((prev) => {
+      if (summary.id && prev.some((item) => item.id === summary.id)) return prev;
+      return [...prev, summary];
+    });
+  }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -144,7 +230,17 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
       message: displayMsg,
       target: toast.target || 'all',
       sender: toast.sender || 'SYSTEM / DM',
+      ...(toast.isDmBroadcast ? { isDmBroadcast: true } : {}),
     };
+    setLatestStatus({
+      title: entry.title,
+      message: rawMsg.replace(/^SYSTEM:\s*/i, ''),
+      category: entry.category,
+      timestamp: entry.timestamp,
+    });
+    if (activeBeatIdRef.current && !toast.isDmBroadcast) {
+      return;
+    }
     setToasts((prev) => [entry, ...prev].slice(0, 6));
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -187,6 +283,8 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
 
   const enterSession = useCallback(
     async (newSession: SessionIdentity, opts?: { showOnboarding?: boolean }) => {
+      seenDefeatIdsRef.current.clear();
+      seededDefeatsRef.current = false;
       setSession(newSession);
       setActiveBeatDetailId(null);
       setLastAutoOpenedBeatId(null);
@@ -212,6 +310,9 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
     }
     setSession(null);
     setState(null);
+    seenDefeatIdsRef.current.clear();
+    seededDefeatsRef.current = false;
+    setDefeatQueue([]);
     setShowOnboarding(false);
     setActiveBeatDetailId(null);
     setLastAutoOpenedBeatId(null);
@@ -220,6 +321,7 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
     setDmCharModalId(null);
     setDmSessionModalOpen(false);
     setTradeItemId(null);
+    setPendingConsumableUse(null);
     setAttackRollRequest(null);
     setGachaModalOpen(false);
     setGachaSpinData(null);
@@ -236,17 +338,24 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
         const res = await sendGameAction<T>(type, payload);
         const anyRes = res as unknown as {
           defeatSummary?: MonsterDefeatSummary | null;
+          defeatSummaries?: MonsterDefeatSummary[];
           damageOutcome?: { defeatSummary?: MonsterDefeatSummary | null };
           chestLootSummary?: ChestLootSummary | null;
           roll?: RollLogEntry | null;
           beat?: { prompts?: Array<{ triggeredStatCheckResults?: Array<{ characterId: string; characterName: string; statKey: string; statMod: number; floorBonus: number; roll: number; total: number; dc: number; passed: boolean; rewardSummary?: string }> }> };
         } | undefined;
-        const summary = anyRes?.defeatSummary || anyRes?.damageOutcome?.defeatSummary || null;
-        if (summary) setDefeatedMonster(summary);
+        if (Array.isArray(anyRes?.defeatSummaries) && anyRes.defeatSummaries.length > 0) {
+          for (const s of anyRes.defeatSummaries) presentDefeatSummary(s);
+        } else {
+          const summary = anyRes?.defeatSummary || anyRes?.damageOutcome?.defeatSummary || null;
+          if (summary) presentDefeatSummary(summary);
+        }
         if (anyRes?.chestLootSummary) setChestReveal(anyRes.chestLootSummary);
         if (anyRes?.roll) {
           seenRollIdRef.current = anyRes.roll.id;
-          setDiceRollModal(anyRes.roll);
+          if (!activeBeatIdRef.current) {
+            setDiceRollModal(anyRes.roll);
+          }
         }
         await refreshState();
         return res;
@@ -257,8 +366,29 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
         return undefined;
       }
     },
-    [pushLocalToast, refreshState, session],
+    [presentDefeatSummary, pushLocalToast, refreshState, session],
   );
+
+  // Show MonsterDefeatedModal when a monster is defeated asynchronously (e.g., via debuff DoT on turn start)
+  useEffect(() => {
+    if (!state) return;
+    const defeats = state.recentMonsterDefeats || [];
+    if (!seededDefeatsRef.current) {
+      for (const d of defeats) {
+        if (d.id) seenDefeatIdsRef.current.add(d.id);
+      }
+      seededDefeatsRef.current = true;
+      return;
+    }
+    if (session?.role === 'player' && session.characterId) {
+      const unseen = defeats.filter(
+        (d) => d.id && !seenDefeatIdsRef.current.has(d.id) && d.killerCharacterId === session.characterId,
+      );
+      for (const entry of unseen) {
+        presentDefeatSummary(entry);
+      }
+    }
+  }, [presentDefeatSummary, session, state]);
 
   // Gracefully log out connected player if the DM resets the campaign or removes their character
   useEffect(() => {
@@ -289,7 +419,7 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
         (session?.role === 'dm' && latestRoll.rollerRole === 'dm') ||
         (myCharName && latestRoll.rollerName === myCharName) ||
         /Stat Check/i.test(latestRoll.label || '');
-      if (isMyRoll) {
+      if (isMyRoll && !activeBeatIdRef.current) {
         setDiceRollModal(latestRoll);
       }
     }
@@ -349,6 +479,7 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
         toasts,
         dismissToast,
         pushLocalToast,
+        latestStatus,
         refreshState,
         enterSession,
         updateSessionIdentity,
@@ -368,6 +499,8 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
         setDmSessionModalOpen,
         tradeItemId,
         setTradeItemId,
+        pendingConsumableUse,
+        setPendingConsumableUse,
         attackRollRequest,
         requestAttackRoll,
         gachaModalOpen,
@@ -380,6 +513,10 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
         setChestReveal,
         activePromptModal,
         setActivePromptModal,
+        activeNpcDialogue,
+        setActiveNpcDialogue,
+        activeObserveResult,
+        setActiveObserveResult,
         diceRollModal,
         setDiceRollModal,
         tooltip,

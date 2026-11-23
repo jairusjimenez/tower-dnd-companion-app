@@ -1,4 +1,12 @@
-import { computePassiveModifiers, computeStatModifier, isStatsAndEquipmentLocked, type Character, type RollLogEntry } from '@shared/index';
+import {
+  computeCharacterMoveSpaces,
+  computePassiveModifiers,
+  computeStatModifier,
+  getPartyFloor,
+  isStatsAndEquipmentLocked,
+  type Character,
+  type RollLogEntry,
+} from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 import { DiabloEquipmentGrid } from '../common/DiabloEquipmentGrid';
 
@@ -39,6 +47,13 @@ export function PlayerStatsTab({
 
   // Build combined passive summary from structured PassiveModifiers
   const pMods = computePassiveModifiers(ch);
+  const agiScore = ch.stats?.AGI ?? ch.stats?.DEX ?? 10;
+  const partyFloor = state ? getPartyFloor(state) : 1;
+  const moveInfo = computeCharacterMoveSpaces({
+    agi: agiScore,
+    floor: partyFloor,
+    passiveSpeedBonus: pMods.bonusSpeedSpaces,
+  });
   const passiveTotals = new Map<string, { val: number; unit: string }>();
   const addTotal = (label: string, val: number, unit = '') => {
     if (!val) return;
@@ -248,10 +263,15 @@ export function PlayerStatsTab({
               <strong id="p-dr-val">{ch.dr}</strong>
               <small className="muted">Dmg Reduced</small>
             </div>
-            <div className="mini-box" title="Movement: grid spaces you can move per turn">
+            <div className="mini-box" title="Movement: Base 3 + AGI (+1 per 4 AGI > 10) + Floor scaling">
               <span>Move</span>
-              <strong id="p-speed-val">{ch.speedSpaces || 6} Spaces</strong>
-              <small className="muted">Per Turn</small>
+              <strong id="p-speed-val">{moveInfo.total} Spaces</strong>
+              <small className="muted">
+                Base {moveInfo.base}
+                {moveInfo.agiBonus > 0 ? ` • AGI +${moveInfo.agiBonus}` : ''}
+                {moveInfo.floorBonus > 0 ? ` • ${partyFloor}F +${moveInfo.floorBonus}` : ''}
+                {moveInfo.passiveBonus > 0 ? ` • Passive +${moveInfo.passiveBonus}` : ''}
+              </small>
             </div>
             <div className="mini-box mini-box-locked" title="Favor system is not unlocked yet">
               <span>Favor</span>

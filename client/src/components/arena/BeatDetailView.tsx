@@ -6,6 +6,7 @@ import {
   UNIT_EFFECT_KINDS,
   UNIT_EFFECT_META,
   buildChestLootPreview,
+  computeActiveEffectModifiers,
   computeStatModifier,
   formatActiveUnitEffect,
   formatMonsterAttackArea,
@@ -24,15 +25,18 @@ import {
   type BeatTreasureSpec,
   type ChestLootSummary,
   type ChestTier,
+  type MapToken,
   type StoryPromptBranch,
   type UnitEffectKind,
   type UnitEffectSpec,
 } from '@shared/index';
 import type { BeatActionMode } from '../../canvas/drawBeatArena';
 import { useVtt } from '../../context/VttContext';
+import { findClosestNpcInteractCell } from '../../utils/npcInteraction';
 import { StoryFlowchartView } from '../common/StoryFlowchartView';
 import { TokenIconSvg } from '../common/TokenIconSvg';
 import { BeatArenaCanvas, useBeatPlayerCellAction } from './BeatArenaCanvas';
+import { PlayerCombatHud } from './PlayerCombatHud';
 
 export function BeatDetailView() {
   const {
@@ -43,9 +47,13 @@ export function BeatDetailView() {
     state,
     sendAction,
     pushLocalToast,
+    latestStatus,
     requestAttackRoll,
+    setDefeatedMonster,
     setChestReveal,
     setActivePromptModal,
+    setActiveNpcDialogue,
+    setPendingConsumableUse,
   } = useVtt();
 
   const handlePlayerBeatCell = useBeatPlayerCellAction();
@@ -141,6 +149,14 @@ export function BeatDetailView() {
   const [askBranches, setAskBranches] = useState<Record<string, { scenario: string; dmNote: string; nextQuestion: string }>>({});
   const [showFlowchart, setShowFlowchart] = useState(true);
   const [playerAnswers, setPlayerAnswers] = useState<Record<string, string>>({});
+  const [pendingNpcMoveConfirm, setPendingNpcMoveConfirm] = useState<{
+    npcTok: MapToken;
+    targetX: number;
+    targetY: number;
+    steps: number;
+    directDist: number;
+  } | null>(null);
+  const [movingToNpc, setMovingToNpc] = useState(false);
 
   if (!activeBeatDetailId || !state || !session) return null;
   const beat = (state.storyBeats || []).find((b) => b.id === activeBeatDetailId);
@@ -157,12 +173,15 @@ export function BeatDetailView() {
   const attacksExhausted = usedAttacks >= maxAttacks;
   const movedDone = Boolean(myArenaTok?.hasMovedThisTurn);
   const observeDone = Boolean(myArenaTok?.hasObservedThisTurn);
+  const spellCastDone = Boolean(myArenaTok?.hasCastSpellThisTurn);
 
   const effectiveMode: BeatActionMode = isDm
     ? beatActionMode === 'monster_move' || beatActionMode === 'monster_attack' || beatActionMode === 'monster_skill'
       ? beatActionMode
       : 'monster_move'
-    : (beatActionMode === 'attack' && attacksExhausted) || (beatActionMode === 'observe' && observeDone)
+    : (beatActionMode === 'attack' && (attacksExhausted || spellCastDone))
+      || (beatActionMode === 'spell' && (usedAttacks > 0 || spellCastDone))
+      || (beatActionMode === 'observe' && observeDone)
       ? 'move'
       : beatActionMode;
 
@@ -248,11 +267,122 @@ export function BeatDetailView() {
     pushLocalToast({ title: 'STORY BEAT UPDATED', message: 'Story beat changes saved!', category: 'info' });
   };
 
+  const openNpcDialogue = (npcTok: MapToken) => {
+    const hasUnclaimedReward =
+      !npcTok.rewardClaimed &&
+      ((Boolean(npcTok.rewardType) && npcTok.rewardType !== 'none') || Number(npcTok.rewardGold || 0) > 0);
+    setActiveNpcDialogue({
+      beatId: beat.id,
+      tokenId: npcTok.id,
+      npcName: npcTok.name,
+      npcRole: npcTok.npcRole || 'NPC',
+      iconId: npcTok.iconId,
+      dialogue: npcTok.dialogue || 'Greetings, Climber.',
+      rewardType: npcTok.rewardType,
+      rewardXp: npcTok.rewardXp,
+      rewardGold: npcTok.rewardGold,
+      rewardItemName: npcTok.rewardItemName,
+      rewardSkillDesc: npcTok.rewardSkillDesc,
+      rewardClaimed: Boolean(npcTok.rewardClaimed),
+    });
+    if (!hasUnclaimedReward) {
+      void sendAction('story_action', {
+        subAction: 'talk_beat_npc',
+        beatId: beat.id,
+        tokenId: npcTok.id,
+        characterId: session.characterId || null,
+      });
+    }
+  };
+
+  const handleNpcInteractRequest = (npcTok: MapToken) => {
+    if (!myArenaTok || !me) return;
+    const reach = findClosestNpcInteractCell({
+      arena,
+      myTok: myArenaTok,
+      npcTok,
+      me,
+      combatRound: state.combat?.round ?? 1,
+      beatFloor: beat.floor || 1,
+    });
+    if (reach.status === 'adjacent') {
+      openNpcDialogue(npcTok);
+      return;
+    }
+    if (!isMyCombatTurn) {
+      pushLocalToast({
+        title: 'WAIT TURN',
+        message: `It is currently ${activeCombatant?.name}'s turn! Wait for your turn to move closer to ${npcTok.name}.`,
+        category: 'warning',
+      });
+      return;
+    }
+    if (movedDone) {
+      pushLocalToast({
+        title: 'OUT OF REACH',
+        message: `You must be within 1 Space of ${npcTok.name} to interact (you already moved this turn).`,
+        category: 'warning',
+      });
+      return;
+    }
+    if (computeActiveEffectModifiers(me.activeEffects).stunned) {
+      pushLocalToast({
+        title: 'STUNNED',
+        message: `${me.name} is Stunned and cannot move to ${npcTok.name}.`,
+        category: 'warning',
+      });
+      return;
+    }
+    if (reach.status === 'reachable') {
+      setPendingNpcMoveConfirm({
+        npcTok,
+        targetX: reach.x,
+        targetY: reach.y,
+        steps: reach.steps,
+        directDist: reach.directDist,
+      });
+      return;
+    }
+    pushLocalToast({
+      title: 'OUT OF REACH',
+      message: `${npcTok.name} is ${reach.directDist} Spaces away — out of movement reach (max ${reach.maxSpaces} Spaces). Move within 1 Space to interact.`,
+      category: 'warning',
+    });
+  };
+
+  const handleConfirmMoveToNpc = async () => {
+    if (!pendingNpcMoveConfirm || !session.characterId || movingToNpc) return;
+    setMovingToNpc(true);
+    try {
+      const res = await sendAction<{ ok?: boolean }>('story_action', {
+        subAction: 'move_beat_token',
+        beatId: beat.id,
+        tokenId: session.characterId,
+        x: pendingNpcMoveConfirm.targetX,
+        y: pendingNpcMoveConfirm.targetY,
+      });
+      if (res && res.ok !== false) {
+        const npcTok = pendingNpcMoveConfirm.npcTok;
+        setPendingNpcMoveConfirm(null);
+        openNpcDialogue(npcTok);
+      }
+    } finally {
+      setMovingToNpc(false);
+    }
+  };
+
   const handleArenaClick = async (x: number, y: number) => {
     const activePlayerArea: AttackArea = playerAttackAreaOverride ?? me?.equipment?.mainHand?.attackArea ?? 'single';
     const activePlayerMod = playerAreaModOverride ?? me?.equipment?.mainHand?.attackAreaModifier ?? 0;
 
     if (!isDm && session.characterId) {
+      if (effectiveMode !== 'attack' && effectiveMode !== 'spell' && effectiveMode !== 'observe') {
+        const tappedNpc = (arena.tokens || []).find((t) => t.x === x && t.y === y && t.type === 'npc');
+        if (tappedNpc) {
+          handleNpcInteractRequest(tappedNpc);
+          return;
+        }
+      }
       if (!isMyCombatTurn) {
         pushLocalToast({
           title: 'WAIT TURN',
@@ -428,12 +558,7 @@ export function BeatDetailView() {
 
     const npcHit = hitToken && hitToken.type === 'npc' ? hitToken : undefined;
     if (npcHit && !isDm) {
-      await sendAction('story_action', {
-        subAction: 'talk_beat_npc',
-        beatId: beat.id,
-        tokenId: npcHit.id,
-        characterId: session.characterId || null,
-      });
+      handleNpcInteractRequest(npcHit);
       return;
     }
 
@@ -563,6 +688,134 @@ export function BeatDetailView() {
   const currentRound = combat.round || 1;
   const isFinalRounds = isCombatBeat && currentRound >= Math.max(1, maxRounds - 2);
 
+  const npcMoveConfirmModal = pendingNpcMoveConfirm ? (
+    <div
+      id="npc-move-confirm-modal"
+      className="modal-backdrop open npc-dialog-backdrop"
+      style={{ zIndex: 9055 }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="npc-move-confirm-title"
+      onClick={() => {
+        if (!movingToNpc) setPendingNpcMoveConfirm(null);
+      }}
+    >
+      <div className="modal-card npc-dialog-card" onClick={(e) => e.stopPropagation()}>
+        <div className="npc-dialog-head">
+          <div className="npc-dialog-avatar">
+            <TokenIconSvg
+              type="npc"
+              name={pendingNpcMoveConfirm.npcTok.name}
+              iconId={pendingNpcMoveConfirm.npcTok.iconId}
+              size={46}
+            />
+          </div>
+          <div className="npc-dialog-speaker">
+            <span className="tag tag-green npc-dialog-role">
+              {pendingNpcMoveConfirm.npcTok.npcRole || 'NPC'}
+            </span>
+            <h2 id="npc-move-confirm-title" className="npc-dialog-name">
+              {pendingNpcMoveConfirm.npcTok.name}
+            </h2>
+          </div>
+          <button
+            type="button"
+            className="btn btn-xs btn-outline npc-dialog-x"
+            aria-label="Cancel Move & Interact"
+            disabled={movingToNpc}
+            onClick={() => setPendingNpcMoveConfirm(null)}
+          >
+            &times;
+          </button>
+        </div>
+
+        <div className="npc-dialog-box">
+          <p className="npc-dialog-text">
+            Move to ({pendingNpcMoveConfirm.targetX + 1}, {pendingNpcMoveConfirm.targetY + 1}) (
+            {pendingNpcMoveConfirm.steps} Space{pendingNpcMoveConfirm.steps === 1 ? '' : 's'}) to
+            interact with <strong>{pendingNpcMoveConfirm.npcTok.name}</strong>?
+          </p>
+        </div>
+
+        <div className="npc-dialog-footer">
+          <button
+            type="button"
+            className="btn btn-sm btn-outline"
+            disabled={movingToNpc}
+            onClick={() => setPendingNpcMoveConfirm(null)}
+          >
+            No
+          </button>
+          <button
+            type="button"
+            id="btn-confirm-move-npc"
+            className="btn btn-sm btn-gold"
+            disabled={movingToNpc}
+            onClick={() => void handleConfirmMoveToNpc()}
+          >
+            {movingToNpc ? 'Moving...' : 'Yes, Move & Interact'}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  if (!isDm && isCombatBeat && session.characterId && me) {
+    return (
+      <>
+        <PlayerCombatHud
+          beat={beat}
+          state={state}
+          me={me}
+          characterId={session.characterId}
+          arena={arena}
+          arenaMons={arenaMons}
+          npcTokens={npcTokens}
+          consumables={consumables}
+          combat={combat}
+          activeCombatant={activeCombatant}
+          relevantCombatants={relevantCombatants}
+          hasTurnOrder={hasTurnOrder}
+          beatHasMonsters={beatHasMonsters}
+          activeTurnMonsterId={activeTurnMonsterId}
+          isMyCombatTurn={isMyCombatTurn}
+          isLive={isLive}
+          currentRound={currentRound}
+          maxRounds={maxRounds}
+          isFinalRounds={isFinalRounds}
+          maxAttacks={maxAttacks}
+          usedAttacks={usedAttacks}
+          attacksExhausted={attacksExhausted}
+          movedDone={movedDone}
+          observeDone={observeDone}
+          effectiveMode={effectiveMode}
+          setBeatActionMode={setBeatActionMode}
+          selectedTokenId={selectedTokenId}
+          aimCell={aimCell}
+          playerAttackAreaOverride={playerAttackAreaOverride}
+          setPlayerAttackAreaOverride={setPlayerAttackAreaOverride}
+          playerAreaModOverride={playerAreaModOverride}
+          setPlayerAreaModOverride={setPlayerAreaModOverride}
+          playerHealBuffChoice={playerHealBuffChoice}
+          setPlayerHealBuffChoice={setPlayerHealBuffChoice}
+          buildChoicePayload={buildChoicePayload}
+          defaultMonsterId={defaultMonsterId}
+          pendingReactionObj={pendingReactionObj}
+          pendingReact={pendingReact}
+          affordableReactSpell={affordableReactSpell}
+          resolveBeatReaction={resolveBeatReaction}
+          mapHint={mapHint}
+          setMapHint={setMapHint}
+          latestStatus={latestStatus}
+          onCellClick={handleArenaClick}
+          onInteractNpc={handleNpcInteractRequest}
+          onClose={() => setActiveBeatDetailId(null)}
+        />
+        {npcMoveConfirmModal}
+      </>
+    );
+  }
+
   return (
     <section id="beat-detail-view" className="view active app-shell">
       <header className="topbar">
@@ -583,6 +836,11 @@ export function BeatDetailView() {
           {isCombatBeat && (
             <span id="beat-detail-round-hud" className={`tag ${isFinalRounds ? 'tag-crimson' : 'tag-gold'}`}>
               ROUND {currentRound} / {maxRounds}
+            </span>
+          )}
+          {beat.aiDmEnabled && (
+            <span id="beat-detail-ai-dm-badge" className="tag tag-purple">
+              AI DM ACTIVE
             </span>
           )}
           {Boolean(beat.xpReward) && (
@@ -1645,7 +1903,7 @@ export function BeatDetailView() {
                 <button
                   type="button"
                   className={`btn btn-xs btn-crimson ${effectiveMode === 'attack' ? 'active' : ''}`}
-                  disabled={!isMyCombatTurn || attacksExhausted}
+                  disabled={!isMyCombatTurn || attacksExhausted || spellCastDone}
                   onClick={() => {
                     setBeatActionMode('attack');
                     setItemTrayOpen(false);
@@ -1838,28 +2096,29 @@ export function BeatDetailView() {
             {!isDm && itemTrayOpen && (
               <div id="beat-detail-item-tray" className="list-stack" style={{ marginBottom: '8px' }}>
                 {consumables.length > 0 ? (
-                  consumables.map((it) => (
-                    <div key={it.id} className="item-card">
-                      <div className="item-card-top">
-                        <strong>{it.name} <span className="tag tag-cyan">×{it.qty || 1}</span></strong>
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-cyan"
-                          onClick={async () => {
-                            await sendAction('inventory_action', {
-                              characterId: session.characterId,
-                              subAction: 'use_consumable',
-                              itemId: it.id,
-                            });
-                            pushLocalToast({ title: 'ITEM USED', message: 'Consumable item applied!', category: 'info' });
-                          }}
-                        >
-                          Use
-                        </button>
+                  consumables.map((it) => {
+                    const myTok = (arena.tokens || []).find((t) => t.id === session.characterId);
+                    const usedConsumableThisTurn = Boolean(myTok?.hasUsedConsumableThisTurn && beatHasMonsters);
+                    return (
+                      <div key={it.id} className="item-card">
+                        <div className="item-card-top">
+                          <strong>{it.name} <span className="tag tag-cyan">×{it.qty || 1}</span></strong>
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-cyan"
+                            disabled={!isMyCombatTurn || usedConsumableThisTurn}
+                            onClick={() => {
+                              if (!session.characterId) return;
+                              setPendingConsumableUse({ characterId: session.characterId, item: it });
+                            }}
+                          >
+                            {usedConsumableThisTurn ? 'Used (Wait Turn)' : 'Use'}
+                          </button>
+                        </div>
+                        {it.notes && <div className="small muted">{it.notes}</div>}
                       </div>
-                      {it.notes && <div className="small muted">{it.notes}</div>}
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="item-card small muted">No consumable items in your bag.</div>
                 )}
@@ -2190,6 +2449,42 @@ export function BeatDetailView() {
               );
             })()}
 
+            <div
+              id="beat-detail-status-strip"
+              className="small"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 10px',
+                marginBottom: '8px',
+                borderRadius: '8px',
+                background: 'rgba(15, 23, 42, 0.72)',
+                border: '1px solid rgba(148, 163, 184, 0.2)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              <span
+                className={`tag ${
+                  latestStatus?.category === 'combat'
+                    ? 'tag-crimson'
+                    : latestStatus?.category === 'warning'
+                      ? 'tag-gold'
+                      : latestStatus?.category === 'loot'
+                        ? 'tag-green'
+                        : 'tag-cyan'
+                }`}
+                style={{ flexShrink: 0 }}
+              >
+                {latestStatus?.title || 'ARENA STATUS'}
+              </span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: '#e2e8f0' }}>
+                {latestStatus?.message || mapHint}
+              </span>
+            </div>
+
             <div className="arena-scroll-wrap" style={{ maxHeight: '74vh' }}>
               <BeatArenaCanvas
                 id="beat-detail-canvas"
@@ -2268,14 +2563,26 @@ export function BeatDetailView() {
                       </button>
                     </>
                   ) : session.characterId ? (
-                    <button
-                      type="button"
-                      id="btn-beat-init-roll-self"
-                      className="btn btn-xs btn-cyan"
-                      onClick={() => sendAction('initiative_action', { subAction: 'player_roll_initiative', characterId: session.characterId })}
-                    >
-                      Roll Initiative
-                    </button>
+                    <>
+                      {beat.aiDmEnabled && activeCombatant?.type === 'monster' && !pendingReactionObj && (
+                        <button
+                          type="button"
+                          id="btn-beat-run-ai-dm"
+                          className="btn btn-xs btn-purple"
+                          onClick={() => sendAction('initiative_action', { subAction: 'run_ai_dm' })}
+                        >
+                          Run AI Monster Turn
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        id="btn-beat-init-roll-self"
+                        className="btn btn-xs btn-cyan"
+                        onClick={() => sendAction('initiative_action', { subAction: 'player_roll_initiative', characterId: session.characterId })}
+                      >
+                        Roll Initiative
+                      </button>
+                    </>
                   ) : null}
                 </div>
               </div>
@@ -2317,7 +2624,10 @@ export function BeatDetailView() {
                             {isCurrent && <span className="tag tag-gold">ACTIVE TURN</span>}
                           </strong>
                           <span>
-                            Init: <b>{c.initiative ?? '—'}</b> <span className="muted small">({statLabel} • {modStr})</span>
+                            Init: <b>{c.initiative ?? '—'}</b>
+                            {(isDm || c.type !== 'monster') && (
+                              <span className="muted small"> ({statLabel} • {modStr})</span>
+                            )}
                           </span>
                         </div>
                       </div>
@@ -2436,7 +2746,7 @@ export function BeatDetailView() {
                             <button
                               type="button"
                               className="btn btn-xs btn-crimson"
-                              disabled={isReaction ? !pendingReact : !isMyCombatTurn}
+                              disabled={isReaction ? !pendingReact : (!isMyCombatTurn || usedAttacks > 0 || spellCastDone)}
                               onClick={async () => {
                                 if (isReaction && pendingReactionObj) {
                                   const res = await sendAction<{ summary?: string }>('resolve_reaction', {
@@ -2452,6 +2762,7 @@ export function BeatDetailView() {
                                 const res = await sendAction<{
                                   ok?: boolean;
                                   summary?: string;
+                                  defeatSummary?: import('@shared/index').MonsterDefeatSummary | null;
                                   logEntry?: { summary?: string };
                                 }>('spell_action', {
                                   characterId: me.id,
@@ -2464,6 +2775,9 @@ export function BeatDetailView() {
                                   ...(sp.healFormula ? { healFormula: sp.healFormula } : {}),
                                   ...(sp.effectSpec ? { effectSpec: sp.effectSpec } : {}),
                                 });
+                                if (res?.defeatSummary) {
+                                  setDefeatedMonster(res.defeatSummary);
+                                }
                                 if (res?.ok) {
                                   pushLocalToast({
                                     title: 'SPELL CAST!',
@@ -2489,7 +2803,7 @@ export function BeatDetailView() {
             {beat.beatType !== 'narration' && (
             <div className="panel">
               <div className="panel-header">
-                <h3>Spawned Monsters</h3>
+                <h3>{isDm ? 'Spawned Monsters' : `Monsters (${arenaMons.length})`}</h3>
                 {isDm && (beat.encounters || []).length > 0 && (
                   <button
                     type="button"
@@ -2530,7 +2844,24 @@ export function BeatDetailView() {
                             {isLockedOutOfTurn && <span className="tag tag-outline">WAIT TURN</span>}
                             {hp !== null && hp <= 0 && <span className="tag tag-gold">DEFEATED</span>}
                           </strong>
-                          <span>{hp !== null && maxHp ? `HP ${hp}/${maxHp}` : ''}{liveMon ? ` • AC ${liveMon.ac} • DR ${liveMon.dr}` : ''}</span>
+                          <span>
+                            {isDm
+                              ? `${hp !== null && maxHp ? `HP ${hp}/${maxHp}` : ''}${liveMon ? ` • AC ${liveMon.ac} • DR ${liveMon.dr}` : ''}`
+                              : state.mechanics?.showExactMonsterHpToPlayers && hp !== null && maxHp
+                                ? `HP ${hp}/${maxHp}`
+                                : liveMon?.healthTier ||
+                                  (hp !== null && maxHp
+                                    ? hp <= 0
+                                      ? 'Defeated'
+                                      : hp >= maxHp
+                                        ? 'Unharmed'
+                                        : hp >= maxHp * 0.5
+                                          ? 'Wounded'
+                                          : hp >= maxHp * 0.25
+                                            ? 'Bloodied'
+                                            : 'Critical'
+                                    : 'Active')}
+                          </span>
                         </div>
                         {isDm && liveMon && (
                           <div className="small mt-xs">
@@ -2565,7 +2896,9 @@ export function BeatDetailView() {
                             ))}
                           </div>
                         )}
-                        {maxHp ? <div className="progress"><div className="progress-fill monster" style={{ width: `${pct}%` }} /></div> : null}
+                        {maxHp && (isDm || state.mechanics?.showExactMonsterHpToPlayers) ? (
+                          <div className="progress"><div className="progress-fill monster" style={{ width: `${pct}%` }} /></div>
+                        ) : null}
                         {isDm && liveMon && (
                           <div className="stack-form mt-xs" style={{ gap: '6px' }}>
                             <div className="btn-row" style={{ flexWrap: 'wrap', gap: '6px' }}>
@@ -2743,14 +3076,20 @@ export function BeatDetailView() {
                     );
                   })
                 ) : (beat.encounters || []).length > 0 ? (
-                  beat.encounters.map((e, i) => (
-                    <div key={`${e.name}-${i}`} className="item-card">
-                      <div className="item-card-top">
-                        <strong>{e.name} <span className="tag tag-crimson">READY TO SPAWN</span></strong>
-                        <span>HP {e.maxHp} • AC {e.ac} • DR {e.dr} • {e.damageFormula || ''}</span>
+                  isDm ? (
+                    beat.encounters.map((e, i) => (
+                      <div key={`${e.name}-${i}`} className="item-card">
+                        <div className="item-card-top">
+                          <strong>{e.name} <span className="tag tag-crimson">READY TO SPAWN</span></strong>
+                          <span>HP {e.maxHp} • AC {e.ac} • DR {e.dr} • {e.damageFormula || ''}</span>
+                        </div>
                       </div>
+                    ))
+                  ) : (
+                    <div className="item-card small muted">
+                      {beat.encounters.length} Monster{beat.encounters.length === 1 ? '' : 's'} lurking in the area...
                     </div>
-                  ))
+                  )
                 ) : (
                   <div className="muted small">No monsters in this story beat.</div>
                 )}
@@ -2758,27 +3097,70 @@ export function BeatDetailView() {
             </div>
             )}
 
+            {beat.beatType !== 'narration' && (
+              <div id="beat-detail-combat-feed" className="panel">
+                <div className="panel-header">
+                  <h3>Live Combat Feed</h3>
+                  <span className="tag tag-cyan">{(state.combatLog || []).length}</span>
+                </div>
+                <div className="list-stack mt-xs" style={{ maxHeight: '210px', overflowY: 'auto' }}>
+                  {(state.combatLog || []).length > 0 ? (
+                    (state.combatLog || []).slice(0, 15).map((log) => (
+                      <div key={log.id} className="item-card" style={{ padding: '6px 8px' }}>
+                        <div className="small" style={{ color: '#e2e8f0' }}>{log.summary}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="muted small">Combat actions will appear here.</div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="panel">
               <div className="panel-header"><h3>Treasure &amp; Loot Chests</h3></div>
               <div id="beat-detail-treasure" className="list-stack mt-xs">
-                {(beat.treasures || []).map((t) => (
-                  <div key={t.id} className="item-card">
-                    <div className="item-card-top">
-                      <strong>{t.name} <span className="tag tag-gold">{t.category || 'treasure'}</span></strong>
-                      <span>{[t.gold ? `${t.gold}G` : '', t.manaStones ? `${t.manaStones} Stones` : '', t.damageDice || ''].filter(Boolean).join(' • ') || 'Story Reward'}</span>
-                    </div>
-                  </div>
-                ))}
-                {(arena.chests || []).map((c) => (
-                  <div key={c.id} className="item-card">
-                    <div className="item-card-top">
-                      <strong>{c.name} <span className={`tag ${c.opened ? 'tag-cyan' : 'tag-gold'}`}>{c.opened ? 'OPENED' : 'CHEST'}</span></strong>
-                      <span>{[c.gold ? `${c.gold}G` : '', c.manaStones ? `${c.manaStones} Stones` : '', c.itemName || ''].filter(Boolean).join(', ') || 'Empty'}</span>
-                    </div>
-                  </div>
-                ))}
-                {(beat.treasures || []).length === 0 && (arena.chests || []).length === 0 && (
-                  <div className="muted small">No treasure or chests attached.</div>
+                {isDm ? (
+                  <>
+                    {(beat.treasures || []).map((t) => (
+                      <div key={t.id} className="item-card">
+                        <div className="item-card-top">
+                          <strong>{t.name} <span className="tag tag-gold">{t.category || 'treasure'}</span></strong>
+                          <span>{[t.gold ? `${t.gold}G` : '', t.manaStones ? `${t.manaStones} Stones` : '', t.damageDice || ''].filter(Boolean).join(' • ') || 'Story Reward'}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {(arena.chests || []).map((c) => (
+                      <div key={c.id} className="item-card">
+                        <div className="item-card-top">
+                          <strong>{c.name} <span className={`tag ${c.opened ? 'tag-cyan' : 'tag-gold'}`}>{c.opened ? 'OPENED' : 'CHEST'}</span></strong>
+                          <span>{[c.gold ? `${c.gold}G` : '', c.manaStones ? `${c.manaStones} Stones` : '', c.itemName || ''].filter(Boolean).join(', ') || 'Empty'}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {(beat.treasures || []).length === 0 && (arena.chests || []).length === 0 && (
+                      <div className="muted small">No treasure or chests attached.</div>
+                    )}
+                  </>
+                ) : (
+                  (() => {
+                    const unopenedCount = (arena.chests || []).filter((c) => !c.opened).length;
+                    const openedCount = (arena.chests || []).filter((c) => c.opened).length;
+                    if (unopenedCount === 0 && openedCount === 0) {
+                      return <div className="muted small">No visible chests in the area.</div>;
+                    }
+                    return (
+                      <div className="item-card small">
+                        {unopenedCount > 0 ? (
+                          <span>
+                            <span className="tag tag-gold">CHEST</span> {unopenedCount} Unopened Chest{unopenedCount === 1 ? '' : 's'} nearby
+                          </span>
+                        ) : (
+                          <span className="muted">All chests in this area have been opened ({openedCount}).</span>
+                        )}
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             </div>
@@ -2852,6 +3234,7 @@ export function BeatDetailView() {
           </div>
         </div>
       </main>
+      {npcMoveConfirmModal}
     </section>
   );
 }

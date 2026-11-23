@@ -44,20 +44,31 @@ export function drawChestIcon(
   size: number,
 ): void {
   const half = Math.max(7, Math.floor(size * 0.36));
-  const tierColors: Record<string, { body: string; trim: string; glow?: string }> = {
-    Common: { body: '#78350f', trim: '#d97706' },
-    Uncommon: { body: '#065f46', trim: '#34d399', glow: 'rgba(52, 211, 153, 0.5)' },
-    Rare: { body: '#075985', trim: '#38bdf8', glow: 'rgba(56, 189, 248, 0.6)' },
-    Epic: { body: '#581c87', trim: '#c084fc', glow: 'rgba(192, 132, 252, 0.7)' },
-    Legendary: { body: '#b45309', trim: '#fbbf24', glow: 'rgba(251, 191, 36, 0.8)' },
-    Mythic: { body: '#881337', trim: '#fb7185', glow: 'rgba(251, 113, 133, 0.85)' },
+  const tierColors: Record<string, { body: string; trim: string; glow: string; halo: string }> = {
+    Common: { body: '#78350f', trim: '#fbbf24', glow: 'rgba(245, 158, 11, 0.85)', halo: 'rgba(251, 191, 36, 0.38)' },
+    Uncommon: { body: '#065f46', trim: '#34d399', glow: 'rgba(52, 211, 153, 0.85)', halo: 'rgba(52, 211, 153, 0.38)' },
+    Rare: { body: '#075985', trim: '#38bdf8', glow: 'rgba(56, 189, 248, 0.9)', halo: 'rgba(56, 189, 248, 0.42)' },
+    Epic: { body: '#581c87', trim: '#c084fc', glow: 'rgba(192, 132, 252, 0.92)', halo: 'rgba(192, 132, 252, 0.45)' },
+    Legendary: { body: '#b45309', trim: '#fde047', glow: 'rgba(251, 191, 36, 0.95)', halo: 'rgba(253, 224, 71, 0.48)' },
+    Mythic: { body: '#881337', trim: '#fb7185', glow: 'rgba(251, 113, 133, 0.95)', halo: 'rgba(251, 113, 133, 0.5)' },
   };
   const pal = tierColors[chest.tier || 'Common'] || tierColors.Common;
   ctx.save();
-  if (chest.opened) ctx.globalAlpha = 0.45;
-  else if (pal.glow) {
+  if (chest.opened) {
+    ctx.globalAlpha = 0.42;
+  } else {
+    const auraRadius = half * 1.95;
+    const grad = ctx.createRadialGradient(cx, cy, half * 0.15, cx, cy, auraRadius);
+    grad.addColorStop(0, pal.halo);
+    grad.addColorStop(0.55, pal.halo.replace(/[\d.]+\)$/, '0.18)'));
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, auraRadius, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.shadowColor = pal.glow;
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = Math.max(12, Math.round(size * 0.45));
   }
   ctx.fillStyle = pal.body;
   ctx.strokeStyle = pal.trim;
@@ -66,6 +77,13 @@ export function drawChestIcon(
   ctx.roundRect(cx - half, cy - half * 0.75, half * 2, half * 1.5, 3);
   ctx.fill();
   ctx.stroke();
+
+  if (!chest.opened) {
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.fillRect(cx - half + 2, cy - half * 0.75 + 2, Math.max(4, half * 2 - 4), 2);
+  }
+
   ctx.fillStyle = pal.trim;
   ctx.fillRect(cx - half, cy - 2, half * 2, 3);
   ctx.fillRect(cx - 2.5, cy - 3.5, 5, 6);
@@ -235,11 +253,13 @@ export function drawArenaBackground(
     }
   }
 
-  ctx.fillStyle = pal.axis;
-  ctx.font = `bold ${cellPx >= 36 ? 10 : 9}px Segoe UI, sans-serif`;
-  ctx.textAlign = 'center';
-  for (let x = 0; x < cols; x++) ctx.fillText(String(x + 1), axisPad + x * cellPx + cellPx / 2, axisPad - 8);
-  for (let y = 0; y < rows; y++) ctx.fillText(String(y + 1), Math.floor(axisPad / 2), axisPad + y * cellPx + cellPx / 2 + 3);
+  if (axisPad > 0) {
+    ctx.fillStyle = pal.axis;
+    ctx.font = `bold ${cellPx >= 36 ? 10 : 9}px Segoe UI, sans-serif`;
+    ctx.textAlign = 'center';
+    for (let x = 0; x < cols; x++) ctx.fillText(String(x + 1), axisPad + x * cellPx + cellPx / 2, axisPad - 8);
+    for (let y = 0; y < rows; y++) ctx.fillText(String(y + 1), Math.floor(axisPad / 2), axisPad + y * cellPx + cellPx / 2 + 3);
+  }
 
   ctx.strokeStyle = pal.grid;
   ctx.lineWidth = 1;

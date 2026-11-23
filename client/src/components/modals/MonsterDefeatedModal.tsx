@@ -7,7 +7,12 @@ export function MonsterDefeatedModal() {
   if (!defeatedMonster) return null;
 
   return (
-    <div id="monster-defeated-modal" className="modal-backdrop" onClick={() => setDefeatedMonster(null)}>
+    <div
+      id="monster-defeated-modal"
+      className="modal-backdrop"
+      style={{ zIndex: 9100 }}
+      onClick={() => setDefeatedMonster(null)}
+    >
       <div
         className="modal-card card-glow-gold"
         style={{ maxWidth: '480px' }}
@@ -18,7 +23,7 @@ export function MonsterDefeatedModal() {
             <div className="badge-tower mb-xs" style={{ color: '#fbbf24' }}>
               VICTORY SPOILS • {defeatedMonster.floor}F
             </div>
-            <h3 style={{ margin: 0 }}>MONSTER DEFEATED</h3>
+            <h3 style={{ margin: 0 }}>You defeated {defeatedMonster.monsterName}!</h3>
           </div>
           <button
             type="button"
@@ -35,6 +40,11 @@ export function MonsterDefeatedModal() {
               <strong>{defeatedMonster.monsterName}</strong>
               <span className="tag tag-crimson">SLAIN BY {defeatedMonster.killerName.toUpperCase()}</span>
             </div>
+            {defeatedMonster.defeatCause && (
+              <div className="small mt-xs" style={{ color: '#f97316' }}>
+                <strong>DEFEATED BY {defeatedMonster.defeatCause.toUpperCase()}</strong>
+              </div>
+            )}
             {defeatedMonster.leveledUp && (
               <div className="small mt-xs" style={{ color: '#4ade80' }}>
                 <strong>LEVEL UP!</strong> Reached Level {defeatedMonster.newLevel}! (+Stat Points &amp; +1 Passive Ticket)
@@ -67,6 +77,26 @@ export function MonsterDefeatedModal() {
               </small>
             </div>
           </div>
+
+          {defeatedMonster.chestDropped && (
+            <div
+              className="item-card"
+              style={{
+                borderColor: 'rgba(245, 158, 11, 0.55)',
+                background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(180, 83, 9, 0.08))',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <strong style={{ color: '#fbbf24' }}>
+                  📦 {defeatedMonster.chestDropped.name} Dropped!
+                </strong>
+                <span className="tag tag-gold">{defeatedMonster.chestDropped.tier}</span>
+              </div>
+              <div className="small muted" style={{ marginTop: '4px' }}>
+                Spawned on the arena at ({defeatedMonster.chestDropped.x + 1}, {defeatedMonster.chestDropped.y + 1}). Tap the chest to unlock!
+              </div>
+            </div>
+          )}
 
           <div className="item-card">
             <div className="small muted" style={{ marginBottom: '6px' }}>

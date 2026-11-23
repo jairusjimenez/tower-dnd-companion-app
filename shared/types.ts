@@ -44,6 +44,7 @@ export interface ActiveUnitEffect {
   potency: number;
   turnsRemaining: number;
   sourceName?: string;
+  sourceCharacterId?: string;
 }
 
 export interface EquipmentItem {
@@ -73,6 +74,7 @@ export interface InventoryItem {
   qty: number;
   healHp?: number;
   healMp?: number;
+  grantXp?: number;
   slot?: EquipmentSlot | '';
   attackBonus?: number;
   damageDice?: string;
@@ -357,6 +359,7 @@ export interface Character {
   artHistory: ArtHistoryEntry[];
   history?: PlayerHistoryEntry[];
   observedWeakSpots?: Record<string, ObservedWeakSpot>;
+  observedMonsterIds?: string[];
   activeEffects?: ActiveUnitEffect[];
   combatPassiveFlags?: {
     lastDamageType?: string;
@@ -374,14 +377,18 @@ export interface Character {
 }
 
 export interface MonsterDefeatSummary {
+  id?: string;
   monsterId: string;
   monsterName: string;
   floor: number;
   killerName: string;
+  killerCharacterId?: string;
+  defeatCause?: string;
   xpGained: number;
   goldGained: number;
   manaStonesGained: number;
   manaStoneDroppedOnMap?: boolean;
+  chestDropped?: { name: string; tier: ChestTier; x: number; y: number } | null;
   items: Array<{ name: string; category: string; tier?: ChestTier; notes?: string }>;
   leveledUp?: boolean;
   newLevel?: number;
@@ -445,8 +452,12 @@ export interface Monster {
   conditions: string[];
   notes: string;
   healthTier?: string;
+  dropsChest?: boolean;
+  chestTier?: ChestTier;
   loot: MonsterLoot;
   skills?: MonsterSkill[];
+  observedByViewer?: boolean;
+  hpPct?: number;
 }
 
 export type ChestTier = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
@@ -547,6 +558,8 @@ export interface BestiaryEntry {
   notes?: string;
   lootTable?: BestiaryLootDrop[];
   skills?: MonsterSkill[];
+  dropsChest?: boolean;
+  chestTier?: ChestTier;
 }
 
 export interface MapToken {
@@ -563,6 +576,8 @@ export interface MapToken {
   iconId?: TokenIconId;
   hasMovedThisTurn?: boolean;
   hasObservedThisTurn?: boolean;
+  hasUsedConsumableThisTurn?: boolean;
+  hasCastSpellThisTurn?: boolean;
   attacksUsedThisTurn?: number;
   // NPC-specific metadata
   npcRole?: string;
@@ -645,6 +660,8 @@ export interface BeatEncounterSpec {
   floor?: number;
   startX?: number | string | null;
   startY?: number | string | null;
+  dropsChest?: boolean;
+  chestTier?: ChestTier;
   skills?: MonsterSkill[];
 }
 
@@ -657,6 +674,7 @@ export interface BeatTreasureSpec {
   manaStones: number;
   healHp?: number;
   healMp?: number;
+  grantXp?: number;
   slot?: EquipmentSlot | '';
   attackBonus?: number;
   damageDice?: string;
@@ -757,6 +775,7 @@ export interface StoryBeat {
   status: 'upcoming' | 'active' | 'resolved' | 'failed' | string;
   xpReward: number;
   maxRounds?: number;
+  aiDmEnabled?: boolean;
   defeatSummary?: CombatDefeatRecord | null;
   arena: BeatArena;
   encounters: BeatEncounterSpec[];
@@ -840,7 +859,22 @@ export interface PendingReaction {
   // Resolution fields once Player rolls their reaction die (or DM resolves)
   resolved?: boolean;
   resolvedAt?: string;
-  playerChoice?: 'parry' | 'counter' | 'spell' | 'accept' | string;
+  playerChoice?: 'react' | 'block' | 'dodge' | 'parry' | 'counter' | 'spell' | 'accept' | string;
+  reactionStyle?: 'parry' | 'block' | 'counter';
+  spellName?: string;
+  spellAccuracyRoll?: {
+    natural: number;
+    mod: number;
+    total: number;
+    targetAc: number;
+    hit: boolean;
+    crit: boolean;
+  } | null;
+  spellDamageRoll?: {
+    formula: string;
+    rolls: number[];
+    total: number;
+  } | null;
   playerRollNatural?: number;
   playerRollMod?: number;
   playerRollTotal?: number;
@@ -959,6 +993,7 @@ export interface ToastMessage {
   message: string;
   target: string;
   sender: string;
+  isDmBroadcast?: boolean;
 }
 
 export interface GameNotes {
@@ -979,6 +1014,7 @@ export interface GameState {
   monsters: Monster[];
   pendingReactions: PendingReaction[];
   lastResolvedClash?: PendingReaction | null;
+  recentMonsterDefeats?: MonsterDefeatSummary[];
   bestiary: BestiaryEntry[];
   npcRoster?: NpcEntry[];
   treasureCatalog?: TreasureEntry[];
@@ -1019,6 +1055,7 @@ export interface FilteredGameState {
   monsters: Monster[];
   pendingReactions: PendingReaction[];
   lastResolvedClash?: PendingReaction | null;
+  recentMonsterDefeats?: MonsterDefeatSummary[];
   bestiary: BestiaryEntry[];
   npcRoster?: NpcEntry[];
   treasureCatalog?: TreasureEntry[];

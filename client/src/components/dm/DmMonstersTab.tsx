@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  CHEST_TIERS,
   MONSTER_ATTACK_AREAS,
   MONSTER_ICON_IDS,
   TOKEN_ICON_META,
@@ -17,7 +18,9 @@ import {
   scaleLootDropForFloor,
   scaleMonsterForFloor,
   scaleMonsterSkillForFloor,
+  shouldMonsterDropChest,
   type BestiaryLootDrop,
+  type ChestTier,
   type MonsterAttackArea,
   type MonsterIconId,
   type MonsterSkill,
@@ -49,6 +52,8 @@ export function DmMonstersTab() {
   const [effectPotency, setEffectPotency] = useState(3);
   const [effectDuration, setEffectDuration] = useState(2);
   const [notes, setNotes] = useState('');
+  const [dropsChestMode, setDropsChestMode] = useState<'auto' | 'yes' | 'no'>('auto');
+  const [chestTier, setChestTier] = useState<ChestTier>('Rare');
   const [lootDrops, setLootDrops] = useState<BestiaryLootDrop[]>([]);
   const [dropName, setDropName] = useState('');
   const [dropCat, setDropCat] = useState<BestiaryLootDrop['category']>('material');
@@ -97,6 +102,8 @@ export function DmMonstersTab() {
     setEffectPotency(3);
     setEffectDuration(2);
     setNotes('');
+    setDropsChestMode('auto');
+    setChestTier('Rare');
     setLootDrops([]);
     setMonsterSkills([]);
   };
@@ -130,6 +137,8 @@ export function DmMonstersTab() {
       healFormula: healFormula.trim() || undefined,
       effectSpec: builtEffectSpec,
       notes: notes.trim(),
+      ...(dropsChestMode === 'yes' ? { dropsChest: true } : dropsChestMode === 'no' ? { dropsChest: false } : {}),
+      ...(dropsChestMode !== 'no' ? { chestTier } : {}),
       lootTable: lootDrops,
       skills: monsterSkills,
     });
@@ -191,6 +200,30 @@ export function DmMonstersTab() {
                 ))}
               </select>
             </label>
+            <div className="grid-2">
+              <label>
+                <span>Chest Drop on Defeat</span>
+                <select value={dropsChestMode} onChange={(e) => setDropsChestMode(e.target.value as 'auto' | 'yes' | 'no')}>
+                  <option value="auto">Auto (Mini-Boss &amp; Boss Only)</option>
+                  <option value="yes">Always Drops Chest</option>
+                  <option value="no">Never Drops Chest</option>
+                </select>
+              </label>
+              <label>
+                <span>Chest Tier (if dropped)</span>
+                <select
+                  value={chestTier}
+                  disabled={dropsChestMode === 'no'}
+                  onChange={(e) => setChestTier(e.target.value as ChestTier)}
+                >
+                  {CHEST_TIERS.map((tier) => (
+                    <option key={tier} value={tier}>
+                      {tier}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <div className="grid-4">
               <label>
                 <span>Base Max HP</span>
@@ -572,7 +605,7 @@ export function DmMonstersTab() {
               const scaled = scaleMonsterForFloor(b, previewFloor);
               const xp = getMonsterXpReward(previewFloor);
               const rawLoot = getDefaultLootTableForMonster(b);
-              const scaledLoot = rawLoot.map((d) => scaleLootDropForFloor(d, previewFloor));
+              const scaledLoot = rawLoot.map((d) => scaleLootDropForFloor(d, previewFloor, b.category === 'Boss'));
               const rawSkills = getDefaultSkillsForMonster(b);
               const scaledSkills = rawSkills.map((s) => scaleMonsterSkillForFloor(s, previewFloor));
               return (
@@ -584,6 +617,9 @@ export function DmMonstersTab() {
                       <span className={`tag ${b.category === 'Boss' ? 'tag-crimson' : b.category === 'Manhwa' ? 'tag-purple' : 'tag-cyan'}`}>
                         {b.category || 'Custom'}
                       </span>
+                      {shouldMonsterDropChest(b) && (
+                        <span className="tag tag-gold">DROPS CHEST</span>
+                      )}
                     </strong>
                     <div className="btn-row">
                       <button
@@ -607,6 +643,8 @@ export function DmMonstersTab() {
                           setEffectPotency(b.effectSpec?.potency || 3);
                           setEffectDuration(b.effectSpec?.duration || 2);
                           setNotes(b.notes || '');
+                          setDropsChestMode(b.dropsChest === true ? 'yes' : b.dropsChest === false ? 'no' : 'auto');
+                          setChestTier(b.chestTier || (b.category === 'Boss' ? 'Epic' : 'Rare'));
                           setLootDrops(rawLoot.map((d) => ({ ...d })));
                           setMonsterSkills(rawSkills.map((s) => ({ ...s })));
                         }}
@@ -700,7 +738,7 @@ export function DmMonstersTab() {
                           }}
                         >
                           <span>
-                            <span className="tag tag-gold">{drop.dropChancePct}%</span>{' '}
+                            <span className="tag tag-gold">{drop.scaledDropChancePct}%</span>{' '}
                             <strong>{drop.itemName}</strong>{' '}
                             <span className={`tag ${getItemTierTagClass(drop.tier)}`}>{drop.tier}</span>{' '}
                             <span className={`tag ${getItemCategoryTagClass(drop.category)}`}>

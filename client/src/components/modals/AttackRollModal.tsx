@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { MonsterDefeatSummary } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 
 interface AttackRollInfo {
@@ -11,105 +12,284 @@ interface AttackRollInfo {
   breakdown: string;
 }
 
+interface DamageRollInfo {
+  formula: string;
+  rolls: number[];
+  diceTotal: number;
+  modifier: number;
+  rawTotal: number;
+  statMod: number;
+  levelBonus: number;
+  passiveBonus: number;
+  weakSpotBonus: number;
+  targetDr: number | null;
+  critMult: number;
+}
+
 interface DamageRes {
   ok?: boolean;
   miss?: boolean;
   hit?: boolean;
+  summary?: string;
   finalDamage?: number;
   friendlyFire?: boolean;
   targetsHit?: string[];
   attackRoll?: AttackRollInfo | null;
+  damageRoll?: DamageRollInfo | null;
   ally?: { name: string; hp: number; maxHp: number };
-  monster?: { hp: number | null; maxHp: number | null; healthTier?: string };
-  logEntry?: { rollDetails?: { breakdown?: string } };
+  monster?: { hp: number | null; maxHp: number | null; healthTier?: string; observedByViewer?: boolean };
+  defeatSummary?: MonsterDefeatSummary | null;
+  logEntry?: { summary?: string; rollDetails?: { breakdown?: string } };
+}
+
+interface ResultPill {
+  label: string;
+  tone: 'crimson' | 'gold' | 'cyan' | 'green' | 'purple';
+}
+
+interface TrioBreakdown {
+  accSub: string;
+  dmgSub: string;
+  finalSub: string;
+}
+
+function buildDamageSubText(dmg: DamageRollInfo | null | undefined): string {
+  if (!dmg) return 'Weapon / Skill';
+  const diceStr = dmg.rolls.length > 0 ? `[${dmg.rolls.join('+')}]` : String(dmg.diceTotal);
+  if (dmg.modifier > 0) return `Dice ${diceStr} + ${dmg.modifier}`;
+  if (dmg.modifier < 0) return `Dice ${diceStr} - ${Math.abs(dmg.modifier)}`;
+  return `Dice ${diceStr}`;
+}
+
+function buildFinalSubText(dmg: DamageRollInfo | null | undefined): string {
+  if (!dmg) return 'Total dealt';
+  const parts: string[] = [];
+  if (dmg.critMult > 1) parts.push(`×${dmg.critMult} Crit`);
+  if (dmg.statMod !== 0) parts.push(`Stat ${dmg.statMod > 0 ? `+${dmg.statMod}` : dmg.statMod}`);
+  if (dmg.levelBonus > 0) parts.push(`Lv +${dmg.levelBonus}`);
+  if (dmg.passiveBonus !== 0) parts.push(`Bonus ${dmg.passiveBonus > 0 ? `+${dmg.passiveBonus}` : dmg.passiveBonus}`);
+  if (dmg.weakSpotBonus > 0) parts.push(`Weak +${dmg.weakSpotBonus}`);
+  if (dmg.targetDr !== null && dmg.targetDr > 0) parts.push(`-${dmg.targetDr} DR`);
+  return parts.length > 0 ? parts.join(' • ') : 'Direct hit';
 }
 
 export function AttackRollModal() {
-  const { attackRollRequest, sendAction } = useVtt();
+  const { attackRollRequest, sendAction, session, setDefeatedMonster } = useVtt();
   const [rolling, setRolling] = useState(true);
-  const [cubeText, setCubeText] = useState('?');
+  const [accCubeText, setAccCubeText] = useState('?');
+  const [dmgCubeText, setDmgCubeText] = useState('?');
+  const [finalCubeText, setFinalCubeText] = useState('?');
   const [landed, setLanded] = useState(false);
+  const [missed, setMissed] = useState(false);
+  const [isCritHit, setIsCritHit] = useState(false);
+  const [trioSub, setTrioSub] = useState<TrioBreakdown>({
+    accSub: 'Rolling 1d20...',
+    dmgSub: 'Rolling...',
+    finalSub: 'Calculating...',
+  });
+  const [pendingDefeat, setPendingDefeat] = useState<MonsterDefeatSummary | null>(null);
   const [resultInfo, setResultInfo] = useState<{
     tierClass?: string;
     title: string;
-    detail: string;
+    pills: ResultPill[];
+    monsterBar?: {
+      name: string;
+      beforeHp: number | null;
+      afterHp: number | null;
+      maxHp: number | null;
+      label: string;
+    };
+    note?: string;
   } | null>(null);
+
+  const sendActionRef = useRef(sendAction);
+  sendActionRef.current = sendAction;
 
   useEffect(() => {
     if (!attackRollRequest) return;
     let cancelled = false;
     setRolling(true);
     setLanded(false);
+    setMissed(false);
+    setIsCritHit(false);
     setResultInfo(null);
-    setCubeText(String(Math.floor(Math.random() * 12) + 1));
+    setPendingDefeat(null);
+    setAccCubeText(String(Math.floor(Math.random() * 20) + 1));
+    setDmgCubeText(String(Math.floor(Math.random() * 8) + 1));
+    setFinalCubeText('?');
+    setTrioSub({
+      accSub: 'Rolling 1d20...',
+      dmgSub: 'Rolling...',
+      finalSub: 'Calculating...',
+    });
 
     const tick = window.setInterval(() => {
-      setCubeText(String(Math.floor(Math.random() * 18) + 1));
+      setAccCubeText(String(Math.floor(Math.random() * 20) + 1));
+      setDmgCubeText(String(Math.floor(Math.random() * 12) + 1));
     }, 85);
+
+    const beforeMonHp = attackRollRequest.monTok.hp ?? null;
+    const beforeMonMaxHp = attackRollRequest.monTok.maxHp ?? null;
 
     const timer = window.setTimeout(async () => {
       try {
-        const res = await sendAction<DamageRes>(
-          'inflict_damage',
-          {
-            monsterId: attackRollRequest.monTok.id,
-            attackerId: attackRollRequest.me.id,
-            beatId: attackRollRequest.beatId,
-            diceFormula: attackRollRequest.diceFormulaOverride || attackRollRequest.wep?.damageDice || '1d6',
-            damageType: attackRollRequest.damageTypeOverride || attackRollRequest.wep?.damageType || 'Physical',
-            includeStatMod: true,
-            attackRoll: true,
-            ...(attackRollRequest.attackArea ? { attackArea: attackRollRequest.attackArea } : {}),
-            ...(attackRollRequest.attackAreaModifier !== undefined
-              ? { attackAreaModifier: attackRollRequest.attackAreaModifier }
-              : {}),
-            ...(attackRollRequest.isSkill ? { isSkill: true } : {}),
-            ...(attackRollRequest.healFormula ? { healFormula: attackRollRequest.healFormula } : {}),
-            ...(attackRollRequest.effectSpec ? { effectSpec: attackRollRequest.effectSpec } : {}),
-          },
-          { throwOnError: true },
-        );
+        const sp = attackRollRequest.spell;
+        const res = sp
+          ? await sendActionRef.current<DamageRes>(
+              'spell_action',
+              {
+                characterId: attackRollRequest.me.id,
+                subAction: 'cast',
+                spellId: sp.id,
+                beatId: attackRollRequest.beatId,
+                attackArea: attackRollRequest.attackArea ?? sp.attackArea ?? 'single',
+                attackAreaModifier: attackRollRequest.attackAreaModifier ?? sp.attackAreaModifier ?? 0,
+                ...(attackRollRequest.isSelfSpell ? {} : { targetMonsterId: attackRollRequest.monTok.id }),
+                ...(sp.healFormula ? { healFormula: sp.healFormula } : {}),
+                ...(sp.effectSpec ? { effectSpec: sp.effectSpec } : {}),
+              },
+              { throwOnError: true },
+            )
+          : await sendActionRef.current<DamageRes>(
+              'inflict_damage',
+              {
+                monsterId: attackRollRequest.monTok.id,
+                attackerId: attackRollRequest.me.id,
+                beatId: attackRollRequest.beatId,
+                diceFormula: attackRollRequest.diceFormulaOverride || attackRollRequest.wep?.damageDice || '1d6',
+                damageType: attackRollRequest.damageTypeOverride || attackRollRequest.wep?.damageType || 'Physical',
+                includeStatMod: true,
+                attackRoll: true,
+                ...(attackRollRequest.attackArea ? { attackArea: attackRollRequest.attackArea } : {}),
+                ...(attackRollRequest.attackAreaModifier !== undefined
+                  ? { attackAreaModifier: attackRollRequest.attackAreaModifier }
+                  : {}),
+                ...(attackRollRequest.isSkill ? { isSkill: true } : {}),
+                ...(attackRollRequest.healFormula ? { healFormula: attackRollRequest.healFormula } : {}),
+                ...(attackRollRequest.effectSpec ? { effectSpec: attackRollRequest.effectSpec } : {}),
+              },
+              { throwOnError: true },
+            );
         if (cancelled) return;
         window.clearInterval(tick);
         setRolling(false);
 
+        if (sp && attackRollRequest.isSelfSpell) {
+          setLanded(true);
+          setAccCubeText('✓');
+          const pills: ResultPill[] = [{ label: `${sp.mpCost} MP`, tone: 'cyan' }];
+          if (sp.healFormula) pills.push({ label: `Heal ${sp.healFormula}`, tone: 'green' });
+          if (sp.effectSpec) pills.push({ label: sp.effectSpec.kind.replace(/_/g, ' '), tone: 'purple' });
+          setResultInfo({
+            tierClass: 'tier-rare',
+            title: `${sp.name} Cast!`,
+            pills,
+            note: res?.summary || res?.logEntry?.summary || 'Spell effect applied.',
+          });
+          return;
+        }
+
+        const atk = res?.attackRoll;
+        const accMod = atk ? atk.total - atk.natural : 0;
+        const accBonusLabel = accMod >= 0 ? `+ ${accMod}` : `- ${Math.abs(accMod)}`;
+        const accSubText = atk
+          ? `Total ${atk.total} (${atk.natural} ${accBonusLabel})${atk.crit ? ' • CRIT!' : ''}`
+          : 'Auto-hit';
+
         if (res?.miss) {
           setLanded(false);
-          setCubeText(String(res.attackRoll?.natural ?? 'MISS'));
+          setMissed(true);
+          setAccCubeText(String(atk?.natural ?? 'MISS'));
+          setDmgCubeText('—');
+          setFinalCubeText('0');
+          setTrioSub({
+            accSub: atk ? `Total ${atk.total} (${atk.natural} ${accBonusLabel}) • MISS` : 'Missed',
+            dmgSub: 'No damage',
+            finalSub: atk?.fumble ? 'Natural 1!' : 'Strike missed',
+          });
+          const pills: ResultPill[] = [];
+          if (atk) {
+            pills.push({ label: `Roll ${atk.total} (d20: ${atk.natural})`, tone: 'cyan' });
+          }
           setResultInfo({
             tierClass: 'tier-normal',
-            title: res.attackRoll?.fumble ? 'FAILED — Critical Miss (Natural 1)!' : 'FAILED — Attack Missed!',
-            detail: res.attackRoll?.breakdown || 'Your attack failed to beat monster AC.',
+            title: atk?.fumble ? 'CRITICAL MISS!' : 'MISSED!',
+            pills,
+            note: 'Your strike failed to connect.',
           });
           return;
         }
 
         setLanded(true);
-        setCubeText(String(res?.finalDamage ?? 0));
+        setMissed(false);
+        setIsCritHit(Boolean(atk?.crit));
+        setAccCubeText(String(atk?.natural ?? '✓'));
+        setDmgCubeText(String(res?.damageRoll?.rawTotal ?? res?.finalDamage ?? 0));
+        setFinalCubeText(String(res?.finalDamage ?? 0));
+        setTrioSub({
+          accSub: accSubText,
+          dmgSub: buildDamageSubText(res?.damageRoll),
+          finalSub: buildFinalSubText(res?.damageRoll),
+        });
 
         if (res?.friendlyFire && res.ally) {
           setResultInfo({
             tierClass: 'tier-rare',
-            title: 'FAILED — FRIENDLY FIRE!',
-            detail: `Your shot struck ally ${res.ally.name} for ${res.finalDamage} damage! (HP: ${res.ally.hp}/${res.ally.maxHp})`,
+            title: 'FRIENDLY FIRE!',
+            pills: [{ label: `${res.finalDamage ?? 0} Damage`, tone: 'crimson' }],
+            note: `Struck ally ${res.ally.name} (HP: ${res.ally.hp}/${res.ally.maxHp}).`,
           });
         } else {
-          const monHpText = res?.monster
-            ? res.monster.hp !== null
-              ? ` • ${attackRollRequest.monTok.name}: ${res.monster.hp}/${res.monster.maxHp} HP`
-              : res.monster.healthTier
-                ? ` • ${attackRollRequest.monTok.name}: ${res.monster.healthTier}`
-                : ''
-            : '';
-          const formula = attackRollRequest.diceFormulaOverride || attackRollRequest.wep?.damageDice || '1d6';
-          const atkPrefix = res?.attackRoll?.breakdown ? `${res.attackRoll.breakdown} • ` : '';
-          const aoeText = res?.targetsHit && res.targetsHit.length > 1
-            ? ` • AoE hit ${res.targetsHit.length} monsters!`
-            : '';
+          const dmgType = attackRollRequest.damageTypeOverride || attackRollRequest.wep?.damageType || 'Physical';
+          const showExact = session?.role === 'dm' || Boolean(res?.monster?.observedByViewer);
+          const pills: ResultPill[] = [];
+          if (atk) {
+            pills.push({ label: `Roll ${atk.total} (d20: ${atk.natural})`, tone: 'cyan' });
+          }
+          pills.push({ label: `${res?.finalDamage ?? 0} ${dmgType}`, tone: 'crimson' });
+          if (res?.targetsHit && res.targetsHit.length > 1) {
+            pills.push({ label: `AoE: ${res.targetsHit.length} Targets`, tone: 'purple' });
+          }
+          let monsterBar: {
+            name: string;
+            beforeHp: number | null;
+            afterHp: number | null;
+            maxHp: number | null;
+            label: string;
+          } | undefined;
+          if (res?.monster) {
+            const m = res.monster;
+            const maxHp = m.maxHp ?? beforeMonMaxHp;
+            const statusText =
+              showExact && m.hp !== null
+                ? `${m.hp}/${maxHp} HP`
+                : m.healthTier && m.healthTier !== 'Unknown'
+                  ? m.healthTier
+                  : 'Hit';
+            const barLabel =
+              showExact && m.hp !== null && maxHp
+                ? beforeMonHp !== null && beforeMonHp !== m.hp
+                  ? `${beforeMonHp} → ${m.hp}/${maxHp} HP`
+                  : `${m.hp}/${maxHp} HP`
+                : statusText;
+            monsterBar = {
+              name: attackRollRequest.monTok.name,
+              beforeHp: beforeMonHp,
+              afterHp: m.hp,
+              maxHp,
+              label: barLabel,
+            };
+          }
+          if (res?.defeatSummary) {
+            attackRollRequest.onComplete(null);
+            setDefeatedMonster(res.defeatSummary);
+            return;
+          }
           setResultInfo({
-            tierClass: res?.attackRoll?.crit ? 'tier-legendary' : undefined,
-            title: `${res?.attackRoll?.crit ? 'CRITICAL SUCCESS! ' : 'SUCCESS — '}Dealt ${res?.finalDamage ?? 0} Damage!`,
-            detail: `${atkPrefix}${res?.logEntry?.rollDetails?.breakdown || formula}${monHpText}${aoeText}`,
+            tierClass: atk?.crit ? 'tier-legendary' : undefined,
+            title: `${atk?.crit ? 'CRITICAL HIT! ' : 'HIT! '}Dealt ${res?.finalDamage ?? 0} Damage`,
+            pills,
+            monsterBar,
           });
         }
       } catch (err) {
@@ -117,39 +297,58 @@ export function AttackRollModal() {
         window.clearInterval(tick);
         setRolling(false);
         setLanded(false);
-        setCubeText('!');
+        setAccCubeText('!');
+        setDmgCubeText('!');
+        setFinalCubeText('!');
         setResultInfo({
           title: 'Attack Failed',
-          detail: err instanceof Error ? err.message : 'Out of range or unable to attack.',
+          pills: [],
+          note: err instanceof Error ? err.message : 'Out of range or unable to attack.',
         });
       }
-    }, 1100);
+    }, 950);
 
     return () => {
       cancelled = true;
       window.clearInterval(tick);
       window.clearTimeout(timer);
     };
-  }, [attackRollRequest, sendAction]);
+  }, [attackRollRequest]);
 
   if (!attackRollRequest) return null;
 
-  const { monTok, me, wep, onComplete } = attackRollRequest;
-  const formula = wep?.damageDice || '1d6';
-  const wepName = wep?.name || 'Unarmed Strike';
-  const hasWeakSpot = Boolean(me?.observedWeakSpots?.[monTok.id]);
+  const { monTok, me, wep, skillName, spell, isSelfSpell, onComplete } = attackRollRequest;
+  const formula = spell ? (spell.damageDice || 'Support') : (attackRollRequest.diceFormulaOverride || wep?.damageDice || '1d6');
+  const dmgType = attackRollRequest.damageTypeOverride || wep?.damageType || 'Physical';
+  const wepName = spell
+    ? `${spell.element || spell.damageType || 'Arcane'} • ${spell.mpCost} MP`
+    : skillName
+      ? `${skillName} (${wep?.name || 'Strike'})`
+      : (wep?.name || 'Unarmed Strike');
+  const hasWeakSpot = Boolean(!isSelfSpell && me?.observedWeakSpots?.[monTok.id]);
+
+  const handleClose = () => {
+    const defeat = pendingDefeat;
+    setPendingDefeat(null);
+    onComplete(null);
+    if (defeat) {
+      setDefeatedMonster(defeat);
+    }
+  };
 
   return (
     <div id="p-attack-roll-modal" className="modal-backdrop">
-      <div className="modal-card card-glow-crimson">
+      <div className="modal-card card-glow-crimson" style={{ maxWidth: '540px', width: 'calc(100% - 24px)' }}>
         <div className="panel-header">
-          <h3 id="p-attack-modal-title">Attacking {monTok.name}</h3>
+          <h3 id="p-attack-modal-title">
+            {spell ? (isSelfSpell ? `Casting ${spell.name}` : `Casting ${spell.name} → ${monTok.name}`) : `Attacking ${monTok.name}`}
+          </h3>
           <button
             type="button"
             id="btn-close-attack-modal"
             className="btn btn-xs btn-outline"
             disabled={rolling}
-            onClick={() => onComplete(null)}
+            onClick={handleClose}
           >
             &times;
           </button>
@@ -165,19 +364,104 @@ export function AttackRollModal() {
           )}
         </div>
 
-        <div className="attack-die-stage mt-sm">
-          <div
-            id="p-attack-die-cube"
-            className={`attack-die-cube ${rolling ? 'rolling' : ''} ${landed ? 'landed' : ''}`}
-          >
-            {cubeText}
+        {isSelfSpell ? (
+          <div className="attack-die-stage mt-sm">
+            <div
+              id="p-attack-die-cube"
+              className={`attack-die-cube ${rolling ? 'rolling' : ''} ${landed ? 'landed' : ''}`}
+            >
+              {accCubeText}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="attack-roll-trio mt-sm">
+            <div className="attack-roll-col">
+              <div className="attack-roll-col-head">
+                <span className="attack-roll-col-label">Accuracy Roll</span>
+                <span className="attack-roll-col-tag">[1d20]</span>
+              </div>
+              <div
+                id="p-attack-die-cube"
+                className={`attack-die-cube is-compact is-acc ${rolling ? 'rolling' : ''} ${landed ? 'landed' : ''} ${missed ? 'is-miss' : ''}`}
+              >
+                {accCubeText}
+              </div>
+              <div className="attack-roll-col-sub">{trioSub.accSub}</div>
+            </div>
+
+            <div className="attack-roll-col">
+              <div className="attack-roll-col-head">
+                <span className="attack-roll-col-label">Damage Roll</span>
+                <span className="attack-roll-col-tag">[{formula}]</span>
+              </div>
+              <div
+                className={`attack-die-cube is-compact is-dmg ${rolling ? 'rolling' : ''} ${landed ? 'landed' : ''} ${missed ? 'is-miss' : ''}`}
+              >
+                {dmgCubeText}
+              </div>
+              <div className="attack-roll-col-sub">{trioSub.dmgSub}</div>
+            </div>
+
+            <div className="attack-roll-col">
+              <div className="attack-roll-col-head">
+                <span className="attack-roll-col-label">Final Damage</span>
+                <span className="attack-roll-col-tag">[{dmgType}]</span>
+              </div>
+              <div
+                className={`attack-die-cube is-compact is-final ${landed ? 'landed' : ''} ${isCritHit ? 'is-crit' : ''} ${missed ? 'is-miss' : ''}`}
+              >
+                {finalCubeText}
+              </div>
+              <div className="attack-roll-col-sub">{trioSub.finalSub}</div>
+            </div>
+          </div>
+        )}
 
         {resultInfo && (
           <div id="p-attack-roll-result" className={`gacha-result-banner mt-sm ${resultInfo.tierClass || ''}`}>
-            <strong>{resultInfo.title}</strong>
-            <div className="small muted">{resultInfo.detail}</div>
+            <strong style={{ fontSize: '1.05rem' }}>{resultInfo.title}</strong>
+            {resultInfo.pills.length > 0 && (
+              <div className="btn-row mt-xs" style={{ justifyContent: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                {resultInfo.pills.map((p, idx) => (
+                  <span key={`${p.label}-${idx}`} className={`tag tag-${p.tone}`}>
+                    {p.label}
+                  </span>
+                ))}
+              </div>
+            )}
+            {resultInfo.monsterBar && (
+              <div className="mt-xs" style={{ textAlign: 'left' }}>
+                <div className="bar-row small" style={{ marginBottom: '4px' }}>
+                  <span style={{ fontWeight: 700, color: '#fca5a5' }}>{resultInfo.monsterBar.name}</span>
+                  <span style={{ fontWeight: 700, color: '#f8fafc' }}>{resultInfo.monsterBar.label}</span>
+                </div>
+                {resultInfo.monsterBar.maxHp && resultInfo.monsterBar.afterHp !== null ? (
+                  <div className="progress" style={{ position: 'relative' }}>
+                    {resultInfo.monsterBar.beforeHp !== null && resultInfo.monsterBar.beforeHp > resultInfo.monsterBar.afterHp && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          width: `${Math.max(0, Math.min(100, (resultInfo.monsterBar.beforeHp / resultInfo.monsterBar.maxHp) * 100))}%`,
+                          background: 'rgba(248, 113, 113, 0.35)',
+                          borderRadius: 'inherit',
+                        }}
+                      />
+                    )}
+                    <div
+                      className="progress-fill monster"
+                      style={{
+                        position: 'relative',
+                        width: `${Math.max(0, Math.min(100, (resultInfo.monsterBar.afterHp / resultInfo.monsterBar.maxHp) * 100))}%`,
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            )}
+            {resultInfo.note && (
+              <div className="small muted" style={{ marginTop: '4px' }}>{resultInfo.note}</div>
+            )}
           </div>
         )}
 
@@ -187,7 +471,7 @@ export function AttackRollModal() {
             id="btn-attack-roll-done"
             className="btn btn-sm btn-crimson"
             disabled={rolling}
-            onClick={() => onComplete(null)}
+            onClick={handleClose}
           >
             Done
           </button>

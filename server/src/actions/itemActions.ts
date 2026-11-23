@@ -10,6 +10,7 @@ import {
   getPartyFloor,
   isStatsAndEquipmentLocked,
   normalizeSpellElement,
+  resolveConsumableEffects,
   type AttackArea,
   type EquipmentItem,
   type EquipmentSlot,
@@ -23,6 +24,7 @@ import {
   applyUnitEffect,
   commitState,
   createInventoryItem,
+  grantXpToCharacter,
   logPlayerHistory,
   pushSystemToast,
   recalculateCharacterAcAndDr,
@@ -143,6 +145,30 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
     if (sp.actionType === 'Reaction' && !payload.reactionId && !hasPendingReaction) {
       return { status: 400, error: 'Reaction spells can only be used when a monster attacks you.' };
     }
+    const isReactionCast = sp.actionType === 'Reaction' || Boolean(payload.reactionId);
+    const castBeat = !isDm
+      ? (payload.beatId
+          ? (ctx.state.storyBeats || []).find((b) => b.id === payload.beatId)
+          : (ctx.state.storyBeats || []).find(
+              (b) =>
+                b.status !== 'resolved' &&
+                (b.arena?.tokens || []).some((t) => t.id === authChar.id) &&
+                (b.arena?.tokens || []).some((t) => t.type === 'monster'),
+            ))
+      : undefined;
+    const castBeatHasMonsters = Boolean(castBeat?.arena?.tokens?.some((t) => t.type === 'monster'));
+    const castTok = castBeatHasMonsters
+      ? castBeat?.arena?.tokens?.find((t) => t.id === authChar.id)
+      : undefined;
+    if (!isDm && !isReactionCast && castTok) {
+      if (Number(castTok.attacksUsedThisTurn || 0) > 0 || castTok.hasCastSpellThisTurn) {
+        return {
+          status: 400,
+          error: 'You have already attacked or cast a spell this turn! Wait until your next turn.',
+        };
+      }
+    }
+
     const pMods = computePassiveModifiers(authChar);
     authChar.combatPassiveFlags = authChar.combatPassiveFlags || {};
     const rawCost = Number(sp.mpCost || 0);
@@ -176,7 +202,10 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
       if (Number(targetMon.hp ?? 0) <= 0) return { status: 400, error: `${targetMon.name} is already defeated.` };
       authChar.mp = Math.max(0, authChar.mp - cost);
       applyCastSideEffects();
-      syncCharacterDerived(ctx, authChar.id);
+      if (castTok && !isReactionCast) {
+      castTok.hasCastSpellThisTurn = true;
+    }
+    syncCharacterDerived(ctx, authChar.id);
       const castHealFormula = typeof payload.healFormula === 'string' && payload.healFormula.trim()
         ? payload.healFormula.trim()
         : sp.healFormula;
@@ -189,6 +218,7 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
         damageType: sp.damageType || sp.element,
         includeStatMod: true,
         statKey: 'INT',
+        attackRoll: true,
         isSpell: true,
         rangeSpaces: sp.rangeSpaces,
         attackArea: payload.attackArea ?? sp.attackArea ?? 'single',
@@ -197,6 +227,10 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
         ...(castEffectSpec ? { effectSpec: castEffectSpec } : {}),
       });
       if (dmgRes.error) return dmgRes;
+      if (castTok && !isReactionCast) {
+        castTok.hasCastSpellThisTurn = true;
+        commitState(ctx);
+      }
       const summary =
         typeof (dmgRes.logEntry as { summary?: unknown } | undefined)?.summary === 'string'
           ? String((dmgRes.logEntry as { summary: string }).summary)
@@ -234,16 +268,19 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
       if (castEffectSpec.target === 'all_allies') {
         const allies = Object.values(ctx.state.characters).filter((c) => Number(c.hp || 0) > 0);
         for (const ally of allies) {
-          applyUnitEffect(ally, castEffectSpec, sp.name);
+          applyUnitEffect(ally, castEffectSpec, sp.name, authChar.id);
           syncCharacterDerived(ctx, ally.id);
         }
         effectNotes.push(`Party ${meta.label} (${castEffectSpec.duration}t)`);
       } else {
-        applyUnitEffect(authChar, castEffectSpec, sp.name);
+        applyUnitEffect(authChar, castEffectSpec, sp.name, authChar.id);
         effectNotes.push(`${meta.label} (${castEffectSpec.duration}t)`);
       }
     }
 
+    if (castTok && !isReactionCast) {
+      castTok.hasCastSpellThisTurn = true;
+    }
     syncCharacterDerived(ctx, authChar.id);
     const castSummary = `${authChar.name} cast ${sp.name} (${sp.areaText}, Cost ${cost} MP)${effectNotes.length ? ` • ${effectNotes.join(', ')}` : ''}.`;
     ctx.state.combatLog.unshift({
@@ -522,6 +559,7 @@ export function inventoryAction(ctx: ActionRequestContext, payload: Record<strin
         qty: Math.max(1, Number(item.qty || 1)),
         healHp: Number(item.healHp || 0),
         healMp: Number(item.healMp || 0),
+        ...(Number(item.grantXp || 0) > 0 ? { grantXp: Math.max(0, Number(item.grantXp)) } : {}),
         slot: (item.slot ? String(item.slot) : undefined) as EquipmentSlot | '' | undefined,
         attackBonus: Number(item.attackBonus || 0),
         damageDice: String(item.damageDice || ''),
@@ -541,15 +579,53 @@ export function inventoryAction(ctx: ActionRequestContext, payload: Record<strin
   } else if (subAction === 'use_consumable' && itemId) {
     const found = ch.inventory.find((i) => i.id === itemId);
     if (!found) return { status: 404, error: 'Item not found.' };
+    const isDm = ctx.role === 'dm';
+    const activeCombatBeat = (ctx.state.storyBeats || []).find(
+      (b) =>
+        b.beatType !== 'narration' &&
+        b.status !== 'resolved' &&
+        b.status !== 'failed' &&
+        (b.arena?.tokens || []).some((t) => t.id === ch.id) &&
+        (b.arena?.tokens || []).some(
+          (t) => t.type === 'monster' && Number(ctx.state.monsters.find((m) => m.id === t.id)?.hp ?? 0) > 0,
+        ),
+    );
+    const playerBeatTok = activeCombatBeat?.arena?.tokens?.find((t) => t.id === ch.id);
+    if (!isDm && activeCombatBeat && playerBeatTok) {
+      const combatants = ctx.state.combat?.combatants || [];
+      const activeComb = combatants[ctx.state.combat?.turnIndex ?? 0];
+      const hasBeatCombatants = combatants.some((c) => (activeCombatBeat.arena?.tokens || []).some((t) => t.id === c.id));
+      if (hasBeatCombatants && activeComb && activeComb.id !== ch.id) {
+        return {
+          status: 400,
+          error: `It is currently ${activeComb.name}'s turn! Wait for your turn to use a consumable.`,
+        };
+      }
+      if (playerBeatTok.hasUsedConsumableThisTurn) {
+        return {
+          status: 400,
+          error: 'You have already used a consumable this turn! Wait until your next turn.',
+        };
+      }
+    }
     const pMods = computePassiveModifiers(ch);
-    const baseHp = Number(found.healHp || 0);
-    const baseMp = Number(found.healMp || 0);
+    const resolved = resolveConsumableEffects(found);
+    const baseHp = resolved.healHp;
+    const baseMp = resolved.healMp;
+    const xpGain = resolved.grantXp;
     const hpGain = baseHp > 0 ? baseHp + pMods.consumableBonusHp + pMods.healingReceivedBonus : 0;
     const mpGain = baseMp > 0 ? baseMp + pMods.consumableBonusMp : 0;
     ch.hp = Math.min(ch.maxHp, ch.hp + hpGain);
     ch.mp = Math.min(ch.maxMp, ch.mp + mpGain);
+    if (xpGain > 0) {
+      grantXpToCharacter(ctx.state, ch, xpGain);
+    }
+    if (found.effectSpec) {
+      applyUnitEffect(ch, found.effectSpec, found.name);
+    }
     found.qty -= 1;
     if (found.qty <= 0) ch.inventory = ch.inventory.filter((i) => i.id !== itemId);
+    if (playerBeatTok) playerBeatTok.hasUsedConsumableThisTurn = true;
     syncCharacterDerived(ctx, ch.id);
     ctx.state.combatLog.unshift({
       id: `cblog-${Date.now()}`,
@@ -560,7 +636,7 @@ export function inventoryAction(ctx: ActionRequestContext, payload: Record<strin
       finalDamage: 0,
       damageType: 'Item',
       remainingHp: ch.hp,
-      summary: `${ch.name} used ${found.name}${hpGain ? ` (+${hpGain} HP)` : ''}${mpGain ? ` (+${mpGain} MP)` : ''}.`,
+      summary: `${ch.name} used ${found.name}${hpGain ? ` (+${hpGain} HP)` : ''}${mpGain ? ` (+${mpGain} MP)` : ''}${xpGain ? ` (+${xpGain} XP)` : ''}.`,
     });
   } else if (subAction === 'trade' && itemId) {
     const found = ch.inventory.find((i) => i.id === itemId);

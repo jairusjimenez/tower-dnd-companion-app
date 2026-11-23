@@ -1,10 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  computePassiveModifiers,
   computeStatModifier,
   getArenaCellPx,
+  getWeaponAttackInfo,
+  hasObserveLineOfSight,
   spaceDistanceBetweenPoints,
   type ArenaCanvasVariant,
   type AttackArea,
+  type Monster,
+  type Spell,
   type StoryBeat,
 } from '@shared/index';
 import { findBeatTokenAt, getScaledCanvasCell } from '../../canvas/coordinates';
@@ -12,7 +17,7 @@ import { drawBeatArenaCanvas, type BeatActionMode } from '../../canvas/drawBeatA
 import { useVtt } from '../../context/VttContext';
 
 export function useBeatPlayerCellAction() {
-  const { session, state, sendAction, pushLocalToast, requestAttackRoll } = useVtt();
+  const { session, state, sendAction, pushLocalToast, requestAttackRoll, setActiveObserveResult } = useVtt();
 
   return useCallback(
     async ({
@@ -49,11 +54,42 @@ export function useBeatPlayerCellAction() {
           return true;
         }
         if (myTok) {
+          const meObs = state.characters?.[session.characterId];
+          const maxObsRange = 3 + (meObs ? computePassiveModifiers(meObs).bonusObserveRangeSpaces || 0 : 0);
           const dist = spaceDistanceBetweenPoints(x, y, myTok.x, myTok.y);
-          if (dist > 3) {
+          if (dist > maxObsRange) {
             pushLocalToast({
               title: 'OUT OF OBSERVE RANGE',
-              message: `Observe reaches 3 Spaces around you (selected ${dist} Spaces away).`,
+              message: `Observe reaches ${maxObsRange} Spaces around you (selected ${dist} Spaces away).`,
+              category: 'warning',
+            });
+            return true;
+          }
+          const terrainSet = new Set((arena.terrain || []).map((t) => `${t.x},${t.y}`));
+          if (terrainSet.has(`${x},${y}`)) {
+            pushLocalToast({
+              title: 'OBSTRUCTED',
+              message: 'Cannot observe impassable terrain.',
+              category: 'warning',
+            });
+            return true;
+          }
+          const obsBlockers = new Set<string>([
+            ...terrainSet,
+            ...(arena.tokens || []).filter((t) => t.type === 'monster').map((t) => `${t.x},${t.y}`),
+          ]);
+          if (
+            !hasObserveLineOfSight({
+              startX: myTok.x,
+              startY: myTok.y,
+              targetX: x,
+              targetY: y,
+              blockers: obsBlockers,
+            })
+          ) {
+            pushLocalToast({
+              title: 'LINE OF SIGHT BLOCKED',
+              message: 'Observe is obstructed by impassable terrain or a monster.',
               category: 'warning',
             });
             return true;
@@ -66,6 +102,7 @@ export function useBeatPlayerCellAction() {
           bonusDamage?: number;
           bonusCritDamage?: number;
           floor?: number;
+          monster?: Monster | null;
         }>('story_action', {
           subAction: 'observe_beat_cell',
           beatId: beat.id,
@@ -73,64 +110,84 @@ export function useBeatPlayerCellAction() {
           x,
           y,
         });
+        if (!obsRes) return true;
 
         const tok = (arena.tokens || []).find((t) => t.x === x && t.y === y);
         const chest = (arena.chests || []).find((c) => c.x === x && c.y === y);
         const terrain = (arena.terrain || []).find((t) => t.x === x && t.y === y);
 
         if (tok?.type === 'monster') {
-          const mon = (state.monsters || []).find((m) => m.id === tok.id);
-          const hpRatio = mon && mon.maxHp ? Number(mon.hp || 0) / Number(mon.maxHp) : 1;
-          const computedTier = mon?.healthTier || (hpRatio <= 0 ? 'Defeated' : hpRatio <= 0.3 ? 'Critical' : hpRatio <= 0.65 ? 'Bloodied' : 'Healthy');
-          if (obsRes?.weakSpotFound) {
-            pushLocalToast({
-              title: `WEAK SPOT FOUND: ${tok.name}!`,
-              message: `PER (${obsRes.successChancePct}% chance, rolled ${obsRes.rollPct}) uncovered a weak point! +${obsRes.bonusDamage} Damage & +${obsRes.bonusCritDamage} Crit Damage (Floor ${obsRes.floor}F).`,
-              category: 'combat',
-            });
-          } else {
-            pushLocalToast({
-              title: `OBSERVE MONSTER: ${tok.name}`,
-              message: mon
-                ? `Condition: ${computedTier} • AC ${mon.ac} • DR ${mon.dr}${mon.damageFormula ? ` • Atk ${mon.damageFormula}` : ''} • Weak spot missed (${obsRes?.rollPct ?? '?'}/${obsRes?.successChancePct ?? '?'}% via PER)`
-                : `Hostile monster. Weak spot missed (${obsRes?.rollPct ?? '?'}/${obsRes?.successChancePct ?? '?'}% via PER).`,
-              category: 'info',
-            });
-          }
+          const mon = obsRes.monster || (state.monsters || []).find((m) => m.id === tok.id) || null;
+          setActiveObserveResult({
+            kind: 'monster',
+            title: tok.name,
+            subtitle: mon?.floor ? `${mon.floor}F Monster` : 'Monster',
+            x,
+            y,
+            iconId: mon?.iconId ?? tok.iconId,
+            monster: mon,
+            weakSpotFound: Boolean(obsRes.weakSpotFound),
+            successChancePct: obsRes.successChancePct,
+            rollPct: obsRes.rollPct,
+            bonusDamage: obsRes.bonusDamage,
+            bonusCritDamage: obsRes.bonusCritDamage,
+            floor: obsRes.floor,
+          });
           return true;
         }
         if (tok?.type === 'player') {
-          const unit = state.characters?.[tok.id];
-          pushLocalToast({
-            title: `OBSERVE UNIT: ${tok.name}`,
-            message: unit
-              ? `Lv ${unit.level} ${unit.className || 'Climber'} • HP ${unit.hp}/${unit.maxHp} • AC ${unit.ac} • DR ${unit.dr || 0}${unit.equipment?.mainHand ? ` • Weapon: ${unit.equipment.mainHand.name}` : ''}`
-              : `Allied unit at (${x + 1}, ${y + 1}).`,
-            category: 'info',
+          const unit = state.characters?.[tok.id] || null;
+          setActiveObserveResult({
+            kind: 'player',
+            title: tok.name,
+            subtitle: unit ? `Lv ${unit.level} ${unit.className || 'Climber'}` : 'Allied Unit',
+            x,
+            y,
+            iconId: tok.iconId,
+            player: unit,
+            description: `Allied unit at (${x + 1}, ${y + 1}).`,
           });
           return true;
         }
         if (tok) {
-          pushLocalToast({
-            title: `OBSERVE NPC: ${tok.name}`,
-            message: `${tok.npcRole || tok.type.toUpperCase()} at (${x + 1}, ${y + 1})${tok.dialogue ? ` — "${tok.dialogue}"` : '.'}`,
-            category: 'info',
+          setActiveObserveResult({
+            kind: 'npc',
+            title: tok.name,
+            subtitle: tok.npcRole || 'NPC',
+            x,
+            y,
+            iconId: tok.iconId,
+            npcRole: tok.npcRole || 'NPC',
+            dialogue: tok.dialogue,
+            description: `${tok.npcRole || tok.type.toUpperCase()} at (${x + 1}, ${y + 1})${tok.dialogue ? ` — "${tok.dialogue}"` : '.'}`,
           });
           return true;
         }
         if (chest) {
-          pushLocalToast({
-            title: `OBSERVE CHEST: ${chest.name}`,
-            message: chest.opened ? 'Already opened.' : 'Unopened chest — tap in Move mode to open.',
-            category: 'info',
+          setActiveObserveResult({
+            kind: 'chest',
+            title: chest.name,
+            subtitle: `${chest.tier || 'Common'} Chest`,
+            x,
+            y,
+            chestName: chest.name,
+            chestTier: chest.tier || 'Common',
+            chestOpened: Boolean(chest.opened),
+            description: chest.opened
+              ? 'Already opened.'
+              : 'Unopened chest — tap in Move mode to open.',
           });
           return true;
         }
         if (terrain) {
-          pushLocalToast({
-            title: `OBSERVE TERRAIN: ${String(terrain.type || 'Obstacle').toUpperCase()}`,
-            message: `Impassable ${terrain.type || 'obstacle'} at (${x + 1}, ${y + 1}). Blocks movement.`,
-            category: 'info',
+          setActiveObserveResult({
+            kind: 'terrain',
+            title: String(terrain.type || 'Obstacle').toUpperCase(),
+            subtitle: 'Impassable Terrain',
+            x,
+            y,
+            terrainType: String(terrain.type || 'obstacle'),
+            description: `Impassable ${terrain.type || 'obstacle'} at (${x + 1}, ${y + 1}). Blocks movement.`,
           });
           return true;
         }
@@ -143,10 +200,15 @@ export function useBeatPlayerCellAction() {
           modifier: perMod,
           label: 'Observe (PER)',
         });
-        pushLocalToast({
-          title: 'OBSERVE TERRAIN',
-          message: `Open ${arena.biome || 'obsidian'} floor at (${x + 1}, ${y + 1}). PER Check: ${rollRes?.roll?.total ?? '?'} (${rollRes?.roll?.formula || '1d20'}).`,
-          category: 'info',
+        setActiveObserveResult({
+          kind: 'terrain',
+          title: 'Open Floor',
+          subtitle: `${String(arena.biome || 'obsidian').toUpperCase()} Arena`,
+          x,
+          y,
+          description: `Open ${arena.biome || 'obsidian'} floor at (${x + 1}, ${y + 1}).`,
+          rollTotal: rollRes?.roll?.total,
+          rollFormula: rollRes?.roll?.formula || '1d20',
         });
         return true;
       }
@@ -158,7 +220,22 @@ export function useBeatPlayerCellAction() {
         }
         const me = state.characters?.[session.characterId];
         if (!me) return true;
+        const myTok = (arena.tokens || []).find((t) => t.id === session.characterId);
+        if (myTok) {
+          const { isRanged, maxRange } = getWeaponAttackInfo(me);
+          const dist = spaceDistanceBetweenPoints(myTok.x, myTok.y, monTok.x, monTok.y);
+          if (dist > maxRange) {
+            pushLocalToast({
+              title: 'OUT OF ATTACK RANGE',
+              message: `You cannot attack ${monTok.name} — it is ${dist} Spaces away (${isRanged ? 'Ranged' : 'Melee'} max ${maxRange} Space${maxRange > 1 ? 's' : ''}).`,
+              category: 'warning',
+            });
+            return true;
+          }
+        }
         const wep = me.equipment?.mainHand || null;
+        const atkHeal = healFormula ?? wep?.healFormula;
+        const atkEff = effectSpec ?? wep?.effectSpec;
         await requestAttackRoll({
           monTok,
           me,
@@ -166,15 +243,15 @@ export function useBeatPlayerCellAction() {
           beatId: beat.id,
           attackArea: attackArea ?? wep?.attackArea ?? 'single',
           attackAreaModifier: attackAreaModifier ?? wep?.attackAreaModifier ?? 0,
-          ...(healFormula ?? wep?.healFormula ? { healFormula: healFormula ?? wep?.healFormula } : {}),
-          ...(effectSpec ?? wep?.effectSpec ? { effectSpec: effectSpec ?? wep?.effectSpec } : {}),
+          ...(atkHeal ? { healFormula: atkHeal } : {}),
+          ...(atkEff ? { effectSpec: atkEff } : {}),
         });
         return true;
       }
 
       return false;
     },
-    [pushLocalToast, requestAttackRoll, sendAction, session, state],
+    [pushLocalToast, requestAttackRoll, sendAction, session, setActiveObserveResult, state],
   );
 }
 
@@ -188,9 +265,12 @@ export function BeatArenaCanvas({
   previewAttackArea = null,
   previewAttackAreaModifier = undefined,
   previewAimCell = null,
+  previewSpell = null,
   measureStart = null,
   measureEnd = null,
   centerOnCharacterId = null,
+  centerTriggerKey = null,
+  hideAxisLabels = false,
   onCellClick,
   onMeasuredLabel,
 }: {
@@ -203,9 +283,12 @@ export function BeatArenaCanvas({
   previewAttackArea?: AttackArea | null;
   previewAttackAreaModifier?: number;
   previewAimCell?: { x: number; y: number } | null;
+  previewSpell?: Spell | null;
   measureStart?: { x: number; y: number } | null;
   measureEnd?: { x: number; y: number } | null;
   centerOnCharacterId?: string | null;
+  centerTriggerKey?: string | number | null;
+  hideAxisLabels?: boolean;
   onCellClick?: (x: number, y: number) => void;
   onMeasuredLabel?: (dist: number) => void;
 }) {
@@ -217,7 +300,11 @@ export function BeatArenaCanvas({
   const cols = beat.arena?.cols || 20;
   const rows = beat.arena?.rows || 20;
   const cellPx = cellPxOverride ?? getArenaCellPx(cols, variant);
-  const axisPad = 24;
+  const axisPad = hideAxisLabels ? 0 : 24;
+  const cellPxRef = useRef(cellPx);
+  cellPxRef.current = cellPx;
+  const axisPadRef = useRef(axisPad);
+  axisPadRef.current = axisPad;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -231,8 +318,10 @@ export function BeatArenaCanvas({
       previewAttackArea,
       previewAttackAreaModifier,
       previewAimCell,
+      previewSpell,
       session,
       state,
+      hideAxisLabels,
       onPortraitLoaded: () => setPortraitRev((r) => r + 1),
     });
 
@@ -256,23 +345,34 @@ export function BeatArenaCanvas({
         onMeasuredLabel?.(dist);
       }
     }
-  }, [beat, cellPx, selectedTokenId, beatActionMode, previewAttackArea, previewAttackAreaModifier, previewAimCell, session, state, measureStart, measureEnd, portraitRev, onMeasuredLabel]);
+  }, [beat, cellPx, selectedTokenId, beatActionMode, previewAttackArea, previewAttackAreaModifier, previewAimCell, previewSpell, session, state, hideAxisLabels, measureStart, measureEnd, portraitRev, onMeasuredLabel]);
 
-  // Center scroll viewport on player's token when opening Beat Detail
+  // Center scroll viewport on the active/target unit token
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !centerOnCharacterId) return;
     const tok = (beat.arena?.tokens || []).find((t) => t.id === centerOnCharacterId);
-    const wrap = canvas.parentElement;
+    const wrap = (canvas.closest('.pcombat-map-scroll, .arena-scroll-wrap') as HTMLElement | null) || canvas.parentElement;
     if (!tok || !wrap) return;
     const raf = window.requestAnimationFrame(() => {
-      const cx = (Number(tok.x || 0) + 0.5) * cellPx;
-      const cy = (Number(tok.y || 0) + 0.5) * cellPx;
-      wrap.scrollLeft = Math.max(0, cx - wrap.clientWidth / 2);
-      wrap.scrollTop = Math.max(0, cy - wrap.clientHeight / 2);
+      const cPx = cellPxRef.current;
+      const aPad = axisPadRef.current;
+      const wrapRect = wrap.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const scaleX = canvasRect.width / (canvas.width || 1);
+      const scaleY = canvasRect.height / (canvas.height || 1);
+      const tokCanvasX = aPad + (Number(tok.x || 0) + 0.5) * cPx;
+      const tokCanvasY = aPad + (Number(tok.y || 0) + 0.5) * cPx;
+      const cx = wrap.scrollLeft + (canvasRect.left - wrapRect.left) + tokCanvasX * scaleX;
+      const cy = wrap.scrollTop + (canvasRect.top - wrapRect.top) + tokCanvasY * scaleY;
+      wrap.scrollTo({
+        left: Math.max(0, cx - wrap.clientWidth / 2),
+        top: Math.max(0, cy - wrap.clientHeight / 2),
+        behavior: 'smooth',
+      });
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [beat.id, centerOnCharacterId]);
+  }, [beat.id, centerOnCharacterId, centerTriggerKey]);
 
   const handleClick = (ev: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -285,7 +385,7 @@ export function BeatArenaCanvas({
   const handleMouseMove = (ev: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const tok = findBeatTokenAt(canvas, ev.clientX, ev.clientY, beat, cellPx, session?.role);
+    const tok = findBeatTokenAt(canvas, ev.clientX, ev.clientY, beat, cellPx, session?.role, axisPad);
     if (tok) showTooltip(tok, ev.clientX, ev.clientY);
     else hideTooltip();
   };
@@ -295,7 +395,7 @@ export function BeatArenaCanvas({
     const touch = ev.touches[0];
     if (!canvas || !touch) return;
     if (holdTimerRef.current) window.clearTimeout(holdTimerRef.current);
-    const tok = findBeatTokenAt(canvas, touch.clientX, touch.clientY, beat, cellPx, session?.role);
+    const tok = findBeatTokenAt(canvas, touch.clientX, touch.clientY, beat, cellPx, session?.role, axisPad);
     if (tok) {
       holdTimerRef.current = window.setTimeout(() => showTooltip(tok, touch.clientX, touch.clientY), 260);
     }

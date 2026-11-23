@@ -54,9 +54,10 @@ export function findBeatTokenAt(
   beat: StoryBeat | null | undefined,
   cellPx: number,
   role?: UserRole,
+  axisPad = 24,
 ): Partial<MapToken> | null {
   if (!beat?.arena) return null;
-  const { x, y } = getScaledCanvasCell(canvas, clientX, clientY, 24, cellPx);
+  const { x, y } = getScaledCanvasCell(canvas, clientX, clientY, axisPad, cellPx);
   const tok = (beat.arena.tokens || []).find((t) => t.x === x && t.y === y);
   if (tok) return tok;
   const chest = (beat.arena.chests || []).find((c) => c.x === x && c.y === y);

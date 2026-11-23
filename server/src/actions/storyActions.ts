@@ -8,17 +8,21 @@ import {
   VALID_TERRAIN_TYPES,
   clampCombatMaxRounds,
   computeActiveEffectModifiers,
+  computeCharacterMoveSpaces,
   computePassiveModifiers,
   computeReachableMoveCells,
   computeStatModifier,
   generateArenaTerrainFromPrompt,
   generateThemedStoryBeat,
   getChestDefaultsForFloor,
+  getPartyFloor,
+  hasObserveLineOfSight,
   isPartyInCombat,
   restSpotRestore,
   rollChestLoot,
   scaleMonsterForFloor,
   scaleTreasureForFloor,
+  spaceDistanceBetweenPoints,
   type BeatEncounterSpec,
   type BeatTreasureSpec,
   type ChestLootSummary,
@@ -952,6 +956,15 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
     const cid = isDm && payload.characterId && ctx.state.characters[String(payload.characterId)]
       ? String(payload.characterId)
       : (ctx.characterId && ctx.state.characters[ctx.characterId] ? ctx.characterId : Object.keys(ctx.state.characters)[0]);
+    if (!isDm && cid) {
+      const playerTok = (arena.tokens || []).find((t) => t.id === cid && t.type === 'player');
+      if (
+        playerTok &&
+        spaceDistanceBetweenPoints(Number(playerTok.x || 0), Number(playerTok.y || 0), Number(tok.x || 0), Number(tok.y || 0)) > 1
+      ) {
+        return { status: 400, error: `Move within 1 Space of ${tok.name} to interact.` };
+      }
+    }
     const ch = cid ? ctx.state.characters[cid] : null;
     const rewardNotes: string[] = [];
 
@@ -1012,6 +1025,21 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
     if (ch) {
       logPlayerHistory(ctx.state, ch.id, 'npc', `Spoke with ${tok.name}${rewardSummary ? ` (Received: ${rewardSummary})` : ''}`);
     }
+    commitState(ctx);
+    return {
+      ok: true,
+      beat,
+      storyBeats: ctx.state.storyBeats,
+      npcDialogue: {
+        tokenId: tok.id,
+        npcName: tok.name,
+        npcRole: tok.npcRole || 'NPC',
+        iconId: tok.iconId,
+        dialogue,
+        rewardNotes,
+        rewardClaimed: Boolean(tok.rewardClaimed),
+      },
+    };
   } else if (sub === 'remove_beat_npc') {
     arena.tokens = arena.tokens.filter((t) => !(t.type === 'npc' && t.id === payload.tokenId));
   } else if (sub === 'open_beat_chest') {
@@ -1174,6 +1202,12 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
     if (blocked) {
       return { status: 400, error: `Impassable terrain (${blocked.type}) blocks that space!` };
     }
+    const blockerAtDest = tok.type === 'player'
+      ? (arena.tokens || []).find((t) => t.id !== tok.id && (t.type === 'monster' || t.type === 'npc') && t.x === nx && t.y === ny)
+      : undefined;
+    if (blockerAtDest) {
+      return { status: 400, error: `${blockerAtDest.name} occupies that space!` };
+    }
     if (!isDm) {
       const beatHasLiveMonsters = arena.tokens.some((t) => t.type === 'monster');
       const activeComb = ctx.state.combat?.combatants?.[ctx.state.combat?.turnIndex ?? 0];
@@ -1194,17 +1228,26 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
         return { status: 400, error: `${tok.name} is Stunned and cannot move this turn!` };
       }
       const r1Bonus = ctx.state.combat.round <= 1 ? (pMods?.round1MoveBonus || 0) : 0;
-      const maxSpaces = Math.max(1, Number(ch?.speedSpaces || 6) + r1Bonus + effMods.speedDelta);
+      const maxSpaces = computeCharacterMoveSpaces({
+        agi: ch?.stats?.AGI ?? ch?.stats?.DEX ?? 10,
+        floor: beat.floor || getPartyFloor(ctx.state),
+        passiveSpeedBonus: pMods?.bonusSpeedSpaces,
+        round1Bonus: r1Bonus,
+        effectSpeedDelta: effMods.speedDelta,
+      }).total;
       if (nx === Number(tok.x || 0) && ny === Number(tok.y || 0)) {
         return { status: 400, error: 'You are already on that space.' };
       }
+      const monsterBlockers = (arena.tokens || [])
+        .filter((t) => t.id !== tok.id && (t.type === 'monster' || t.type === 'npc'))
+        .map((t) => ({ x: t.x, y: t.y }));
       const reachable = computeReachableMoveCells({
         startX: Number(tok.x || 0),
         startY: Number(tok.y || 0),
         maxSpaces,
         cols: arena.cols,
         rows: arena.rows,
-        terrain: arena.terrain,
+        terrain: [...(arena.terrain || []), ...monsterBlockers],
       });
       if (!reachable.distByKey.has(`${nx},${ny}`)) {
         return {
@@ -1345,11 +1388,38 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
     if (!isDm && dist > maxObsRange) {
       return { status: 400, error: `Out of Observe range! Max ${maxObsRange} Spaces (selected ${dist}).` };
     }
+    if (!isDm) {
+      const terrainSet = new Set((arena.terrain || []).map((t) => `${t.x},${t.y}`));
+      if (terrainSet.has(`${ox},${oy}`)) {
+        return { status: 400, error: 'Cannot observe impassable terrain.' };
+      }
+      const obsBlockers = new Set<string>([
+        ...terrainSet,
+        ...(arena.tokens || []).filter((t) => t.type === 'monster').map((t) => `${t.x},${t.y}`),
+      ]);
+      if (
+        !hasObserveLineOfSight({
+          startX: Number(tok.x || 0),
+          startY: Number(tok.y || 0),
+          targetX: ox,
+          targetY: oy,
+          blockers: obsBlockers,
+        })
+      ) {
+        return { status: 400, error: 'Line of sight is obstructed by impassable terrain or a monster.' };
+      }
+    }
     if (!isDm) tok.hasObservedThisTurn = true;
     const monTok = arena.tokens.find((t) => t.x === ox && t.y === oy && t.type === 'monster');
     if (monTok) {
       const ch = obsChar;
       const mon = ctx.state.monsters.find((m) => m.id === monTok.id);
+      if (ch) {
+        ch.observedMonsterIds = ch.observedMonsterIds || [];
+        if (!ch.observedMonsterIds.includes(monTok.id)) {
+          ch.observedMonsterIds.push(monTok.id);
+        }
+      }
       const floor = Math.max(1, Number(beat.floor || ch?.currentFloor || ctx.state.map?.currentFloor || 1));
       const perScore = Number(ch?.stats?.PER ?? 10);
       const perMod = computeStatModifier(perScore, ctx.state.mechanics, ch) + (obsMods?.perCheckBonus || 0);
@@ -1414,7 +1484,7 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
         floor,
         bonusDamage,
         bonusCritDamage,
-        monster: mon ? maskMonsterForRole(mon, ctx.state, ctx.role) : null,
+        monster: mon ? maskMonsterForRole(mon, ctx.state, ctx.role, ctx.characterId) : null,
         beat,
         roll: obsEntry,
       };
@@ -1625,6 +1695,7 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
       tok.hasMovedThisTurn = false;
       tok.attacksUsedThisTurn = 0;
       tok.hasObservedThisTurn = false;
+      tok.hasUsedConsumableThisTurn = false;
     }
 
     const nextCombatants: typeof ctx.state.combat.combatants = [];

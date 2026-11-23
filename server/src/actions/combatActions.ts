@@ -20,13 +20,20 @@ import {
   getDefaultLootTableForMonster,
   getDefaultSkillsForMonster,
   getEquippedTotals,
+  getFloorLootProfile,
   getGridLineCells,
   getMaxAttacksForFloor,
   getMonsterXpReward,
   getWeaponAttackInfo,
+  getChestDefaultsForFloor,
+  isBossToken,
+  resolvePlayerReactionStyle,
   scaleLootDropForFloor,
   scaleMonsterSkillForFloor,
+  shouldMonsterDropChest,
+  spaceDistanceBetweenPoints,
   type AttackArea,
+  type Character,
   type ChestTier,
   type CombatDefeatPenaltyEntry,
   type GameState,
@@ -61,6 +68,7 @@ import {
   triggerStartOfTurnPassives,
 } from '../services/gameHelpers';
 import { maskMonsterForRole } from '../store/filterState';
+import { runAiDmTurns } from '../services/aiDm';
 import type { ActionRequestContext, ActionResult } from './types';
 
 export function spawnMonsterAction(ctx: ActionRequestContext, payload: Record<string, unknown>): ActionResult {
@@ -101,6 +109,14 @@ export function spawnMonsterAction(ctx: ActionRequestContext, payload: Record<st
   const rawIcon = String(payload.iconId || matchedBestiary?.iconId || '').trim() as TokenIconId;
   const resolvedIconId = rawIcon && TOKEN_ICON_META[rawIcon] ? rawIcon : undefined;
 
+  const rawChestTier = String(payload.chestTier ?? matchedBestiary?.chestTier ?? '').trim() as ChestTier;
+  const resolvedChestTier = CHEST_TIERS.includes(rawChestTier) ? rawChestTier : undefined;
+  const resolvedDropsChest = typeof payload.dropsChest === 'boolean'
+    ? payload.dropsChest
+    : typeof matchedBestiary?.dropsChest === 'boolean'
+      ? matchedBestiary.dropsChest
+      : undefined;
+
   const monster: Monster = {
     id,
     name,
@@ -111,6 +127,8 @@ export function spawnMonsterAction(ctx: ActionRequestContext, payload: Record<st
     dr,
     rangeSpaces,
     ...(resolvedIconId ? { iconId: resolvedIconId } : {}),
+    ...(typeof resolvedDropsChest === 'boolean' ? { dropsChest: resolvedDropsChest } : {}),
+    ...(resolvedChestTier ? { chestTier: resolvedChestTier } : {}),
     attackArea: inferDefaultAttackAreaForMonster({
       name,
       maxHp,
@@ -510,6 +528,141 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
   };
 }
 
+function awardMonsterDefeatLoot(
+  ctx: ActionRequestContext,
+  monster: Monster,
+  killerChar: Character,
+  opts?: {
+    manaStoneDroppedOnMap?: boolean;
+    manaStonesGained?: number;
+    dropBeat?: StoryBeat | null;
+    monTokPos?: { x: number; y: number } | null;
+    defeatCause?: string;
+  },
+): MonsterDefeatSummary {
+  const monFloor = Math.max(1, Number(monster.floor || 1));
+  const baseName = monster.name.replace(/\s*#\d+$/, '').trim().toLowerCase();
+  const bestiaryMatch = (ctx.state.bestiary || []).find((b) => b.name.toLowerCase() === baseName)
+    || { name: monster.name, maxHp: Number(monster.maxHp || 30) };
+  const bestiaryCat = (bestiaryMatch as { category?: string })?.category;
+  const isBoss = isBossToken(monster.name, monster.iconId, bestiaryCat) || Number(monster.maxHp || 0) >= 90;
+  const profile = getFloorLootProfile(monFloor, isBoss);
+  const table = getDefaultLootTableForMonster(bestiaryMatch).map((d) => scaleLootDropForFloor(d, monFloor, isBoss));
+  const passedDrops = table.filter((d) => d.unlocked && crypto.randomInt(1, 101) <= d.scaledDropChancePct);
+  const rolledDrops = [
+    ...passedDrops.filter((d) => d.category !== 'material'),
+    ...passedDrops.filter((d) => d.category === 'material'),
+  ].slice(0, profile.maxItems);
+
+  const xpGained = Math.max(0, Number(monster.loot?.xp || getMonsterXpReward(monFloor)));
+  const xpRes = xpGained > 0 ? grantXpToCharacter(ctx.state, killerChar, xpGained) : { levelsGained: 0, level: killerChar.level };
+
+  const explicitGold = Number(monster.loot?.gold || 0);
+  const dropGold = rolledDrops.reduce((s, d) => s + d.scaledGold, 0);
+  const baseGold = explicitGold > 0
+    ? Math.round(explicitGold * profile.goldMult) + dropGold
+    : profile.baseKillGold + dropGold;
+  const goldGained = applyGoldBonus(killerChar, baseGold, false);
+  killerChar.currency = killerChar.currency || { gold: 0, manaStones: 0 };
+  killerChar.currency.gold = Number(killerChar.currency.gold || 0) + goldGained;
+
+  let manaStonesGained = Number(opts?.manaStonesGained || 0);
+  const rawExtraStones = rolledDrops.reduce((s, d) => s + d.scaledManaStones, 0) + Number(monster.loot?.manaStones || 0);
+  const extraStones = !isBoss && monFloor <= 2 ? Math.min(1, rawExtraStones) : rawExtraStones;
+  if (extraStones > 0) {
+    killerChar.currency.manaStones = Number(killerChar.currency.manaStones || 0) + extraStones;
+    manaStonesGained += extraStones;
+  }
+
+  const items: MonsterDefeatSummary['items'] = [];
+  killerChar.inventory = killerChar.inventory || [];
+  if (monster.loot?.itemName && !monster.loot.dropped) {
+    killerChar.inventory.push(
+      createInventoryItem({
+        name: monster.loot.itemName,
+        category: monster.loot.itemCategory || 'relic',
+        notes: `Dropped by ${monster.name} (${monFloor}F)`,
+      }),
+    );
+    items.push({ name: monster.loot.itemName, category: monster.loot.itemCategory || 'relic' });
+  }
+  for (const drop of rolledDrops) {
+    killerChar.inventory.push(
+      createInventoryItem({
+        name: drop.itemName,
+        category: drop.category,
+        notes: drop.notes || `Dropped by ${monster.name} (${monFloor}F)`,
+      }),
+    );
+    items.push({ name: drop.itemName, category: drop.category, tier: drop.tier, notes: drop.notes });
+  }
+  if (monster.loot) monster.loot.dropped = true;
+  removeMonsterTokensFromMaps(ctx.state, monster.id);
+  syncCharacterDerived(ctx, killerChar.id);
+
+  let chestDropped: MonsterDefeatSummary['chestDropped'] = null;
+  const bestiaryDropsChest = (bestiaryMatch as { dropsChest?: boolean })?.dropsChest;
+  const bestiaryChestTier = (bestiaryMatch as { chestTier?: ChestTier })?.chestTier;
+  const canDropChest = shouldMonsterDropChest({
+    name: monster.name,
+    iconId: monster.iconId,
+    category: bestiaryCat,
+    dropsChest: monster.dropsChest ?? bestiaryDropsChest,
+  });
+  if (canDropChest && opts?.dropBeat?.arena && opts?.monTokPos) {
+    const tier: ChestTier = monster.chestTier && CHEST_TIERS.includes(monster.chestTier)
+      ? monster.chestTier
+      : bestiaryChestTier && CHEST_TIERS.includes(bestiaryChestTier)
+        ? bestiaryChestTier
+        : isBossToken(monster.name, monster.iconId, bestiaryCat)
+          ? 'Epic'
+          : 'Rare';
+    const defaults = getChestDefaultsForFloor(tier, monFloor);
+    const chest = {
+      ...defaults,
+      id: `chest-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
+      name: `${monster.name}'s ${tier} Chest`,
+      tier,
+      x: opts.monTokPos.x,
+      y: opts.monTokPos.y,
+      itemName: '',
+      itemCategory: 'treasure',
+      opened: false,
+    };
+    opts.dropBeat.arena.chests = opts.dropBeat.arena.chests || [];
+    opts.dropBeat.arena.chests.push(chest);
+    chestDropped = { name: chest.name, tier: chest.tier, x: chest.x, y: chest.y };
+  }
+
+  const summary: MonsterDefeatSummary = {
+    id: `defeat-${Date.now().toString(36)}-${crypto.randomInt(100, 999)}`,
+    monsterId: monster.id,
+    monsterName: monster.name,
+    floor: monFloor,
+    killerName: killerChar.name,
+    killerCharacterId: killerChar.id,
+    ...(opts?.defeatCause ? { defeatCause: opts.defeatCause } : {}),
+    xpGained,
+    goldGained,
+    manaStonesGained,
+    manaStoneDroppedOnMap: Boolean(opts?.manaStoneDroppedOnMap),
+    chestDropped,
+    items,
+    leveledUp: xpRes.levelsGained > 0,
+    newLevel: xpRes.level,
+  };
+  ctx.state.recentMonsterDefeats = [summary, ...(ctx.state.recentMonsterDefeats || [])].slice(0, 20);
+  if (opts?.defeatCause) {
+    logPlayerHistory(
+      ctx.state,
+      killerChar.id,
+      'combat',
+      `Defeated ${monster.name} via ${opts.defeatCause} (+${xpGained} XP, +${goldGained}g)`,
+    );
+  }
+  return summary;
+}
+
 export function resolveReactionAction(ctx: ActionRequestContext, payload: Record<string, unknown>): ActionResult {
   const idx = ctx.state.pendingReactions.findIndex((r) => r.id === payload.reactionId);
   if (idx === -1) return { status: 404, error: 'Reaction window expired or already resolved.' };
@@ -521,7 +674,25 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
   }
 
   const mon = ctx.state.monsters.find((m) => m.id === reaction.monsterId);
-  const choice = String(payload.choice || 'counter');
+  const prevMonHp = mon ? Number(mon.hp ?? 0) : 0;
+  let reactionDropBeat: StoryBeat | null = null;
+  let reactionMonTokPos: { x: number; y: number } | null = null;
+  if (mon) {
+    for (const b of ctx.state.storyBeats || []) {
+      const foundTok = b.arena?.tokens?.find((t) => t.id === mon.id);
+      if (foundTok) {
+        reactionDropBeat = b;
+        reactionMonTokPos = { x: foundTok.x, y: foundTok.y };
+        break;
+      }
+    }
+  }
+  const rawChoice = String(payload.choice || 'react');
+  const effectiveChoice = rawChoice === 'react' ? resolvePlayerReactionStyle(ch).style : rawChoice;
+  const reactionStyle: 'parry' | 'block' | 'counter' | undefined =
+    effectiveChoice === 'parry' || effectiveChoice === 'block' || effectiveChoice === 'counter'
+      ? effectiveChoice
+      : undefined;
   const mods = computePassiveModifiers(ch);
   let dmgTaken = 0;
   let counterDamageDealt = 0;
@@ -540,7 +711,7 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     });
     const dealt = Math.max(1, Math.round(evaluateFormula(ctx.state.mechanics.damageFormula, scope)));
     mon.hp = Math.max(0, Number(mon.hp ?? 0) - dealt);
-    syncMonsterDerived(ctx, mon.id);
+    syncMonsterDerived(ctx, mon.id, { skipAutoLoot: true });
     if (mon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, mon.id);
     return dealt;
   };
@@ -550,15 +721,29 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
   let playerRollTotal = 10;
   let playerRollFormula = '1d20';
   let playerSuccess = false;
+  let spellName: string | undefined;
+  let spellAccuracyRoll: {
+    natural: number;
+    mod: number;
+    total: number;
+    targetAc: number;
+    hit: boolean;
+    crit: boolean;
+  } | null = null;
+  let spellDamageRoll: {
+    formula: string;
+    rolls: number[];
+    total: number;
+  } | null = null;
 
-  if (choice === 'counter') {
+  if (effectiveChoice === 'counter') {
     const weapon = getEquippedTotals(ch).mainWeapon;
     const dmgFormula = String(payload.diceFormula || weapon?.damageDice || '1d8+3');
     const hitBonus = getEquippedTotals(ch).attackBonus + mods.bonusAttackHit + mods.bonusMeleeHit;
     const hitRoll = rollDiceServer({ formula: '1d20', modifier: hitBonus });
     const dmgRoll = rollDiceServer({ formula: dmgFormula });
-    const agiOrStr = ch.stats?.STR ?? ch.stats?.AGI ?? 12;
-    const statMod = computeStatModifier(agiOrStr, ctx.state.mechanics, ch);
+    const agiScore = ch.stats?.AGI ?? ch.stats?.STR ?? 12;
+    const statMod = computeStatModifier(agiScore, ctx.state.mechanics, ch);
 
     playerRollNatural = hitRoll.rolls?.[0] ?? hitRoll.diceTotal ?? 10;
     playerRollMod = hitBonus;
@@ -576,7 +761,7 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
       });
       counterDamageDealt = Math.max(1, Math.round(evaluateFormula(ctx.state.mechanics.damageFormula, scope)));
       mon.hp = Math.max(0, Number(mon.hp ?? 0) - counterDamageDealt);
-      syncMonsterDerived(ctx, mon.id);
+      syncMonsterDerived(ctx, mon.id, { skipAutoLoot: true });
       if (mon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, mon.id);
     }
     const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
@@ -586,9 +771,9 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     });
     dmgTaken = incomingRes.dmgTaken;
     summary = `${ch.name} COUNTER-ATTACKED ${reaction.monsterName} (Roll ${hitRoll.total}) for ${counterDamageDealt} damage and took ${dmgTaken} dmg!`;
-  } else if (choice === 'parry') {
-    const agiScore = ch.stats?.AGI ?? ch.stats?.STR ?? 12;
-    const parryMod = computeStatModifier(agiScore, ctx.state.mechanics, ch) + mods.bonusParryRoll;
+  } else if (effectiveChoice === 'parry') {
+    const strPerScore = Math.round((Number(ch.stats?.STR ?? 10) + Number(ch.stats?.PER ?? 10)) / 2);
+    const parryMod = computeStatModifier(strPerScore, ctx.state.mechanics, ch) + mods.bonusParryRoll;
     const parryRoll = rollDiceServer({ formula: '1d20', modifier: parryMod });
     playerRollNatural = parryRoll.rolls?.[0] ?? parryRoll.diceTotal ?? 10;
     playerRollMod = parryMod;
@@ -602,7 +787,7 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
       if (mods.parryReflectPct > 0 && mon) {
         counterDamageDealt = Math.max(1, Math.round((reaction.incomingDamage * mods.parryReflectPct) / 100));
         mon.hp = Math.max(0, Number(mon.hp ?? 0) - counterDamageDealt);
-        syncMonsterDerived(ctx, mon.id);
+        syncMonsterDerived(ctx, mon.id, { skipAutoLoot: true });
         if (mon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, mon.id);
         reflectNote = ` & reflected ${counterDamageDealt} dmg`;
       }
@@ -614,14 +799,79 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
         halveAfterDr: true,
       });
       dmgTaken = incomingRes.dmgTaken;
-      summary = `${ch.name} partially guarded ${reaction.monsterName}'s strike (${parryRoll.total}) — took halved ${dmgTaken} dmg.`;
+      summary = `${ch.name} partially parried ${reaction.monsterName}'s strike (${parryRoll.total}) — took halved ${dmgTaken} dmg.`;
     }
-  } else if (choice === 'spell') {
+  } else if (effectiveChoice === 'block') {
+    const vitScore = Number(ch.stats?.VIT ?? 10);
+    const blockMod = computeStatModifier(vitScore, ctx.state.mechanics, ch) + mods.bonusParryRoll;
+    const blockRoll = rollDiceServer({ formula: '1d20', modifier: blockMod });
+    playerRollNatural = blockRoll.rolls?.[0] ?? blockRoll.diceTotal ?? 10;
+    playerRollMod = blockMod;
+    playerRollTotal = blockRoll.total;
+    playerRollFormula = blockRoll.formula;
+    playerSuccess = blockRoll.total >= reaction.attackTotal;
+
+    if (blockRoll.total >= reaction.attackTotal) {
+      dmgTaken = 0;
+      summary = `${ch.name} BLOCKED ${reaction.monsterName}'s strike cleanly (Roll ${blockRoll.total} vs ${reaction.attackTotal}) — 0 damage taken!`;
+    } else {
+      const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
+        attackerMonster: mon,
+        damageType: 'Monster Strike',
+        halveAfterDr: true,
+      });
+      dmgTaken = incomingRes.dmgTaken;
+      summary = `${ch.name} partially blocked ${reaction.monsterName}'s strike (${blockRoll.total}) — took halved ${dmgTaken} dmg.`;
+    }
+  } else if (effectiveChoice === 'dodge') {
+    const agiScore = Number(ch.stats?.AGI ?? 10);
+    const dodgeMod = computeStatModifier(agiScore, ctx.state.mechanics, ch);
+    const dodgeRoll = rollDiceServer({ formula: '1d20', modifier: dodgeMod });
+    playerRollNatural = dodgeRoll.rolls?.[0] ?? dodgeRoll.diceTotal ?? 10;
+    playerRollMod = dodgeMod;
+    playerRollTotal = dodgeRoll.total;
+    playerRollFormula = dodgeRoll.formula;
+    const dodged = dodgeRoll.isCrit || (!dodgeRoll.isFumble && dodgeRoll.total >= reaction.attackTotal);
+    playerSuccess = dodged;
+
+    if (dodged) {
+      dmgTaken = 0;
+      summary = `${ch.name} DODGED ${reaction.monsterName}'s strike (Roll ${dodgeRoll.total} vs ${reaction.attackTotal}) — 0 damage taken!`;
+    } else {
+      const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
+        attackerMonster: mon,
+        damageType: 'Monster Strike',
+      });
+      dmgTaken = incomingRes.dmgTaken;
+      summary = `${ch.name} failed to dodge ${reaction.monsterName}'s strike (Roll ${dodgeRoll.total} vs ${reaction.attackTotal}) — took ${dmgTaken} dmg!`;
+    }
+  } else if (effectiveChoice === 'spell') {
     const spell = payload.spellId
       ? ((ch.spells || []).find((s) => s.id === payload.spellId) || ctx.state.grimoire.find((s) => s.id === payload.spellId))
-      : (ch.spells || [])[0];
+      : (ch.spells || []).find((s) => s.actionType === 'Reaction');
     if (!spell) {
-      return { status: 400, error: 'No spell selected or learned for Reaction Spell.' };
+      return { status: 400, error: 'No reaction spell selected or learned.' };
+    }
+    if (spell.actionType !== 'Reaction') {
+      return { status: 400, error: 'Only Reaction spells can be cast during an opposed clash.' };
+    }
+    const isSelfOnly = Boolean(
+      spell.effectSpec &&
+      (spell.effectSpec.target === 'self' || UNIT_EFFECT_META[spell.effectSpec.kind]?.defaultTarget === 'self') &&
+      !spell.damageDice,
+    );
+    if (!isSelfOnly && reactionDropBeat?.arena && reactionMonTokPos) {
+      const playerTok = reactionDropBeat.arena.tokens?.find((t) => t.id === ch.id);
+      if (playerTok) {
+        const dist = spaceDistanceBetweenPoints(playerTok.x, playerTok.y, reactionMonTokPos.x, reactionMonTokPos.y);
+        const spellRange = Math.max(1, Number(spell.rangeSpaces || 3));
+        if (dist > spellRange) {
+          return {
+            status: 400,
+            error: `${spell.name} is out of range (max ${spellRange} Spaces, target is ${dist} away).`,
+          };
+        }
+      }
     }
     ch.combatPassiveFlags = ch.combatPassiveFlags || {};
     const rawCost = Number(spell.mpCost || 0);
@@ -636,28 +886,73 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     }
     ch.mp = Math.max(0, ch.mp - mpCost);
     ch.combatPassiveFlags.spellsCastThisCombat = Number(ch.combatPassiveFlags.spellsCastThisCombat || 0) + 1;
-    const intMod = computeStatModifier(ch.stats?.INT ?? 12, ctx.state.mechanics, ch) + mods.bonusReactionSpellHit;
-    const spellRoll = rollDiceServer({ formula: spell.damageDice || '2d6' });
-    playerRollNatural = spellRoll.rolls?.[0] ?? spellRoll.diceTotal ?? spellRoll.total;
-    playerRollMod = intMod;
-    playerRollTotal = spellRoll.total + intMod;
-    playerRollFormula = spell.damageDice || '2d6';
-    playerSuccess = true;
+    spellName = spell.name;
 
-    if (mon) {
-      let bonusDiceTotal = 0;
-      for (const d of mods.bonusReactionSpellDice) {
-        bonusDiceTotal += rollDiceServer({ formula: d }).total;
+    const intMod = computeStatModifier(ch.stats?.INT ?? 12, ctx.state.mechanics, ch);
+    const accMod = intMod + mods.bonusAttackHit + mods.bonusSpellHit + mods.bonusReactionSpellHit;
+    const accRoll = rollDiceServer({ formula: '1d20', modifier: accMod });
+    const targetAc = Math.max(1, Number(mon?.ac || 10));
+    const spellHit = isSelfOnly || accRoll.isCrit || (!accRoll.isFumble && accRoll.total >= targetAc);
+
+    playerRollNatural = accRoll.rolls?.[0] ?? accRoll.diceTotal ?? 10;
+    playerRollMod = accMod;
+    playerRollTotal = accRoll.total;
+    playerRollFormula = accRoll.formula;
+    spellAccuracyRoll = {
+      natural: playerRollNatural,
+      mod: accMod,
+      total: accRoll.total,
+      targetAc,
+      hit: spellHit,
+      crit: accRoll.isCrit,
+    };
+
+    if (spellHit) {
+      playerSuccess = true;
+      if (!isSelfOnly) {
+        const dmgFormula = spell.damageDice || '2d6';
+        const spellRoll = rollDiceServer({ formula: dmgFormula });
+        spellDamageRoll = {
+          formula: dmgFormula,
+          rolls: spellRoll.rolls || [],
+          total: spellRoll.total,
+        };
+        if (mon) {
+          let bonusDiceTotal = 0;
+          for (const d of mods.bonusReactionSpellDice) {
+            bonusDiceTotal += rollDiceServer({ formula: d }).total;
+          }
+          counterDamageDealt = applyCounterFormula(spellRoll.total + bonusDiceTotal + mods.bonusSpellPower, intMod);
+        }
       }
-      counterDamageDealt = applyCounterFormula(spellRoll.total + bonusDiceTotal + mods.bonusSpellPower, intMod);
+      if (spell.effectSpec && UNIT_EFFECT_META[spell.effectSpec.kind]) {
+        const isSelfBuff =
+          spell.effectSpec.target === 'self' ||
+          UNIT_EFFECT_META[spell.effectSpec.kind].defaultTarget === 'self';
+        if (isSelfBuff) {
+          applyUnitEffect(ch, spell.effectSpec, spell.name, ch.id);
+          syncCharacterDerived(ctx, ch.id);
+        } else if (mon && Number(mon.hp ?? 0) > 0) {
+          applyUnitEffect(mon, spell.effectSpec, spell.name, ch.id);
+          syncMonsterDerived(ctx, mon.id);
+        }
+      }
+      const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
+        attackerMonster: mon,
+        damageType: 'Monster Strike',
+        halveAfterDr: true,
+      });
+      dmgTaken = incomingRes.dmgTaken;
+      summary = `${ch.name}'s ${spell.name} HIT (Roll ${accRoll.total}), dealing ${counterDamageDealt} damage to ${reaction.monsterName} (took ${dmgTaken} dmg)!`;
+    } else {
+      playerSuccess = false;
+      const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
+        attackerMonster: mon,
+        damageType: 'Monster Strike',
+      });
+      dmgTaken = incomingRes.dmgTaken;
+      summary = `${ch.name}'s ${spell.name} MISSED (Roll ${accRoll.total}) — took ${dmgTaken} dmg!`;
     }
-    const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
-      attackerMonster: mon,
-      damageType: 'Monster Strike',
-      halveAfterDr: true,
-    });
-    dmgTaken = incomingRes.dmgTaken;
-    summary = `${ch.name} reacted with ${spell.name}, dealing ${counterDamageDealt} damage to ${reaction.monsterName} (took ${dmgTaken} dmg)!`;
   } else {
     playerRollNatural = 1;
     playerRollMod = 0;
@@ -676,7 +971,11 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     ...reaction,
     resolved: true,
     resolvedAt: new Date().toISOString(),
-    playerChoice: choice,
+    playerChoice: effectiveChoice,
+    ...(reactionStyle ? { reactionStyle } : {}),
+    ...(spellName ? { spellName } : {}),
+    ...(spellAccuracyRoll ? { spellAccuracyRoll } : {}),
+    ...(spellDamageRoll ? { spellDamageRoll } : {}),
     playerRollNatural,
     playerRollMod,
     playerRollTotal,
@@ -695,21 +994,44 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     target: reaction.monsterName,
     rawDamage: counterDamageDealt,
     finalDamage: counterDamageDealt,
-    damageType: `Reaction (${choice})`,
+    damageType: `Reaction (${effectiveChoice})`,
     remainingHp: mon ? mon.hp : null,
     summary,
   });
   ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
 
+  let defeatSummary: MonsterDefeatSummary | null = null;
+  if (mon && prevMonHp > 0 && Number(mon.hp ?? 0) <= 0) {
+    defeatSummary = awardMonsterDefeatLoot(ctx, mon, ch, {
+      dropBeat: reactionDropBeat,
+      monTokPos: reactionMonTokPos,
+    });
+  }
+
+  const prevDefeatIds = new Set((ctx.state.recentMonsterDefeats || []).map((d) => d.id).filter(Boolean));
   commitState(ctx);
+  runAiDmTurns(
+    ctx,
+    { initiativeAction, monsterAttackAction },
+    { advanceCurrentMonsterFirst: true },
+  );
+  const postRunDefeats = (ctx.state.recentMonsterDefeats || []).filter(
+    (d) => d.id && !prevDefeatIds.has(d.id) && d.killerCharacterId === ch.id,
+  );
+  const allDefeats: MonsterDefeatSummary[] = [
+    ...(defeatSummary ? [defeatSummary] : []),
+    ...postRunDefeats,
+  ];
   return {
     ok: true,
     counterDamageDealt,
     dmgTaken,
-    monster: mon ? maskMonsterForRole(mon, ctx.state, ctx.role) : null,
+    monster: mon ? maskMonsterForRole(mon, ctx.state, ctx.role, ctx.characterId) : null,
     character: ch,
     summary,
     resolvedClash,
+    ...(allDefeats[0] ? { defeatSummary: allDefeats[0] } : {}),
+    ...(allDefeats.length > 0 ? { defeatSummaries: allDefeats } : {}),
   };
 }
 
@@ -744,6 +1066,9 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
     const monTok = beat?.arena?.tokens?.find((t) => t.id === monster.id);
     if (atkTok) {
       atkTokForTurn = atkTok;
+      if (!payload.isSpell && atkTok.hasCastSpellThisTurn) {
+        return { status: 400, error: 'You have already cast a spell this turn! Wait until your next turn.' };
+      }
       const floor = Math.max(1, Number(beat?.floor || attackerChar?.currentFloor || ctx.state.map?.currentFloor || 1));
       const maxAttacks = getMaxAttacksForFloor(floor);
       const used = Number(atkTok.attacksUsedThisTurn || 0);
@@ -873,7 +1198,7 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
         hit: false,
         finalDamage: 0,
         attackRoll,
-        monster: maskMonsterForRole(monster, ctx.state, ctx.role),
+        monster: maskMonsterForRole(monster, ctx.state, ctx.role, ctx.characterId),
         logEntry: missEntry,
       };
     }
@@ -941,6 +1266,9 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
     }
   }
 
+  let appliedStatMod = 0;
+  let appliedTargetDr = 0;
+  let appliedCritMult = 1;
   let finalDamage = Math.max(0, rawDamage + passiveFlatBonus + passiveDiceBonus + attackerEffMods.dmgDelta);
   if (!payload.ignoreFormula) {
     const primaryStatKey = ctx.state.mechanics.stats[0]?.key || 'STR';
@@ -955,6 +1283,9 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
     const critMult = isCrit
       ? Math.max(Number(ctx.state.mechanics.critMultiplier || 2), attackerMods?.critMultiplier || 0)
       : 1;
+    appliedStatMod = statMod;
+    appliedTargetDr = effectiveTargetDr;
+    appliedCritMult = critMult;
     const scope = buildCharacterVarScope(attackerChar, ctx.state.mechanics, {
       RAW_DMG: rawDamage + passiveFlatBonus + passiveDiceBonus + attackerEffMods.dmgDelta,
       STAT_MOD: statMod,
@@ -1018,7 +1349,7 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
       friendlyFire: true,
       finalDamage,
       ally: friendlyAlly,
-      monster: maskMonsterForRole(monster, ctx.state, ctx.role),
+      monster: maskMonsterForRole(monster, ctx.state, ctx.role, ctx.characterId),
       logEntry: ffEntry,
     };
   }
@@ -1032,7 +1363,7 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
   if (attackerChar) {
     logPlayerHistory(ctx.state, attackerChar.id, 'combat', `Dealt ${finalDamage} ${damageType} damage to ${monster.name} (${monster.hp}/${monster.maxHp} HP left)`);
   }
-  syncMonsterDerived(ctx, monster.id);
+  syncMonsterDerived(ctx, monster.id, { skipAutoLoot: true });
 
   // Lifesteal & on-hit MP restore
   if (attackerChar && attackerMods && finalDamage > 0) {
@@ -1081,7 +1412,7 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
         const dist = Math.max(Math.abs(otherTok.x - monTok.x), Math.abs(otherTok.y - monTok.y));
         if (dist <= maxDist) {
           otherMon.hp = Math.max(0, Number(otherMon.hp ?? 0) - finalDamage);
-          syncMonsterDerived(ctx, otherMon.id);
+          syncMonsterDerived(ctx, otherMon.id, { skipAutoLoot: true });
           if (otherMon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, otherMon.id);
           hitExtras += 1;
         }
@@ -1137,7 +1468,7 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
         if (!otherMon) continue;
         const secDmg = Math.max(0, finalDamage);
         otherMon.hp = Math.max(0, Number(otherMon.hp ?? 0) - secDmg);
-        syncMonsterDerived(ctx, otherMon.id);
+        syncMonsterDerived(ctx, otherMon.id, { skipAutoLoot: true });
         if (otherMon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, otherMon.id);
         targetsHit.push(otherMon.id);
         extraHitNames.push(`${otherMon.name} (${otherMon.hp}/${otherMon.maxHp} HP)`);
@@ -1170,14 +1501,14 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
   if (pEffSpec && UNIT_EFFECT_META[pEffSpec.kind]) {
     const isSelfBuff = pEffSpec.target === 'self' || UNIT_EFFECT_META[pEffSpec.kind].defaultTarget === 'self';
     if (isSelfBuff && attackerChar) {
-      const applied = applyUnitEffect(attackerChar, pEffSpec, attackerName);
+      const applied = applyUnitEffect(attackerChar, pEffSpec, attackerName, attackerChar.id);
       syncCharacterDerived(ctx, attackerChar.id);
       passiveNotes.push(`Buff: ${applied.name} (${applied.turnsRemaining}t)`);
     } else {
       for (const hitId of targetsHit) {
         const hitMon = ctx.state.monsters.find((m) => m.id === hitId && Number(m.hp ?? 0) > 0);
         if (!hitMon) continue;
-        const applied = applyUnitEffect(hitMon, pEffSpec, attackerName);
+        const applied = applyUnitEffect(hitMon, pEffSpec, attackerName, attackerChar?.id);
         syncMonsterDerived(ctx, hitMon.id);
         passiveNotes.push(`Debuff: ${applied.name} -> ${hitMon.name}`);
       }
@@ -1210,9 +1541,13 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
         }
       }
       const isRangedKill = Boolean(payload.isRangedAttack) || isRanged;
+      const killFloor = Math.max(1, Number(monster.floor || 1));
+      const killIsBoss = isBossToken(monster.name, monster.iconId) || Number(monster.maxHp || 0) >= 90;
+      const killProfile = getFloorLootProfile(killFloor, killIsBoss);
+      const shouldDropKillManaStone = crypto.randomInt(1, 101) <= killProfile.manaStoneDropChancePct;
       let manaStonesGained = 0;
       let manaStoneDroppedOnMap = false;
-      if (!isRangedKill) {
+      if (shouldDropKillManaStone && !isRangedKill) {
         attackerChar.currency = attackerChar.currency || { gold: 0, manaStones: 0 };
         attackerChar.currency.manaStones = Number(attackerChar.currency.manaStones || 0) + 1;
         manaStonesGained += 1;
@@ -1223,7 +1558,7 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
           category: 'loot',
           target: attackerChar.id,
         });
-      } else if (dropBeat?.arena && monTokPos) {
+      } else if (shouldDropKillManaStone && dropBeat?.arena && monTokPos) {
         dropBeat.arena.manaStones = dropBeat.arena.manaStones || [];
         const stone = {
           id: `ms-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
@@ -1241,66 +1576,12 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
         });
       }
 
-      // Roll Bestiary Loot Table + Monster XP + Gold
-      const monFloor = Math.max(1, Number(monster.floor || 1));
-      const baseName = monster.name.replace(/\s*#\d+$/, '').trim().toLowerCase();
-      const bestiaryMatch = (ctx.state.bestiary || []).find((b) => b.name.toLowerCase() === baseName)
-        || { name: monster.name, maxHp: Number(monster.maxHp || 30) };
-      const table = getDefaultLootTableForMonster(bestiaryMatch).map((d) => scaleLootDropForFloor(d, monFloor));
-      const rolledDrops = table.filter((d) => d.unlocked && crypto.randomInt(1, 101) <= d.dropChancePct);
-
-      const xpGained = Math.max(0, Number(monster.loot?.xp || getMonsterXpReward(monFloor)));
-      const xpRes = xpGained > 0 ? grantXpToCharacter(ctx.state, attackerChar, xpGained) : { levelsGained: 0, level: attackerChar.level };
-
-      const baseGold = Number(monster.loot?.gold || 0)
-        + (rolledDrops.length > 0 ? rolledDrops.reduce((s, d) => s + d.scaledGold, 0) : Math.round(10 * monFloor));
-      const goldGained = applyGoldBonus(attackerChar, baseGold, false);
-      attackerChar.currency = attackerChar.currency || { gold: 0, manaStones: 0 };
-      attackerChar.currency.gold = Number(attackerChar.currency.gold || 0) + goldGained;
-
-      const extraStones = rolledDrops.reduce((s, d) => s + d.scaledManaStones, 0) + Number(monster.loot?.manaStones || 0);
-      if (extraStones > 0) {
-        attackerChar.currency.manaStones = Number(attackerChar.currency.manaStones || 0) + extraStones;
-        manaStonesGained += extraStones;
-      }
-
-      const items: MonsterDefeatSummary['items'] = [];
-      attackerChar.inventory = attackerChar.inventory || [];
-      if (monster.loot?.itemName && !monster.loot.dropped) {
-        attackerChar.inventory.push(
-          createInventoryItem({
-            name: monster.loot.itemName,
-            category: monster.loot.itemCategory || 'relic',
-            notes: `Dropped by ${monster.name} (${monFloor}F)`,
-          }),
-        );
-        items.push({ name: monster.loot.itemName, category: monster.loot.itemCategory || 'relic' });
-      }
-      for (const drop of rolledDrops) {
-        attackerChar.inventory.push(
-          createInventoryItem({
-            name: drop.itemName,
-            category: drop.category,
-            notes: drop.notes || `Dropped by ${monster.name} (${monFloor}F)`,
-          }),
-        );
-        items.push({ name: drop.itemName, category: drop.category, tier: drop.tier, notes: drop.notes });
-      }
-      if (monster.loot) monster.loot.dropped = true;
-
-      defeatSummary = {
-        monsterId: monster.id,
-        monsterName: monster.name,
-        floor: monFloor,
-        killerName: attackerChar.name,
-        xpGained,
-        goldGained,
-        manaStonesGained,
+      defeatSummary = awardMonsterDefeatLoot(ctx, monster, attackerChar, {
         manaStoneDroppedOnMap,
-        items,
-        leveledUp: xpRes.levelsGained > 0,
-        newLevel: xpRes.level,
-      };
+        manaStonesGained,
+        dropBeat,
+        monTokPos: monTokPos ? { x: monTokPos.x, y: monTokPos.y } : null,
+      });
     }
   }
 
@@ -1355,7 +1636,22 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
     ok: true,
     hit: true,
     attackRoll,
-    monster: maskMonsterForRole(monster, ctx.state, ctx.role),
+    damageRoll: rollDetails
+      ? {
+          formula: rollDetails.formula,
+          rolls: rollDetails.rolls,
+          diceTotal: rollDetails.rolls.reduce((s, r) => s + r, 0),
+          modifier: rollDetails.modifier,
+          rawTotal: rawDamage,
+          statMod: appliedStatMod,
+          levelBonus: Math.floor(Number(attackerChar?.level || 1) / 3),
+          passiveBonus: passiveFlatBonus + passiveDiceBonus + attackerEffMods.dmgDelta,
+          weakSpotBonus: weakSpotBonusApplied,
+          targetDr: isDm || attackerChar?.observedMonsterIds?.includes(monster.id) ? appliedTargetDr : null,
+          critMult: isCrit ? appliedCritMult : 1,
+        }
+      : null,
+    monster: maskMonsterForRole(monster, ctx.state, ctx.role, ctx.characterId),
     finalDamage,
     logEntry,
     defeatSummary,
@@ -1519,9 +1815,45 @@ function handleCombatRoundAdvance(ctx: ActionRequestContext): boolean {
 export function initiativeAction(ctx: ActionRequestContext, payload: Record<string, unknown>): ActionResult {
   const isDm = ctx.role === 'dm';
   const sub = String(payload.subAction || '');
-  if (!isDm && sub !== 'player_roll_initiative' && sub !== 'end_turn') {
+  if (!isDm && sub !== 'player_roll_initiative' && sub !== 'end_turn' && sub !== 'run_ai_dm') {
     return { status: 403, error: 'Only the DM can control turn progression.' };
   }
+
+  const prevDefeatIds = new Set((ctx.state.recentMonsterDefeats || []).map((d) => d.id).filter(Boolean));
+
+  if (sub === 'run_ai_dm') {
+    runAiDmTurns(ctx, { initiativeAction, monsterAttackAction });
+    const newDefeatsForCaller = ctx.characterId
+      ? (ctx.state.recentMonsterDefeats || []).filter(
+          (d) => d.id && !prevDefeatIds.has(d.id) && d.killerCharacterId === ctx.characterId,
+        )
+      : [];
+    return {
+      ok: true,
+      combat: ctx.state.combat,
+      ...(newDefeatsForCaller[0] ? { defeatSummary: newDefeatsForCaller[0] } : {}),
+      ...(newDefeatsForCaller.length > 0 ? { defeatSummaries: newDefeatsForCaller } : {}),
+    };
+  }
+
+  const handleDotKill = (tickRes: ReturnType<typeof tickUnitEffectsOnTurnStart>) => {
+    const killed = tickRes.dotKilledMonster;
+    if (!killed) return;
+    const killerChar = killed.killerCharacterId ? ctx.state.characters[killed.killerCharacterId] : null;
+    if (!killerChar) return;
+    const killerMods = computePassiveModifiers(killerChar);
+    if (killerMods.hpOnKill > 0) killerChar.hp = Math.min(killerChar.maxHp, killerChar.hp + killerMods.hpOnKill);
+    if (killerMods.mpOnKill > 0) killerChar.mp = Math.min(killerChar.maxMp, killerChar.mp + killerMods.mpOnKill);
+    if (killerMods.tempHpOnKill > 0) killerChar.tempHp = Number(killerChar.tempHp || 0) + killerMods.tempHpOnKill;
+    if (killerMods.hpOnKill > 0 || killerMods.mpOnKill > 0 || killerMods.tempHpOnKill > 0) {
+      syncCharacterDerived(ctx, killerChar.id);
+    }
+    awardMonsterDefeatLoot(ctx, killed.monster, killerChar, {
+      dropBeat: killed.dropBeat,
+      monTokPos: killed.monTokPos,
+      defeatCause: killed.effectNames.join(' / ') || 'Debuff',
+    });
+  };
 
   let initiativeRollEntry: Record<string, unknown> | undefined;
   if (sub === 'end_turn') {
@@ -1546,7 +1878,7 @@ export function initiativeAction(ctx: ActionRequestContext, payload: Record<stri
         if (nextActive) {
           resetArenaTurnFlags(ctx.state, [nextActive.id]);
           if (nextActive.type === 'player') triggerStartOfTurnPassives(ctx, nextActive.id);
-          tickUnitEffectsOnTurnStart(ctx, nextActive.id, nextActive.type === 'monster' ? 'monster' : 'player');
+          handleDotKill(tickUnitEffectsOnTurnStart(ctx, nextActive.id, nextActive.type === 'monster' ? 'monster' : 'player'));
         }
       }
     } else if (cid) {
@@ -1565,7 +1897,7 @@ export function initiativeAction(ctx: ActionRequestContext, payload: Record<stri
         if (active) {
           resetArenaTurnFlags(ctx.state, [active.id]);
           if (active.type === 'player') triggerStartOfTurnPassives(ctx, active.id);
-          tickUnitEffectsOnTurnStart(ctx, active.id, active.type === 'monster' ? 'monster' : 'player');
+          handleDotKill(tickUnitEffectsOnTurnStart(ctx, active.id, active.type === 'monster' ? 'monster' : 'player'));
         }
       }
     }
@@ -1680,7 +2012,21 @@ export function initiativeAction(ctx: ActionRequestContext, payload: Record<stri
   }
 
   commitState(ctx);
-  return { ok: true, combat: ctx.state.combat, ...(initiativeRollEntry ? { roll: initiativeRollEntry } : {}) };
+  if (!payload._fromAiDm && (sub === 'end_turn' || sub === 'next_turn')) {
+    runAiDmTurns(ctx, { initiativeAction, monsterAttackAction });
+  }
+  const newDefeatsForCaller = ctx.characterId
+    ? (ctx.state.recentMonsterDefeats || []).filter(
+        (d) => d.id && !prevDefeatIds.has(d.id) && d.killerCharacterId === ctx.characterId,
+      )
+    : [];
+  return {
+    ok: true,
+    combat: ctx.state.combat,
+    ...(initiativeRollEntry ? { roll: initiativeRollEntry } : {}),
+    ...(newDefeatsForCaller[0] ? { defeatSummary: newDefeatsForCaller[0] } : {}),
+    ...(newDefeatsForCaller.length > 0 ? { defeatSummaries: newDefeatsForCaller } : {}),
+  };
 }
 
 export function bestiaryAction(ctx: ActionRequestContext, payload: Record<string, unknown>): ActionResult {
@@ -1738,6 +2084,7 @@ export function bestiaryAction(ctx: ActionRequestContext, payload: Record<string
           })
       : getDefaultSkillsForMonster({ id: sub === 'update' ? String(payload.id) : undefined, name, category, maxHp });
     const rawBestiaryIcon = String(payload.iconId || '').trim() as TokenIconId;
+    const rawBestiaryChestTier = String(payload.chestTier || '').trim() as ChestTier;
     const entry = {
       id: sub === 'update' ? String(payload.id) : `best-${Date.now().toString(36)}-${crypto.randomInt(10, 99)}`,
       name,
@@ -1747,6 +2094,8 @@ export function bestiaryAction(ctx: ActionRequestContext, payload: Record<string
       dr: Math.max(0, Math.trunc(Number(payload.dr || 0))),
       rangeSpaces: Math.max(1, Math.trunc(Number(payload.rangeSpaces || 2))),
       ...(rawBestiaryIcon && TOKEN_ICON_META[rawBestiaryIcon] ? { iconId: rawBestiaryIcon } : {}),
+      ...(typeof payload.dropsChest === 'boolean' ? { dropsChest: payload.dropsChest } : {}),
+      ...(CHEST_TIERS.includes(rawBestiaryChestTier) ? { chestTier: rawBestiaryChestTier } : {}),
       attackArea: inferDefaultAttackAreaForMonster({
         name,
         category,
@@ -2010,6 +2359,10 @@ export function unitEffectAction(ctx: ActionRequestContext, payload: Record<stri
   let totalHealed = 0;
   const appliedLabels: string[] = [];
 
+  const sourceCharacterId = !isDm
+    ? (ctx.characterId || undefined)
+    : (payload.sourceCharacterId ? String(payload.sourceCharacterId) : undefined);
+
   for (const t of targets) {
     if (t.type === 'player') {
       const ch = ctx.state.characters[t.id];
@@ -2022,7 +2375,7 @@ export function unitEffectAction(ctx: ActionRequestContext, payload: Record<stri
         totalHealed += ch.hp - prev;
       }
       if (rawSpec && UNIT_EFFECT_META[rawSpec.kind as UnitEffectKind]) {
-        const eff = applyUnitEffect(ch, rawSpec, sourceName);
+        const eff = applyUnitEffect(ch, rawSpec, sourceName, sourceCharacterId);
         appliedLabels.push(`${eff.name} (${eff.turnsRemaining}t) -> ${ch.name}`);
       }
       syncCharacterDerived(ctx, ch.id);
@@ -2036,7 +2389,7 @@ export function unitEffectAction(ctx: ActionRequestContext, payload: Record<stri
         totalHealed += m.hp - prev;
       }
       if (rawSpec && UNIT_EFFECT_META[rawSpec.kind as UnitEffectKind]) {
-        const eff = applyUnitEffect(m, rawSpec, sourceName);
+        const eff = applyUnitEffect(m, rawSpec, sourceName, sourceCharacterId);
         appliedLabels.push(`${eff.name} (${eff.turnsRemaining}t) -> ${m.name}`);
       }
       syncMonsterDerived(ctx, m.id);

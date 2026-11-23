@@ -1,10 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { SessionIdentity } from '../../../shared';
+import {
+  DEFAULT_COMBAT_MAX_ROUNDS,
+  buildStarterEquipment,
+  generateArenaTerrainFromPrompt,
+  getDefaultSkillsForMonster,
+  type Monster,
+  type SessionIdentity,
+  type StoryBeat,
+} from '../../../shared';
 import type { ServerContext } from '../actions/types';
 import { hashPassword, verifyPassword } from '../auth/password';
 import { clearSessionCookie, resolveRequestSession, setSessionCookie } from '../auth/session';
-import { createNewCharacterRecord } from '../services/gameHelpers';
+import { createInventoryItem, createNewCharacterRecord, recalculateCharacterAcAndDr } from '../services/gameHelpers';
+import { createDefaultBeatArena } from '../store/initialState';
 
 const RESERVED_USERNAMES = new Set(['admin', 'dm', 'dungeonmaster', 'dm@tower.gg']);
 
@@ -385,5 +394,361 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: ServerContext): vo
       email: account.email,
       ...(updatedSession ? { session: updatedSession } : {}),
     });
+  });
+
+  app.post('/api/auth/mock-player', async (req, reply) => {
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as { joinBeat?: boolean };
+    const joinBeat = Boolean(body.joinBeat);
+    const mockEmail = 'mock.player@tower.gg';
+    const mockUsername = 'mock_climber';
+    const state = repo.getState();
+
+    let account = state.playerAccounts[mockEmail];
+    if (!account || !state.characters[account.characterId]) {
+      const ch = createNewCharacterRecord(state, {
+        name: 'Sung Jin-Woo (Mock)',
+        race: 'Human',
+        className: 'Assassin',
+      });
+      ch.level = 3;
+      ch.xp = 80;
+      ch.xpToNext = 220;
+      ch.hp = 42;
+      ch.maxHp = 42;
+      ch.mp = 24;
+      ch.maxMp = 24;
+      ch.currency = { gold: 150, manaStones: 3 };
+      ch.equipment = buildStarterEquipment('dagger', 'Iron').equipment;
+      ch.spells = [
+        {
+          id: `sp-mock-slash-${Date.now().toString(36)}`,
+          name: 'Shadow Slash',
+          element: 'Dark',
+          mpCost: 3,
+          damageDice: '2d6+3',
+          damageType: 'Dark',
+          rangeSpaces: 2,
+          areaText: '2 Spaces',
+          attackArea: 'single',
+          attackAreaModifier: 0,
+          actionType: 'Action',
+          effectSpec: { kind: 'burn', potency: 4, duration: 2, target: 'enemy' },
+          explanation: 'Dark-infused blade strike that inflicts Burn.',
+        },
+        {
+          id: `sp-mock-mend-${Date.now().toString(36)}`,
+          name: 'Mending Light',
+          element: 'Light',
+          mpCost: 3,
+          damageDice: '1d4',
+          damageType: 'Light',
+          rangeSpaces: 4,
+          areaText: '4 Spaces',
+          attackArea: 'single',
+          attackAreaModifier: 0,
+          actionType: 'Action',
+          healFormula: '2d6+3',
+          effectSpec: { kind: 'shield', potency: 2, duration: 2, target: 'self' },
+          explanation: 'Restores HP and raises a protective Light barrier.',
+        },
+      ];
+      ch.inventory = [
+        createInventoryItem({
+          name: 'Healing Vial',
+          category: 'consumable',
+          qty: 2,
+          healHp: 12,
+          notes: 'Restores 12 HP.',
+        }),
+      ];
+      recalculateCharacterAcAndDr(state, ch);
+
+      const nowIso = new Date().toISOString();
+      const { salt, hash } = hashPassword('mockpass123');
+      account = {
+        id: `acc-mock-${Date.now().toString(36)}`,
+        email: mockEmail,
+        username: mockUsername,
+        characterId: ch.id,
+        salt,
+        passwordHash: hash,
+        activated: true,
+        invitedAt: nowIso,
+        lastLoginAt: nowIso,
+      };
+      state.playerAccounts[mockEmail] = account;
+    } else {
+      account.lastLoginAt = new Date().toISOString();
+    }
+
+    const ch = state.characters[account.characterId];
+    if (ch) {
+      for (const beat of state.storyBeats || []) {
+        if (!beat.arena) continue;
+        beat.arena.tokens = beat.arena.tokens || [];
+        if (!beat.arena.tokens.some((t) => t.id === ch.id)) {
+          const cols = Number(beat.arena.cols || 20);
+          const rows = Number(beat.arena.rows || 20);
+          beat.arena.tokens.push({
+            id: ch.id,
+            name: ch.name.split(' ')[0],
+            type: 'player',
+            x: Math.floor(cols / 2),
+            y: Math.max(0, rows - 3),
+            color: '#38bdf8',
+            hp: ch.hp,
+            maxHp: ch.maxHp,
+            hiddenFromPlayers: false,
+            label: 'SJ',
+          });
+        }
+      }
+    }
+
+    let joinedBeatId: string | undefined;
+    if (joinBeat && ch) {
+      state.session.status = 'active';
+      if (!state.session.startedAt) state.session.startedAt = new Date().toISOString();
+
+      // Always reset mock player vitals, effects, pending reactions & previous mock combat state
+      ch.hp = ch.maxHp;
+      ch.mp = ch.maxMp;
+      ch.activeEffects = [];
+      ch.combatPassiveFlags = {};
+      recalculateCharacterAcAndDr(state, ch);
+      state.pendingReactions = [];
+      state.lastResolvedClash = null;
+      state.recentMonsterDefeats = [];
+      state.storyBeats = (state.storyBeats || []).filter((b) => !b.id.startsWith('beat-mock-combat'));
+      state.monsters = (state.monsters || []).filter((m) => !m.id.startsWith('mon-mock-'));
+
+      let targetBeat =
+        (state.storyBeats || []).find(
+          (b) => b.beatType !== 'narration' && b.presented && b.status !== 'resolved',
+        ) || (state.storyBeats || []).find((b) => b.presented && b.status !== 'resolved');
+
+      if (!targetBeat) {
+        const arena = createDefaultBeatArena(20, 20);
+        const reserved = new Set<string>(['9,12', '8,9', '11,9', '5,13', '14,12']);
+        const gen = generateArenaTerrainFromPrompt(
+          'misty forest with boulders and a stream',
+          20,
+          20,
+          'forest',
+          reserved,
+        );
+        arena.biome = gen.biome;
+        arena.terrain = gen.terrain;
+
+        const mon1Id = `mon-mock-1-${Date.now().toString(36)}`;
+        const mon2Id = `mon-mock-2-${Date.now().toString(36)}`;
+        const makeMockGoblin = (id: string, name: string): Monster => ({
+          id,
+          name,
+          floor: 1,
+          hp: 26,
+          maxHp: 26,
+          ac: 14,
+          dr: 1,
+          rangeSpaces: 2,
+          iconId: 'goblin',
+          attackArea: 'around_1',
+          attackAreaModifier: 0,
+          activeEffects: [],
+          attackFormula: '1d20+4',
+          damageFormula: '1d6+2',
+          hiddenFromPlayers: false,
+          conditions: [],
+          notes: 'Gatekeeper guarding the forest clearing.',
+          loot: { itemName: 'Goblin Ear', itemCategory: 'material', gold: 25, manaStones: 1, xp: 20, dropped: false },
+          skills: getDefaultSkillsForMonster({ name, maxHp: 26 }).map((s) => ({
+            ...s,
+            maxUsesPerCombat: s.baseUsesPerCombat,
+            usesRemaining: s.baseUsesPerCombat,
+          })),
+        });
+        const mon1 = makeMockGoblin(mon1Id, 'Goblin Gatekeeper #1');
+        const mon2 = makeMockGoblin(mon2Id, 'Goblin Gatekeeper #2');
+        state.monsters.push(mon1, mon2);
+
+        arena.tokens = [
+          {
+            id: ch.id,
+            name: ch.name.split(' ')[0],
+            type: 'player',
+            x: 9,
+            y: 12,
+            color: '#38bdf8',
+            hp: ch.hp,
+            maxHp: ch.maxHp,
+            hiddenFromPlayers: false,
+            hasMovedThisTurn: false,
+            attacksUsedThisTurn: 0,
+            label: 'SJ',
+          },
+          {
+            id: mon1.id,
+            name: mon1.name,
+            type: 'monster',
+            iconId: 'goblin',
+            x: 8,
+            y: 9,
+            color: '#ef4444',
+            hp: mon1.hp,
+            maxHp: mon1.maxHp,
+            hiddenFromPlayers: false,
+            label: 'GG',
+          },
+          {
+            id: mon2.id,
+            name: mon2.name,
+            type: 'monster',
+            iconId: 'goblin',
+            x: 11,
+            y: 9,
+            color: '#ef4444',
+            hp: mon2.hp,
+            maxHp: mon2.maxHp,
+            hiddenFromPlayers: false,
+            label: 'GG',
+          },
+          {
+            id: `npc-mock-${Date.now().toString(36)}`,
+            name: 'Elder Lyra',
+            npcRole: 'Quest Giver',
+            iconId: 'quest_giver',
+            dialogue: 'Defeat the Goblin Gatekeepers before 20 rounds elapse!',
+            rewardType: 'xp',
+            rewardItemName: '',
+            rewardItemCategory: 'relic',
+            rewardSkillDesc: '',
+            rewardXp: 40,
+            rewardGold: 0,
+            rewardClaimed: false,
+            type: 'npc',
+            x: 5,
+            y: 13,
+            color: '#10b981',
+            hp: null,
+            maxHp: null,
+            hiddenFromPlayers: false,
+            label: 'EL',
+          },
+        ];
+        arena.chests = [
+          {
+            id: `chest-mock-${Date.now().toString(36)}`,
+            name: 'Clearing Supply Chest',
+            tier: 'Common',
+            x: 14,
+            y: 12,
+            gold: 50,
+            manaStones: 1,
+            itemName: '',
+            itemCategory: 'relic',
+            opened: false,
+          },
+        ];
+
+        targetBeat = {
+          id: `beat-mock-combat-${Date.now().toString(36)}`,
+          order: (state.storyBeats || []).length + 1,
+          floor: 1,
+          beatType: 'combat',
+          title: 'Gate of Trials — Goblin Ambush',
+          narration: 'Mist swirls through the ancient forest clearing as Goblin Gatekeepers step from behind the boulders!',
+          dmSecret: null,
+          presented: true,
+          status: 'active',
+          xpReward: 120,
+          maxRounds: DEFAULT_COMBAT_MAX_ROUNDS,
+          aiDmEnabled: true,
+          arena,
+          encounters: [],
+          treasures: [],
+        } as StoryBeat;
+        state.storyBeats.push(targetBeat);
+      }
+
+      if (targetBeat) {
+        if (targetBeat.beatType !== 'narration') {
+          targetBeat.aiDmEnabled = true;
+        }
+        joinedBeatId = targetBeat.id;
+        targetBeat.arena.tokens = targetBeat.arena.tokens || [];
+        const pTok = targetBeat.arena.tokens.find((t) => t.id === ch.id);
+        if (pTok) {
+          pTok.hasMovedThisTurn = false;
+          pTok.hasUsedConsumableThisTurn = false;
+          pTok.attacksUsedThisTurn = 0;
+        }
+        const beatMons = targetBeat.arena.tokens
+          .filter((t) => t.type === 'monster')
+          .map((t) => state.monsters.find((m) => m.id === t.id))
+          .filter((m): m is Monster => Boolean(m && Number(m.hp ?? 0) > 0));
+
+        for (const m of beatMons) {
+          m.hiddenFromPlayers = false;
+          const mTok = targetBeat.arena.tokens.find((t) => t.id === m.id);
+          if (mTok) mTok.hiddenFromPlayers = false;
+        }
+
+        const livingMonIds = new Set(beatMons.map((m) => m.id));
+        const syncedCombatants = (state.combat.combatants || [])
+          .filter((c) => c.type === 'player' || livingMonIds.has(c.id))
+          .map((c) => ({ ...c, hiddenFromPlayers: false }));
+
+        if (!syncedCombatants.some((c) => c.id === ch.id)) {
+          syncedCombatants.unshift({
+            id: ch.id,
+            name: ch.name,
+            type: 'player',
+            hp: ch.hp,
+            maxHp: ch.maxHp,
+            ac: ch.ac,
+            initiative: 19,
+            initMod: 3,
+            hiddenFromPlayers: false,
+          });
+        }
+        beatMons.forEach((m, idx) => {
+          if (!syncedCombatants.some((c) => c.id === m.id)) {
+            syncedCombatants.push({
+              id: m.id,
+              name: m.name,
+              type: 'monster' as const,
+              hp: Number(m.hp ?? m.maxHp ?? 20),
+              maxHp: Number(m.maxHp ?? 20),
+              ac: m.ac,
+              initiative: 14 - idx,
+              initMod: 1,
+              hiddenFromPlayers: false,
+            });
+          }
+        });
+        syncedCombatants.sort((a, b) => Number(b.initiative ?? 0) - Number(a.initiative ?? 0));
+        const playerIdx = syncedCombatants.findIndex((c) => c.id === ch.id);
+        state.combat = {
+          active: true,
+          round: 1,
+          turnIndex: playerIdx >= 0 ? playerIdx : 0,
+          combatants: syncedCombatants,
+        };
+      }
+    }
+
+    state.version++;
+    repo.save(state);
+    sseHub.broadcast('state');
+
+    const session: SessionIdentity = {
+      role: 'player',
+      email: account.email,
+      username: account.username,
+      characterId: account.characterId,
+      name: state.characters[account.characterId]?.name || account.username,
+    };
+    setSessionCookie(req, reply, session, config);
+    return reply.code(200).send({ ok: true, session, ...(joinedBeatId ? { beatId: joinedBeatId } : {}) });
   });
 }

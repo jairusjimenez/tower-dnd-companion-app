@@ -119,13 +119,17 @@ export function drawTowerCanvas({
   }
 
   for (const tok of state.map.tokens || []) {
+    const liveMon = tok.type === 'monster' ? (state.monsters || []).find((m) => m.id === tok.id) : undefined;
     const cx = labelW + tok.x * cellSize + cellSize / 2;
     const cy = tok.y * cellSize + cellSize / 2;
     drawTokenAvatar(ctx, tok, cx, cy, 17, selectedTokenId === tok.id, state.characters, onPortraitLoaded);
 
-    if (tok.maxHp && tok.maxHp > 0 && tok.hp !== null) {
+    const showHpBar = isDmView || (tok.type === 'monster' && Boolean(liveMon?.observedByViewer));
+    const barHp = liveMon?.hp !== undefined ? liveMon.hp : tok.hp;
+    const barMaxHp = liveMon?.maxHp !== undefined ? liveMon.maxHp : tok.maxHp;
+    if (showHpBar && barMaxHp && barMaxHp > 0 && barHp !== null && barHp !== undefined) {
       const bw = 34;
-      const pct = Math.max(0, Math.min(1, tok.hp / tok.maxHp));
+      const pct = Math.max(0, Math.min(1, barHp / barMaxHp));
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(cx - bw / 2, cy + 16, bw, 5);
       ctx.fillStyle = tok.type === 'monster' ? '#ef4444' : '#22c55e';
