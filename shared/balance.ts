@@ -600,6 +600,7 @@ export const UNIT_EFFECT_KINDS: UnitEffectKind[] = [
   'regen',
   'burn',
   'poison',
+  'bleed',
   'armor_break',
   'weaken',
   'slow',
@@ -622,6 +623,7 @@ export const UNIT_EFFECT_META: Record<
   regen: { label: 'Regen (+HP/Turn)', category: 'buff', defaultPotency: 5, defaultDuration: 3, defaultTarget: 'self' },
   burn: { label: 'Burn (Fire DoT)', category: 'debuff', defaultPotency: 4, defaultDuration: 3, defaultTarget: 'enemy' },
   poison: { label: 'Poison (Venom DoT)', category: 'debuff', defaultPotency: 4, defaultDuration: 3, defaultTarget: 'enemy' },
+  bleed: { label: 'Bleed (% Max HP/Round)', category: 'debuff', defaultPotency: 3, defaultDuration: 3, defaultTarget: 'enemy' },
   armor_break: { label: 'Armor Break (-AC/DR)', category: 'debuff', defaultPotency: 2, defaultDuration: 2, defaultTarget: 'enemy' },
   weaken: { label: 'Weaken (-Hit/Dmg)', category: 'debuff', defaultPotency: 2, defaultDuration: 2, defaultTarget: 'enemy' },
   slow: { label: 'Slow (-Speed)', category: 'debuff', defaultPotency: 2, defaultDuration: 2, defaultTarget: 'enemy' },
@@ -679,14 +681,14 @@ export function formatUnitEffectSpec(spec?: UnitEffectSpec | null): string {
   if (!spec) return '';
   const meta = UNIT_EFFECT_META[spec.kind];
   if (!meta) return '';
-  const potStr = spec.kind === 'stun' ? '' : ` ${spec.potency}`;
+  const potStr = spec.kind === 'stun' ? '' : spec.kind === 'bleed' ? ` ${spec.potency}%` : ` ${spec.potency}`;
   return `${meta.label}${potStr} (${spec.duration}t)`;
 }
 
 export function formatActiveUnitEffect(eff: ActiveUnitEffect): string {
   const meta = UNIT_EFFECT_META[eff.kind];
   const base = meta ? meta.label.split(' (')[0] : eff.name;
-  const pot = eff.kind === 'stun' ? '' : ` ${eff.potency}`;
+  const pot = eff.kind === 'stun' ? '' : eff.kind === 'bleed' ? ` ${eff.potency}%` : ` ${eff.potency}`;
   return `${base}${pot} (${eff.turnsRemaining}t)`;
 }
 

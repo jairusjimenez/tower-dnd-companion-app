@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { computePassiveModifiers, formatUnitEffectSpec, resolveConsumableEffects } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 import { InventoryItemSvg } from '../common/EquipmentIcons';
+import { SegmentedBarTicks } from '../common/SegmentedBar';
 
 interface ConfirmedSnapshot {
   beforeHp: number;
@@ -208,7 +209,7 @@ export function ConsumableConfirmModal() {
                     {actualHpGain > 0 ? `+${actualHpGain} HP` : 'FULL (+0)'}
                   </span>
                 </div>
-                <div className="consumable-bar-track" role="progressbar" aria-valuenow={afterHp} aria-valuemax={maxHp}>
+                <div className="consumable-bar-track bar-seg" role="progressbar" aria-valuenow={afterHp} aria-valuemax={maxHp}>
                   <div className="consumable-bar-base is-hp" style={{ width: `${hpPctBefore}%` }} />
                   {hpPctAfter > hpPctBefore && (
                     <div
@@ -219,6 +220,7 @@ export function ConsumableConfirmModal() {
                       }}
                     />
                   )}
+                  <SegmentedBarTicks maxValue={maxHp} kind="hp" />
                 </div>
               </div>
             )}
@@ -240,7 +242,7 @@ export function ConsumableConfirmModal() {
                     {actualMpGain > 0 ? `+${actualMpGain} MP` : 'FULL (+0)'}
                   </span>
                 </div>
-                <div className="consumable-bar-track" role="progressbar" aria-valuenow={afterMp} aria-valuemax={maxMp}>
+                <div className="consumable-bar-track bar-seg" role="progressbar" aria-valuenow={afterMp} aria-valuemax={maxMp}>
                   <div className="consumable-bar-base is-mp" style={{ width: `${mpPctBefore}%` }} />
                   {mpPctAfter > mpPctBefore && (
                     <div
@@ -251,6 +253,7 @@ export function ConsumableConfirmModal() {
                       }}
                     />
                   )}
+                  <SegmentedBarTicks maxValue={maxMp} kind="mp" />
                 </div>
               </div>
             )}
@@ -273,7 +276,7 @@ export function ConsumableConfirmModal() {
                   </span>
                 </div>
                 <div
-                  className="consumable-bar-track"
+                  className="consumable-bar-track bar-seg"
                   role="progressbar"
                   aria-valuenow={Math.min(xpTarget, afterXp)}
                   aria-valuemax={xpTarget}
@@ -288,6 +291,7 @@ export function ConsumableConfirmModal() {
                       }}
                     />
                   )}
+                  <SegmentedBarTicks maxValue={xpTarget} kind="xp" />
                 </div>
               </div>
             )}

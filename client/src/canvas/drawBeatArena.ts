@@ -5,6 +5,7 @@ import {
   computeMonsterAttackCells,
   computePassiveModifiers,
   computeReachableMoveCells,
+  computeSegmentedBarTicks,
   inferDefaultAttackAreaForMonster,
   type AttackArea,
   type MonsterAttackArea,
@@ -423,11 +424,28 @@ export function drawBeatArenaCanvas({
     const barMaxHp = liveMon?.maxHp !== undefined ? liveMon.maxHp : tok.maxHp;
     if (showHpBar && barMaxHp && barMaxHp > 0 && barHp !== null && barHp !== undefined) {
       const bw = cellPx - 6;
+      const bh = 5;
+      const bx = cx - bw / 2;
+      const by = cy + r + 2;
       const pct = Math.max(0, Math.min(1, barHp / barMaxHp));
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(cx - bw / 2, cy + r + 2, bw, 4);
+      ctx.fillStyle = '#060a14';
+      ctx.fillRect(bx, by, bw, bh);
       ctx.fillStyle = tok.type === 'monster' ? '#ef4444' : '#22c55e';
-      ctx.fillRect(cx - bw / 2, cy + r + 2, bw * pct, 4);
+      ctx.fillRect(bx, by, bw * pct, bh);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.fillRect(bx, by, bw, 2);
+      const ticks =
+        liveMon?.hpBarTicks ??
+        computeSegmentedBarTicks(barMaxHp, tok.type === 'monster' ? 'monster' : 'hp');
+      for (const tick of ticks) {
+        const tx = Math.round(bx + (bw * tick.pct) / 100);
+        const tw = tick.major ? 2 : 1;
+        ctx.fillStyle = 'rgba(6, 10, 20, 0.92)';
+        ctx.fillRect(tx - Math.floor(tw / 2), by, tw, bh);
+      }
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.3)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(bx, by, bw, bh);
     }
   }
 }

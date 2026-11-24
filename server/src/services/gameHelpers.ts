@@ -344,7 +344,7 @@ export function applyIncomingDamageToCharacter(
   ctx: ActionRequestContext,
   ch: Character,
   rawIncoming: number,
-  opts: { attackerMonster?: Monster | null; damageType?: string; isCrit?: boolean; isSpell?: boolean; halveAfterDr?: boolean } = {},
+  opts: { attackerMonster?: Monster | null; damageType?: string; isCrit?: boolean; isSpell?: boolean; halveAfterDr?: boolean; mitigationPct?: number } = {},
 ): { dmgTaken: number; reflectedDamage: number; evaded: boolean; notes: string[] } {
   const mods = computePassiveModifiers(ch);
   ch.combatPassiveFlags = ch.combatPassiveFlags || {};
@@ -386,7 +386,12 @@ export function applyIncomingDamageToCharacter(
   }
 
   let dmgTaken = Math.max(1, Math.round(rawIncoming) - effectiveDr);
-  if (opts.halveAfterDr) dmgTaken = Math.max(1, Math.floor(dmgTaken / 2));
+  if (opts.mitigationPct && opts.mitigationPct > 0) {
+    const clampedMit = Math.max(0, Math.min(95, opts.mitigationPct));
+    dmgTaken = Math.max(0, Math.round(dmgTaken * (1 - clampedMit / 100)));
+  } else if (opts.halveAfterDr) {
+    dmgTaken = Math.max(1, Math.floor(dmgTaken / 2));
+  }
 
   const hitCount = Number(ch.combatPassiveFlags.hitsTakenThisRound || 0);
   ch.combatPassiveFlags.hitsTakenThisRound = hitCount + 1;
@@ -736,6 +741,10 @@ export function applyUnitEffect(
     ...(sourceCharacterId ? { sourceCharacterId } : {}),
   };
   target.activeEffects = target.activeEffects || [];
+  if (spec.kind === 'bleed') {
+    target.activeEffects.push(next);
+    return next;
+  }
   const existingIdx = target.activeEffects.findIndex((e) => e.kind === spec.kind);
   if (existingIdx >= 0) {
     const prev = target.activeEffects[existingIdx];
@@ -830,10 +839,14 @@ export function tickUnitEffectsOnTurnStart(
     notes.push('STUNNED (Cannot Move or Attack this turn)');
   }
 
-  // Decrement turnsRemaining and expire finished effects
+  // Decrement turnsRemaining and expire finished effects (bleed ticks at start-of-round instead)
   const expiredNames: string[] = [];
   const remaining: ActiveUnitEffect[] = [];
   for (const eff of unit.activeEffects) {
+    if (eff.kind === 'bleed') {
+      remaining.push(eff);
+      continue;
+    }
     const nextTurns = Number(eff.turnsRemaining || 1) - 1;
     if (nextTurns > 0) {
       remaining.push({ ...eff, turnsRemaining: nextTurns });
@@ -878,6 +891,110 @@ export function tickUnitEffectsOnTurnStart(
   return {
     ...(dotKilledMonster ? { dotKilledMonster } : {}),
   };
+}
+
+export function tickBleedEffectsOnRoundStart(ctx: ActionRequestContext): TickUnitEffectsResult[] {
+  const results: TickUnitEffectsResult[] = [];
+  const units: Array<{ unit: Monster | Character; unitType: 'monster' | 'player' }> = [
+    ...(ctx.state.monsters || []).map((m) => ({ unit: m, unitType: 'monster' as const })),
+    ...Object.values(ctx.state.characters || {}).map((c) => ({ unit: c, unitType: 'player' as const })),
+  ];
+
+  for (const { unit, unitType } of units) {
+    if (!Array.isArray(unit.activeEffects) || unit.activeEffects.length === 0) continue;
+    const bleedEffects = unit.activeEffects.filter((e) => e.kind === 'bleed');
+    if (bleedEffects.length === 0) continue;
+
+    const maxHp = Number(unit.maxHp ?? 0);
+    const prevHp = Number(unit.hp ?? 0);
+    let totalBleedDmg = 0;
+
+    if (prevHp > 0 && maxHp > 0) {
+      for (const eff of bleedEffects) {
+        totalBleedDmg += Math.max(1, Math.round((maxHp * Number(eff.potency || 3)) / 100));
+      }
+      unit.hp = Math.max(0, prevHp - totalBleedDmg);
+    }
+
+    let expiredBleeds = 0;
+    const nextEffects: ActiveUnitEffect[] = [];
+    for (const eff of unit.activeEffects) {
+      if (eff.kind !== 'bleed') {
+        nextEffects.push(eff);
+        continue;
+      }
+      const nextTurns = Number(eff.turnsRemaining || 1) - 1;
+      if (nextTurns > 0) {
+        nextEffects.push({ ...eff, turnsRemaining: nextTurns });
+      } else {
+        expiredBleeds += 1;
+      }
+    }
+    unit.activeEffects = nextEffects;
+
+    if (unitType === 'monster' && prevHp > 0 && Number(unit.hp ?? 0) <= 0) {
+      const mon = unit as Monster;
+      let dropBeat: StoryBeat | null = null;
+      let monTokPos: { x: number; y: number } | null = null;
+      for (const b of ctx.state.storyBeats || []) {
+        const foundTok = b.arena?.tokens?.find((t) => t.id === mon.id);
+        if (foundTok) {
+          dropBeat = b;
+          monTokPos = { x: foundTok.x, y: foundTok.y };
+          break;
+        }
+      }
+      const sortedBleeds = [...bleedEffects].sort((a, b) => Number(b.potency || 0) - Number(a.potency || 0));
+      const killerCharacterId = sortedBleeds.find(
+        (e) => e.sourceCharacterId && Boolean(ctx.state.characters[e.sourceCharacterId]),
+      )?.sourceCharacterId;
+      removeMonsterTokensFromMaps(ctx.state, mon.id);
+      results.push({
+        dotKilledMonster: {
+          monster: mon,
+          killerCharacterId,
+          effectNames: ['Bleed'],
+          dropBeat,
+          monTokPos,
+        },
+      });
+    }
+
+    if (unitType === 'player') {
+      recalculateCharacterAcAndDr(ctx.state, unit as Character);
+      syncCharacterDerived(ctx, unit.id);
+    } else {
+      syncMonsterDerived(ctx, unit.id, { skipAutoLoot: true });
+    }
+
+    if (totalBleedDmg > 0 || expiredBleeds > 0) {
+      const stackLabel = bleedEffects.length > 1 ? ` (${bleedEffects.length} stacks)` : '';
+      const msgParts = [
+        ...(totalBleedDmg > 0 ? [`-${totalBleedDmg} HP Bleed${stackLabel}`] : []),
+        ...(expiredBleeds > 0 ? [`${expiredBleeds} Bleed expired`] : []),
+      ];
+      pushSystemToast(ctx, {
+        title: `BLEED: ${unit.name.toUpperCase()}`,
+        message: msgParts.join(' • '),
+        category: 'combat',
+        target: unitType === 'player' ? unit.id : 'all',
+      });
+      ctx.state.combatLog.unshift({
+        id: `cblog-${Date.now()}-${crypto.randomInt(10, 99)}`,
+        timestamp: new Date().toISOString(),
+        attacker: 'Bleed',
+        target: unit.name,
+        rawDamage: totalBleedDmg,
+        finalDamage: totalBleedDmg,
+        damageType: 'Bleed Tick',
+        remainingHp: unit.hp,
+        summary: `${unit.name} round start: ${msgParts.join(' • ')}.`,
+      });
+      ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
+    }
+  }
+
+  return results;
 }
 
 export { VALID_BIOME_THEMES };

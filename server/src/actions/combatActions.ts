@@ -11,6 +11,9 @@ import {
   clampCombatMaxRounds,
   computeActiveEffectModifiers,
   computeAttackAreaCells,
+  computeBlockMitigationPct,
+  computeCounterBleedChancePct,
+  computeParryStunChancePct,
   computePassiveModifiers,
   computeMonsterAttackCells,
   computeStatModifier,
@@ -27,6 +30,7 @@ import {
   getWeaponAttackInfo,
   getChestDefaultsForFloor,
   isBossToken,
+  resolvePlayerDefenseReaction,
   resolvePlayerReactionStyle,
   scaleLootDropForFloor,
   scaleMonsterSkillForFloor,
@@ -64,6 +68,7 @@ import {
   resetCombatPassiveFlags,
   syncCharacterDerived,
   syncMonsterDerived,
+  tickBleedEffectsOnRoundStart,
   tickUnitEffectsOnTurnStart,
   triggerStartOfTurnPassives,
 } from '../services/gameHelpers';
@@ -377,7 +382,14 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
   const areaLabel = formatMonsterAttackArea(effectiveArea, effectiveMod);
 
   const dmgRoll = payload.customDamage !== undefined && payload.customDamage !== ''
-    ? { total: Math.max(1, Number(payload.customDamage)), formula: 'Direct' }
+    ? {
+        total: Math.max(1, Number(payload.customDamage)),
+        formula: 'Direct',
+        rolls: [Math.max(1, Number(payload.customDamage))],
+        sides: 8,
+        modifier: 0,
+        diceTotal: Math.max(1, Number(payload.customDamage)),
+      }
     : rollDiceServer({ formula: dmgFormulaToRoll });
   const effectiveMonDmg = Math.max(1, dmgRoll.total + monEffMods.dmgDelta);
 
@@ -394,7 +406,16 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
     const targetAc = Math.max(1, Number(tc.ac || 12) + tEffMods.acDelta);
     const attackNatural = hitRoll.rolls?.[0] ?? hitRoll.diceTotal ?? 10;
     const attackHit = hitRoll.isCrit || (!hitRoll.isFumble && effectiveHitTotal >= targetAc);
-    return { effectiveHitTotal, targetAc, attackNatural, attackHit };
+    return {
+      effectiveHitTotal,
+      targetAc,
+      attackNatural,
+      attackHit,
+      attackModifier: hitRoll.modifier,
+      attackEffectDelta: monEffMods.hitDelta,
+      attackAuraPenalty: hitPenalty,
+      attackCrit: hitRoll.isCrit,
+    };
   };
 
   // Monster self-heal & buff/debuff application
@@ -442,8 +463,16 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
         attackTotal: h.effectiveHitTotal,
         attackFormula: atkFormula,
         attackHit: h.attackHit,
-        incomingDamage: Math.max(1, dmgRoll.total),
+        attackModifier: h.attackModifier,
+        attackEffectDelta: h.attackEffectDelta,
+        attackAuraPenalty: h.attackAuraPenalty,
+        attackCrit: h.attackCrit,
+        incomingDamage: effectiveMonDmg,
         formula: dmgRoll.formula,
+        damageRolls: dmgRoll.rolls || [],
+        damageSides: dmgRoll.sides || 8,
+        damageModifier: dmgRoll.modifier || 0,
+        damageEffectDelta: monEffMods.dmgDelta || 0,
       };
       ctx.state.pendingReactions.unshift(reaction);
 
@@ -688,7 +717,12 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     }
   }
   const rawChoice = String(payload.choice || 'react');
-  const effectiveChoice = rawChoice === 'react' ? resolvePlayerReactionStyle(ch).style : rawChoice;
+  const effectiveChoice =
+    rawChoice === 'react'
+      ? resolvePlayerReactionStyle(ch).style
+      : rawChoice === 'defense'
+        ? resolvePlayerDefenseReaction(ch).choice
+        : rawChoice;
   const reactionStyle: 'parry' | 'block' | 'counter' | undefined =
     effectiveChoice === 'parry' || effectiveChoice === 'block' || effectiveChoice === 'counter'
       ? effectiveChoice
@@ -696,6 +730,9 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
   const mods = computePassiveModifiers(ch);
   let dmgTaken = 0;
   let counterDamageDealt = 0;
+  let stunnedEnemy = false;
+  let bleedApplied = false;
+  let mitigationPctApplied: number | undefined;
   let summary = '';
 
   const effectiveTargetDr = (m: Monster) => (mods.ignoreAllEnemyDr ? 0 : Math.max(0, Number(m.dr || 0) - mods.ignoreEnemyDr));
@@ -735,6 +772,13 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     rolls: number[];
     total: number;
   } | null = null;
+  let counterDamageRoll: {
+    formula: string;
+    rolls: number[];
+    sides: number;
+    modifier: number;
+    total: number;
+  } | null = null;
 
   if (effectiveChoice === 'counter') {
     const weapon = getEquippedTotals(ch).mainWeapon;
@@ -742,6 +786,13 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     const hitBonus = getEquippedTotals(ch).attackBonus + mods.bonusAttackHit + mods.bonusMeleeHit;
     const hitRoll = rollDiceServer({ formula: '1d20', modifier: hitBonus });
     const dmgRoll = rollDiceServer({ formula: dmgFormula });
+    counterDamageRoll = {
+      formula: dmgRoll.formula,
+      rolls: dmgRoll.rolls || [],
+      sides: dmgRoll.sides || 8,
+      modifier: dmgRoll.modifier || 0,
+      total: dmgRoll.total,
+    };
     const agiScore = ch.stats?.AGI ?? ch.stats?.STR ?? 12;
     const statMod = computeStatModifier(agiScore, ctx.state.mechanics, ch);
 
@@ -764,13 +815,23 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
       syncMonsterDerived(ctx, mon.id, { skipAutoLoot: true });
       if (mon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, mon.id);
     }
+    let bleedNote = '';
+    if (mon && Number(mon.hp ?? 0) > 0) {
+      const bleedChance = computeCounterBleedChancePct(agiScore);
+      if (hitRoll.isCrit || crypto.randomInt(1, 101) <= bleedChance) {
+        applyUnitEffect(mon, { kind: 'bleed', potency: 3, duration: 3, target: 'enemy' }, 'Counter Bleed', ch.id);
+        syncMonsterDerived(ctx, mon.id, { skipAutoLoot: true });
+        bleedApplied = true;
+        bleedNote = ' & inflicted BLEED (3% max HP/round, 3r)';
+      }
+    }
     const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
       attackerMonster: mon,
       damageType: 'Monster Strike',
       halveAfterDr: hitRoll.total >= 12,
     });
     dmgTaken = incomingRes.dmgTaken;
-    summary = `${ch.name} COUNTER-ATTACKED ${reaction.monsterName} (Roll ${hitRoll.total}) for ${counterDamageDealt} damage and took ${dmgTaken} dmg!`;
+    summary = `${ch.name} COUNTER-ATTACKED ${reaction.monsterName} (Roll ${hitRoll.total}) for ${counterDamageDealt} damage${bleedNote} and took ${dmgTaken} dmg!`;
   } else if (effectiveChoice === 'parry') {
     const strPerScore = Math.round((Number(ch.stats?.STR ?? 10) + Number(ch.stats?.PER ?? 10)) / 2);
     const parryMod = computeStatModifier(strPerScore, ctx.state.mechanics, ch) + mods.bonusParryRoll;
@@ -791,7 +852,15 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
         if (mon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, mon.id);
         reflectNote = ` & reflected ${counterDamageDealt} dmg`;
       }
-      summary = `${ch.name} PARRIED ${reaction.monsterName}'s strike cleanly (Roll ${parryRoll.total} vs ${reaction.attackTotal}) — 0 damage taken${reflectNote}!`;
+      let stunNote = '';
+      const stunChance = computeParryStunChancePct(Number(ch.stats?.STR ?? 10), Number(ch.stats?.PER ?? 10));
+      if (mon && Number(mon.hp ?? 0) > 0 && (parryRoll.isCrit || crypto.randomInt(1, 101) <= stunChance)) {
+        applyUnitEffect(mon, { kind: 'stun', potency: 1, duration: 1, target: 'enemy' }, 'Parry Stun', ch.id);
+        syncMonsterDerived(ctx, mon.id, { skipAutoLoot: true });
+        stunnedEnemy = true;
+        stunNote = ` & STUNNED ${reaction.monsterName} (1 turn)`;
+      }
+      summary = `${ch.name} PARRIED ${reaction.monsterName}'s strike cleanly (Roll ${parryRoll.total} vs ${reaction.attackTotal}) — 0 damage taken${reflectNote}${stunNote}!`;
     } else {
       const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
         attackerMonster: mon,
@@ -809,19 +878,29 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     playerRollMod = blockMod;
     playerRollTotal = blockRoll.total;
     playerRollFormula = blockRoll.formula;
-    playerSuccess = blockRoll.total >= reaction.attackTotal;
+    const blocked = blockRoll.isCrit || (!blockRoll.isFumble && blockRoll.total >= reaction.attackTotal);
+    playerSuccess = blocked;
+    const fullMitPct = computeBlockMitigationPct(vitScore);
 
-    if (blockRoll.total >= reaction.attackTotal) {
-      dmgTaken = 0;
-      summary = `${ch.name} BLOCKED ${reaction.monsterName}'s strike cleanly (Roll ${blockRoll.total} vs ${reaction.attackTotal}) — 0 damage taken!`;
-    } else {
+    if (blocked) {
+      mitigationPctApplied = fullMitPct;
       const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
         attackerMonster: mon,
         damageType: 'Monster Strike',
-        halveAfterDr: true,
+        mitigationPct: fullMitPct,
       });
       dmgTaken = incomingRes.dmgTaken;
-      summary = `${ch.name} partially blocked ${reaction.monsterName}'s strike (${blockRoll.total}) — took halved ${dmgTaken} dmg.`;
+      summary = `${ch.name} BLOCKED ${reaction.monsterName}'s strike (Roll ${blockRoll.total} vs ${reaction.attackTotal}) — mitigated ${fullMitPct}% (${dmgTaken} dmg taken)!`;
+    } else {
+      const partialMitPct = Math.max(10, Math.round(fullMitPct / 2));
+      mitigationPctApplied = partialMitPct;
+      const incomingRes = applyIncomingDamageToCharacter(ctx, ch, reaction.incomingDamage, {
+        attackerMonster: mon,
+        damageType: 'Monster Strike',
+        mitigationPct: partialMitPct,
+      });
+      dmgTaken = incomingRes.dmgTaken;
+      summary = `${ch.name} partially blocked ${reaction.monsterName}'s strike (Roll ${blockRoll.total}) — mitigated ${partialMitPct}% (${dmgTaken} dmg taken).`;
     }
   } else if (effectiveChoice === 'dodge') {
     const agiScore = Number(ch.stats?.AGI ?? 10);
@@ -976,6 +1055,7 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     ...(spellName ? { spellName } : {}),
     ...(spellAccuracyRoll ? { spellAccuracyRoll } : {}),
     ...(spellDamageRoll ? { spellDamageRoll } : {}),
+    ...(counterDamageRoll ? { counterDamageRoll } : {}),
     playerRollNatural,
     playerRollMod,
     playerRollTotal,
@@ -983,6 +1063,9 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
     playerSuccess,
     dmgTaken,
     counterDamageDealt,
+    ...(stunnedEnemy ? { stunnedEnemy } : {}),
+    ...(bleedApplied ? { bleedApplied } : {}),
+    ...(mitigationPctApplied !== undefined ? { mitigationPct: mitigationPctApplied } : {}),
     resolutionSummary: summary,
   };
   ctx.state.lastResolvedClash = resolvedClash;
@@ -1872,6 +1955,11 @@ export function initiativeAction(ctx: ActionRequestContext, payload: Record<stri
       if (ctx.state.combat.turnIndex === 0) {
         ctx.state.combat.round += 1;
         defeatedByRoundLimit = handleCombatRoundAdvance(ctx);
+        if (!defeatedByRoundLimit) {
+          for (const bleedRes of tickBleedEffectsOnRoundStart(ctx)) {
+            handleDotKill(bleedRes);
+          }
+        }
       }
       if (!defeatedByRoundLimit) {
         const nextActive = combatants[ctx.state.combat.turnIndex];
@@ -1891,6 +1979,11 @@ export function initiativeAction(ctx: ActionRequestContext, payload: Record<stri
       if (ctx.state.combat.turnIndex === 0) {
         ctx.state.combat.round += 1;
         defeatedByRoundLimit = handleCombatRoundAdvance(ctx);
+        if (!defeatedByRoundLimit) {
+          for (const bleedRes of tickBleedEffectsOnRoundStart(ctx)) {
+            handleDotKill(bleedRes);
+          }
+        }
       }
       if (!defeatedByRoundLimit) {
         const active = ctx.state.combat.combatants[ctx.state.combat.turnIndex];

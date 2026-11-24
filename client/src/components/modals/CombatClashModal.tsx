@@ -1,12 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  UNIT_EFFECT_META,
+  buildCharacterVarScope,
+  computeCounterBleedChancePct,
+  computeParryStunChancePct,
+  computePassiveModifiers,
+  computeStatModifier,
+  evaluateFormula,
+  getEquippedTotals,
+  resolvePlayerDefenseReaction,
   resolvePlayerReactionStyle,
   spaceDistanceBetweenPoints,
   type MonsterDefeatSummary,
   type PendingReaction,
+  type Spell,
 } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 import { PolyhedralDieSvg } from '../common/DiceTrayStage';
+import { SegmentedBar } from '../common/SegmentedBar';
 
 interface ResolutionReport {
   clash: PendingReaction;
@@ -15,11 +26,36 @@ interface ResolutionReport {
   counterDamageDealt: number;
 }
 
+function fmtSigned(n: number): string {
+  return n >= 0 ? `+${n}` : String(n);
+}
+
+function parseSides(formula?: string, fallback = 8): 4 | 6 | 8 | 10 | 12 | 20 {
+  const m = String(formula || '').match(/d(\d+)/i);
+  const raw = m ? Number(m[1]) : fallback;
+  if (raw === 4 || raw === 6 || raw === 8 || raw === 10 || raw === 12 || raw === 20) return raw;
+  return 8;
+}
+
+function estimateAverageDice(formula: string): number {
+  const clean = String(formula || '').replace(/\s+/g, '');
+  const m = clean.match(/^(\d+)?d(\d+)([+-]\d+)?$/i);
+  if (m) {
+    const count = Math.max(1, Number(m[1] || 1));
+    const sides = Math.max(1, Number(m[2] || 8));
+    const mod = Number(m[3] || 0);
+    return count * ((sides + 1) / 2) + mod;
+  }
+  const flat = Number(clean);
+  return Number.isFinite(flat) ? flat : 7.5;
+}
+
 export function CombatClashModal() {
   const { session, state, sendAction, setDefeatedMonster } = useVtt();
 
   const [dmRolling, setDmRolling] = useState(false);
   const [dmFlicker, setDmFlicker] = useState(12);
+  const [dmDmgFlicker, setDmDmgFlicker] = useState(6);
   const [playerRolling, setPlayerRolling] = useState(false);
   const [playerFlicker, setPlayerFlicker] = useState(14);
   const [spellDmgFlicker, setSpellDmgFlicker] = useState(8);
@@ -58,8 +94,10 @@ export function CombatClashModal() {
     setSpellPickerOpen(false);
     setDmRolling(true);
     setDmFlicker(Math.floor(Math.random() * 20) + 1);
+    setDmDmgFlicker(Math.floor(Math.random() * 8) + 1);
     const tick = window.setInterval(() => {
       setDmFlicker(Math.floor(Math.random() * 20) + 1);
+      setDmDmgFlicker(Math.floor(Math.random() * 8) + 1);
     }, 65);
     const stop = window.setTimeout(() => {
       window.clearInterval(tick);
@@ -132,6 +170,177 @@ export function CombatClashModal() {
   });
 
   const styleInfo = resolvePlayerReactionStyle(targetChar);
+  const defenseInfo = resolvePlayerDefenseReaction(targetChar);
+
+  const expectedCounterDmg = (() => {
+    if (!targetChar) return 0;
+    const mods = computePassiveModifiers(targetChar);
+    const weapon = getEquippedTotals(targetChar).mainWeapon;
+    const dmgFormula = weapon?.damageDice || '1d8+3';
+    const avgRaw = estimateAverageDice(dmgFormula) + mods.bonusCounterDamage + mods.bonusWeaponDamage + mods.bonusMeleeDamage;
+    const agiScore = targetChar.stats?.AGI ?? targetChar.stats?.STR ?? 12;
+    const statMod = computeStatModifier(agiScore, state.mechanics, targetChar);
+    const targetDr =
+      monster && monster.hp !== null
+        ? mods.ignoreAllEnemyDr
+          ? 0
+          : Math.max(0, Number(monster.dr || 0) - mods.ignoreEnemyDr)
+        : 0;
+    const scope = buildCharacterVarScope(targetChar, state.mechanics, {
+      RAW_DMG: avgRaw,
+      STAT_MOD: statMod,
+      TARGET_DR: targetDr,
+      TARGET_AC: Number(monster?.ac || 10),
+      CRIT_MULT: 1,
+    });
+    return Math.max(1, Math.round(evaluateFormula(state.mechanics.damageFormula, scope)));
+  })();
+
+  const bleedChancePct = computeCounterBleedChancePct(Number(targetChar?.stats?.AGI ?? 10));
+  const stunChancePct = computeParryStunChancePct(
+    Number(targetChar?.stats?.STR ?? 10),
+    Number(targetChar?.stats?.PER ?? 10),
+  );
+  const expectedFailDmg = Math.max(1, Math.round(activeClash.incomingDamage) - Number(targetChar?.dr || 0));
+  const expectedBlockWinDmg = Math.max(
+    0,
+    Math.round(expectedFailDmg * (1 - (defenseInfo.mitigationPct || 25) / 100)),
+  );
+
+  const computeSpellPreview = (sp: Spell): { mode: 'heal' | 'support' | 'damage'; amount: number } => {
+    if (sp.healFormula) {
+      return {
+        mode: 'heal',
+        amount: Math.max(1, Math.round(estimateAverageDice(sp.healFormula))),
+      };
+    }
+    const isSelfOnly = Boolean(
+      sp.effectSpec &&
+        (sp.effectSpec.target === 'self' || UNIT_EFFECT_META[sp.effectSpec.kind]?.defaultTarget === 'self') &&
+        !sp.damageDice,
+    );
+    if (isSelfOnly) {
+      return {
+        mode: 'support',
+        amount: Math.max(1, Math.floor(expectedFailDmg / 2)),
+      };
+    }
+    if (!targetChar) return { mode: 'damage', amount: 0 };
+    const mods = computePassiveModifiers(targetChar);
+    const bonusDiceAvg = mods.bonusReactionSpellDice.reduce((sum, d) => sum + estimateAverageDice(d), 0);
+    const rawAvg = estimateAverageDice(sp.damageDice || '2d6') + bonusDiceAvg + mods.bonusSpellPower;
+    const intMod = computeStatModifier(targetChar.stats?.INT ?? 12, state.mechanics, targetChar);
+    const targetDr =
+      monster && monster.hp !== null
+        ? mods.ignoreAllEnemyDr
+          ? 0
+          : Math.max(0, Number(monster.dr || 0) - mods.ignoreEnemyDr)
+        : 0;
+    const scope = buildCharacterVarScope(targetChar, state.mechanics, {
+      RAW_DMG: rawAvg,
+      STAT_MOD: intMod,
+      TARGET_DR: targetDr,
+      TARGET_AC: Number(monster?.ac || 10),
+      CRIT_MULT: 1,
+    });
+    return {
+      mode: 'damage',
+      amount: Math.max(1, Math.round(evaluateFormula(state.mechanics.damageFormula, scope))),
+    };
+  };
+
+  const renderSpellPreviewBar = (sp: Spell) => {
+    const preview = computeSpellPreview(sp);
+    if (preview.mode === 'heal') {
+      const curHp = Number(targetChar?.hp ?? 0);
+      const maxHp = Number(targetChar?.maxHp ?? 0);
+      const afterHp = maxHp > 0 ? Math.min(maxHp, curHp + preview.amount) : curHp + preview.amount;
+      const curPct = maxHp > 0 ? Math.max(0, Math.min(100, (curHp / maxHp) * 100)) : 0;
+      const afterPct = maxHp > 0 ? Math.max(0, Math.min(100, (afterHp / maxHp) * 100)) : 0;
+      return (
+        <div className="clash-btn-stats">
+          <div className="clash-btn-stat-line">
+            Expected Heal: <b className="clash-btn-heal-delta">+{preview.amount} HP</b>
+          </div>
+          {targetChar && maxHp > 0 && (
+            <>
+              <SegmentedBar
+                pct={curPct}
+                ghostPct={afterPct}
+                ghostColor="rgba(34, 197, 94, 0.55)"
+                maxValue={maxHp}
+                kind="hp"
+                trackClassName="progress clash-btn-bar"
+                fillKind="hp"
+                critical={curPct > 0 && curPct <= 20}
+              />
+              <div className="clash-btn-hp-note">
+                {curHp} &rarr; {afterHp}/{maxHp} HP
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+    if (preview.mode === 'support') {
+      const curHp = Number(targetChar?.hp ?? 0);
+      const maxHp = Number(targetChar?.maxHp ?? 0);
+      const afterHp = Math.max(0, curHp - preview.amount);
+      const curPct = maxHp > 0 ? Math.max(0, Math.min(100, (curHp / maxHp) * 100)) : 0;
+      const afterPct = maxHp > 0 ? Math.max(0, Math.min(100, (afterHp / maxHp) * 100)) : 0;
+      return (
+        <div className="clash-btn-stats">
+          <div className="clash-btn-stat-line">
+            Support &bull; Halves Hit <span className="clash-btn-dmg-delta">(-{preview.amount} HP)</span>
+          </div>
+          {targetChar && maxHp > 0 && (
+            <>
+              <SegmentedBar
+                pct={afterPct}
+                ghostPct={curPct}
+                ghostColor="rgba(248, 113, 113, 0.55)"
+                maxValue={maxHp}
+                kind="hp"
+                trackClassName="progress clash-btn-bar"
+                fillKind="hp"
+                critical={afterPct > 0 && afterPct <= 20}
+              />
+              <div className="clash-btn-hp-note">
+                {curHp} &rarr; {afterHp}/{maxHp} HP
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div className="clash-btn-stats">
+        <div className="clash-btn-stat-line">
+          Expected Damage: <b>{preview.amount}</b>
+        </div>
+        {monster && (
+          <SegmentedBar
+            pct={
+              monster.hp !== null && monster.maxHp
+                ? Math.max(0, Math.min(100, (Math.max(0, monster.hp - preview.amount) / monster.maxHp) * 100))
+                : Math.max(0, Math.min(100, Number(monster.hpPct ?? 100)))
+            }
+            ghostPct={
+              monster.hp !== null && monster.maxHp
+                ? Math.max(0, Math.min(100, (monster.hp / monster.maxHp) * 100))
+                : undefined
+            }
+            ghostColor="rgba(251, 191, 36, 0.55)"
+            maxValue={monster.maxHp ?? 0}
+            ticks={monster.hpBarTicks}
+            kind="monster"
+            trackClassName="progress clash-btn-bar"
+            fillKind="monster"
+          />
+        )}
+      </div>
+    );
+  };
 
   const handleContinue = () => {
     if (!isResolved || playerRolling) return;
@@ -143,7 +352,7 @@ export function CombatClashModal() {
     setResolutionReport(null);
   };
 
-  const handlePlayerReactionRoll = async (choice: 'react' | 'spell' | 'dodge', spellIdOverride?: string) => {
+  const handlePlayerReactionRoll = async (choice: 'react' | 'spell' | 'dodge' | 'block', spellIdOverride?: string) => {
     if (playerRolling) return;
     const clashSnapshot = activeClash;
     setPlayerRolling(true);
@@ -211,11 +420,12 @@ export function CombatClashModal() {
     if (!playerSuccess) {
       if (activeClash.playerChoice === 'spell') return 'SPELL MISSED!';
       if (activeClash.playerChoice === 'dodge') return 'DODGE FAILED!';
+      if (activeClash.playerChoice === 'block' || activeClash.reactionStyle === 'block') return 'PARTIAL BLOCK';
       return 'HIT TAKEN';
     }
     if (activeClash.playerChoice === 'dodge') return 'DODGED!';
     if (activeClash.playerChoice === 'spell') return 'SPELL HIT!';
-    if (activeClash.reactionStyle === 'block') return 'BLOCKED!';
+    if (activeClash.playerChoice === 'block' || activeClash.reactionStyle === 'block') return 'BLOCKED!';
     if (activeClash.reactionStyle === 'counter' || activeClash.playerChoice === 'counter') return 'COUNTER-ATTACK!';
     return 'PARRIED!';
   })();
@@ -252,22 +462,100 @@ export function CombatClashModal() {
             <div className="clash-side-label">MONSTER ATTACK</div>
             <div className="clash-side-sub">{activeClash.monsterName}</div>
 
-            <div className={`clash-die-box is-monster ${dmRolling ? 'rolling' : 'landed'}`}>
-              <div className="clash-die-bg">
-                <PolyhedralDieSvg sides={20} />
-              </div>
-              <span className="clash-die-num">
-                {dmRolling ? dmFlicker : activeClash.attackTotal}
-              </span>
-            </div>
+            {(() => {
+              const monDmgSides =
+                activeClash.damageSides === 4 ||
+                activeClash.damageSides === 6 ||
+                activeClash.damageSides === 8 ||
+                activeClash.damageSides === 10 ||
+                activeClash.damageSides === 12 ||
+                activeClash.damageSides === 20
+                  ? activeClash.damageSides
+                  : parseSides(activeClash.formula, 8);
+              const atkNat = activeClash.attackNatural;
+              const atkMod = activeClash.attackModifier;
+              const atkEffDelta = Number(activeClash.attackEffectDelta ?? 0);
+              const atkAuraPen = Number(activeClash.attackAuraPenalty ?? 0);
+              const dmgRolls = activeClash.damageRolls;
+              const dmgMod = Number(activeClash.damageModifier ?? 0);
+              const dmgEffDelta = Number(activeClash.damageEffectDelta ?? 0);
 
-            {!dmRolling && (
-              <div className="clash-side-meta">
-                <span className={`tag ${dmSuccess ? 'tag-crimson' : 'tag-cyan'}`}>
-                  {dmSuccess ? 'HIT' : 'GRAZE'} &bull; {activeClash.incomingDamage} DMG
-                </span>
-              </div>
-            )}
+              return (
+                <>
+                  <div className="clash-spell-dice-row">
+                    <div className="clash-spell-die-col">
+                      <span className="clash-spell-die-tag">Acc [1d20]</span>
+                      <div className={`clash-die-box is-compact is-monster ${dmRolling ? 'rolling' : 'landed'}`}>
+                        <div className="clash-die-bg">
+                          <PolyhedralDieSvg sides={20} />
+                        </div>
+                        <span className="clash-die-num">
+                          {dmRolling ? dmFlicker : activeClash.attackTotal}
+                        </span>
+                      </div>
+                      {!dmRolling && (
+                        <span className={`tag small ${dmSuccess ? 'tag-crimson' : 'tag-cyan'}`}>
+                          {dmSuccess ? (activeClash.attackCrit ? 'CRIT HIT' : 'HIT') : 'GRAZE'} vs AC {activeClash.targetAc ?? '?'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="clash-spell-die-col">
+                      <span className="clash-spell-die-tag">Dmg [{activeClash.formula || '1d8'}]</span>
+                      <div className={`clash-die-box is-compact is-dmg ${dmRolling ? 'rolling' : 'landed'}`}>
+                        <div className="clash-die-bg">
+                          <PolyhedralDieSvg sides={monDmgSides} />
+                        </div>
+                        <span className="clash-die-num">
+                          {dmRolling ? dmDmgFlicker : activeClash.incomingDamage}
+                        </span>
+                      </div>
+                      {!dmRolling && (
+                        <span className="tag small tag-gold">
+                          {activeClash.incomingDamage} DMG
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {!dmRolling && (
+                    <div className="clash-calc-box">
+                      <div className="clash-calc-line">
+                        <b>Hit:</b>{' '}
+                        {atkNat !== undefined && atkMod !== undefined ? (
+                          <>
+                            d20(<b>{atkNat}</b>) {fmtSigned(atkMod)}
+                            {atkEffDelta !== 0 ? ` ${fmtSigned(atkEffDelta)} eff` : ''}
+                            {atkAuraPen > 0 ? ` -${atkAuraPen} aura` : ''} = <b>{activeClash.attackTotal}</b> vs AC {activeClash.targetAc ?? '?'}
+                          </>
+                        ) : (
+                          <>
+                            <b>{activeClash.attackTotal}</b> vs AC {activeClash.targetAc ?? '?'}
+                          </>
+                        )}
+                      </div>
+                      <div className="clash-calc-line">
+                        <b>Dmg:</b>{' '}
+                        {dmgRolls && dmgRolls.length > 0 ? (
+                          <>
+                            {activeClash.formula} [{dmgRolls.join('+')}]
+                            {dmgMod !== 0 ? ` ${fmtSigned(dmgMod)}` : ''}
+                            {dmgEffDelta !== 0 ? ` ${fmtSigned(dmgEffDelta)} eff` : ''} = <b>{activeClash.incomingDamage}</b>
+                          </>
+                        ) : (
+                          <>
+                            {activeClash.formula || '1d8'} = <b>{activeClash.incomingDamage}</b>
+                          </>
+                        )}
+                        {!isResolved && targetChar && Number(targetChar.dr || 0) > 0 && (
+                          <span className="muted"> &bull; Your DR {targetChar.dr}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           {/* RIGHT: Player Response */}
@@ -325,6 +613,47 @@ export function CombatClashModal() {
                   </div>
                 )}
               </div>
+            ) : !isSpellClash && isResolved && activeClash.counterDamageRoll ? (
+              <div className="clash-spell-dice-row">
+                <div className="clash-spell-die-col">
+                  <span className="clash-spell-die-tag">Acc [1d20]</span>
+                  <div
+                    className={`clash-die-box is-compact ${
+                      playerRolling ? 'rolling' : playerSuccess ? 'is-win' : 'is-loss'
+                    }`}
+                  >
+                    <div className="clash-die-bg">
+                      <PolyhedralDieSvg sides={20} />
+                    </div>
+                    <span className="clash-die-num">
+                      {playerRolling ? playerFlicker : activeClash.playerRollTotal ?? '—'}
+                    </span>
+                  </div>
+                  {!playerRolling && (
+                    <span className={`tag small ${playerSuccess ? 'tag-green' : 'tag-gold'}`}>
+                      d20: {activeClash.playerRollNatural ?? '?'} ({responseModText})
+                    </span>
+                  )}
+                </div>
+
+                <div className="clash-spell-die-col">
+                  <span className="clash-spell-die-tag">Dmg [{activeClash.counterDamageRoll.formula}]</span>
+                  <div className={`clash-die-box is-compact is-dmg ${playerRolling ? 'rolling' : 'is-win'}`}>
+                    <div className="clash-die-bg">
+                      <PolyhedralDieSvg sides={parseSides(activeClash.counterDamageRoll.formula, activeClash.counterDamageRoll.sides || 8)} />
+                    </div>
+                    <span className="clash-die-num">
+                      {playerRolling ? spellDmgFlicker : activeClash.counterDamageDealt ?? activeClash.counterDamageRoll.total}
+                    </span>
+                  </div>
+                  {!playerRolling && (
+                    <span className="tag small tag-gold">
+                      [{activeClash.counterDamageRoll.rolls.join('+')}]
+                      {activeClash.counterDamageRoll.modifier !== 0 ? ` ${fmtSigned(activeClash.counterDamageRoll.modifier)}` : ''} &rarr; {activeClash.counterDamageDealt ?? activeClash.counterDamageRoll.total}
+                    </span>
+                  )}
+                </div>
+              </div>
             ) : (
               <>
                 <div
@@ -378,10 +707,48 @@ export function CombatClashModal() {
                   onClick={() => void handlePlayerReactionRoll('react')}
                 >
                   <div className="clash-action-top">
-                    <strong>React: {styleInfo.label}</strong>
+                    <strong className="clash-action-title">{styleInfo.label}</strong>
                     <span className="tag tag-cyan">{styleInfo.statTag}</span>
                   </div>
-                  <span className="clash-action-sub">{styleInfo.shortDesc}</span>
+                  {styleInfo.style === 'counter' ? (
+                    <div className="clash-btn-stats">
+                      <div className="clash-btn-stat-line">
+                        Expected Damage: <b>{expectedCounterDmg}</b>
+                      </div>
+                      {monster && (
+                        <SegmentedBar
+                          pct={
+                            monster.hp !== null && monster.maxHp
+                              ? Math.max(0, Math.min(100, (Math.max(0, monster.hp - expectedCounterDmg) / monster.maxHp) * 100))
+                              : Math.max(0, Math.min(100, Number(monster.hpPct ?? 100)))
+                          }
+                          ghostPct={
+                            monster.hp !== null && monster.maxHp
+                              ? Math.max(0, Math.min(100, (monster.hp / monster.maxHp) * 100))
+                              : undefined
+                          }
+                          ghostColor="rgba(251, 191, 36, 0.55)"
+                          maxValue={monster.maxHp ?? 0}
+                          ticks={monster.hpBarTicks}
+                          kind="monster"
+                          trackClassName="progress clash-btn-bar"
+                          fillKind="monster"
+                        />
+                      )}
+                      <div className="clash-btn-stat-line">
+                        Bleed Chance: <b>{bleedChancePct}%</b>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="clash-btn-stats">
+                      <div className="clash-btn-stat-line">
+                        <b>0 Damage</b> on Win (&frac12; on Fail)
+                      </div>
+                      <div className="clash-btn-stat-line">
+                        Stun Chance: <b>{stunChancePct}%</b>
+                      </div>
+                    </div>
+                  )}
                 </button>
 
                 <button
@@ -392,18 +759,27 @@ export function CombatClashModal() {
                   onClick={() => setSpellPickerOpen(true)}
                 >
                   <div className="clash-action-top">
-                    <strong>Use Spell</strong>
+                    <strong className="clash-action-title">Cast Spell</strong>
                     <span className="tag tag-purple">
                       {usableReactionSpells.length > 0 ? `${usableReactionSpells.length} Ready` : 'NONE'}
                     </span>
                   </div>
-                  <span className="clash-action-sub">
-                    {usableReactionSpells.length > 0
-                      ? 'Select a reaction spell'
-                      : reactionSpells.length > 0
-                        ? 'Low MP or out of range'
-                        : 'No reaction spell'}
-                  </span>
+                  {usableReactionSpells.length > 0 ? (
+                    <>
+                      {renderSpellPreviewBar(usableReactionSpells[0])}
+                      <span className="clash-action-perk is-spell">
+                        {usableReactionSpells.length > 1
+                          ? `${usableReactionSpells[0].name} +${usableReactionSpells.length - 1} more`
+                          : 'INT Roll • Halves Hit'}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="clash-action-sub">
+                      {reactionSpells.length > 0
+                        ? 'Low MP or target out of spell range.'
+                        : 'No reaction-speed spell in your grimoire.'}
+                    </span>
+                  )}
                 </button>
 
                 <button
@@ -411,13 +787,74 @@ export function CombatClashModal() {
                   id="btn-clash-dodge"
                   className="clash-action-btn is-dodge"
                   disabled={playerRolling}
-                  onClick={() => void handlePlayerReactionRoll('dodge')}
+                  onClick={() => void handlePlayerReactionRoll(defenseInfo.choice)}
                 >
                   <div className="clash-action-top">
-                    <strong>Dodge</strong>
-                    <span className="tag tag-gold">AGI</span>
+                    <strong className="clash-action-title">{defenseInfo.label}</strong>
+                    <span className="tag tag-gold">{defenseInfo.statTag}</span>
                   </div>
-                  <span className="clash-action-sub">0 dmg on win, full on fail</span>
+                  {defenseInfo.choice === 'dodge' ? (
+                    <div className="clash-btn-stats">
+                      <div className="clash-btn-stat-line">
+                        <b>0 Damage</b> on Win
+                      </div>
+                      <div className="clash-btn-stat-line">
+                        <b>Full Damage</b> on Fail{' '}
+                        <span className="clash-btn-dmg-delta">(-{expectedFailDmg} HP)</span>
+                      </div>
+                      {targetChar && targetChar.maxHp > 0 && (() => {
+                        const plAfterHp = Math.max(0, targetChar.hp - expectedFailDmg);
+                        const plAfterPct = Math.max(0, Math.min(100, (plAfterHp / targetChar.maxHp) * 100));
+                        const plCurPct = Math.max(0, Math.min(100, (targetChar.hp / targetChar.maxHp) * 100));
+                        return (
+                          <>
+                            <SegmentedBar
+                              pct={plAfterPct}
+                              ghostPct={plCurPct}
+                              ghostColor="rgba(248, 113, 113, 0.55)"
+                              maxValue={targetChar.maxHp}
+                              kind="hp"
+                              trackClassName="progress clash-btn-bar"
+                              fillKind="hp"
+                              critical={plAfterPct > 0 && plAfterPct <= 20}
+                            />
+                            <div className="clash-btn-hp-note">
+                              {targetChar.hp} &rarr; {plAfterHp}/{targetChar.maxHp} HP
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="clash-btn-stats">
+                      <div className="clash-btn-stat-line">
+                        Mitigate <b>{defenseInfo.mitigationPct}%</b> on Win{' '}
+                        <span className="clash-btn-dmg-delta">(-{expectedBlockWinDmg} HP)</span>
+                      </div>
+                      {targetChar && targetChar.maxHp > 0 && (() => {
+                        const plAfterHp = Math.max(0, targetChar.hp - expectedBlockWinDmg);
+                        const plAfterPct = Math.max(0, Math.min(100, (plAfterHp / targetChar.maxHp) * 100));
+                        const plCurPct = Math.max(0, Math.min(100, (targetChar.hp / targetChar.maxHp) * 100));
+                        return (
+                          <>
+                            <SegmentedBar
+                              pct={plAfterPct}
+                              ghostPct={plCurPct}
+                              ghostColor="rgba(248, 113, 113, 0.55)"
+                              maxValue={targetChar.maxHp}
+                              kind="hp"
+                              trackClassName="progress clash-btn-bar"
+                              fillKind="hp"
+                              critical={plAfterPct > 0 && plAfterPct <= 20}
+                            />
+                            <div className="clash-btn-hp-note">
+                              {targetChar.hp} &rarr; {plAfterHp}/{targetChar.maxHp} HP
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </button>
               </div>
             ) : (
@@ -452,8 +889,9 @@ export function CombatClashModal() {
                         <span className="tag tag-purple">{sp.mpCost} MP</span>
                       </div>
                       <span className="clash-action-sub">
-                        {sp.damageDice || 'Support'} &bull; {sp.rangeSpaces || 3} Sp &bull; INT Accuracy
+                        {sp.healFormula ? `Heal ${sp.healFormula}` : sp.damageDice || 'Support'} &bull; {sp.rangeSpaces || 3} Sp &bull; INT Accuracy
                       </span>
+                      {renderSpellPreviewBar(sp)}
                     </button>
                   ))}
                 </div>
@@ -472,6 +910,15 @@ export function CombatClashModal() {
                 {(activeClash.counterDamageDealt || 0) > 0 && (
                   <span className="tag tag-gold">Dealt: {activeClash.counterDamageDealt} HP</span>
                 )}
+                {activeClash.mitigationPct !== undefined && activeClash.mitigationPct > 0 && (
+                  <span className="tag tag-cyan">-{activeClash.mitigationPct}% Mitigated</span>
+                )}
+                {activeClash.stunnedEnemy && (
+                  <span className="tag tag-purple">STUNNED!</span>
+                )}
+                {activeClash.bleedApplied && (
+                  <span className="tag tag-crimson">BLEED APPLIED!</span>
+                )}
               </div>
             </div>
 
@@ -486,18 +933,22 @@ export function CombatClashModal() {
                       {targetChar.hp}/{targetChar.maxHp} HP
                     </b>
                   </div>
-                  <div className="progress">
-                    <div
-                      className="progress-fill hp"
-                      style={{
-                        width: `${
-                          targetChar.maxHp > 0
-                            ? Math.max(0, Math.min(100, (targetChar.hp / targetChar.maxHp) * 100))
-                            : 0
-                        }%`,
-                      }}
-                    />
-                  </div>
+                  <SegmentedBar
+                    pct={
+                      targetChar.maxHp > 0
+                        ? Math.max(0, Math.min(100, (targetChar.hp / targetChar.maxHp) * 100))
+                        : 0
+                    }
+                    maxValue={targetChar.maxHp}
+                    kind="hp"
+                    trackClassName="progress"
+                    fillKind="hp"
+                    critical={
+                      targetChar.maxHp > 0 &&
+                      targetChar.hp > 0 &&
+                      (targetChar.hp / targetChar.maxHp) * 100 <= 20
+                    }
+                  />
                 </div>
               )}
 
@@ -511,18 +962,18 @@ export function CombatClashModal() {
                       </b>
                     ) : null}
                   </div>
-                  <div className="progress">
-                    <div
-                      className="progress-fill monster"
-                      style={{
-                        width: `${
-                          monster.hp !== null && monster.maxHp
-                            ? Math.max(0, Math.min(100, (monster.hp / monster.maxHp) * 100))
-                            : Math.max(0, Math.min(100, Number(monster.hpPct ?? 100)))
-                        }%`,
-                      }}
-                    />
-                  </div>
+                  <SegmentedBar
+                    pct={
+                      monster.hp !== null && monster.maxHp
+                        ? Math.max(0, Math.min(100, (monster.hp / monster.maxHp) * 100))
+                        : Math.max(0, Math.min(100, Number(monster.hpPct ?? 100)))
+                    }
+                    maxValue={monster.maxHp ?? 0}
+                    ticks={monster.hpBarTicks}
+                    kind="monster"
+                    trackClassName="progress"
+                    fillKind="monster"
+                  />
                 </div>
               )}
             </div>

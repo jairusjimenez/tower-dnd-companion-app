@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MonsterDefeatSummary } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
+import { SegmentedBar } from '../common/SegmentedBar';
 
 interface AttackRollInfo {
   natural: number;
@@ -436,26 +437,18 @@ export function AttackRollModal() {
                   <span style={{ fontWeight: 700, color: '#f8fafc' }}>{resultInfo.monsterBar.label}</span>
                 </div>
                 {resultInfo.monsterBar.maxHp && resultInfo.monsterBar.afterHp !== null ? (
-                  <div className="progress" style={{ position: 'relative' }}>
-                    {resultInfo.monsterBar.beforeHp !== null && resultInfo.monsterBar.beforeHp > resultInfo.monsterBar.afterHp && (
-                      <div
-                        style={{
-                          position: 'absolute',
-                          inset: 0,
-                          width: `${Math.max(0, Math.min(100, (resultInfo.monsterBar.beforeHp / resultInfo.monsterBar.maxHp) * 100))}%`,
-                          background: 'rgba(248, 113, 113, 0.35)',
-                          borderRadius: 'inherit',
-                        }}
-                      />
-                    )}
-                    <div
-                      className="progress-fill monster"
-                      style={{
-                        position: 'relative',
-                        width: `${Math.max(0, Math.min(100, (resultInfo.monsterBar.afterHp / resultInfo.monsterBar.maxHp) * 100))}%`,
-                      }}
-                    />
-                  </div>
+                  <SegmentedBar
+                    pct={Math.max(0, Math.min(100, (resultInfo.monsterBar.afterHp / resultInfo.monsterBar.maxHp) * 100))}
+                    ghostPct={
+                      resultInfo.monsterBar.beforeHp !== null &&
+                      resultInfo.monsterBar.beforeHp > resultInfo.monsterBar.afterHp
+                        ? Math.max(0, Math.min(100, (resultInfo.monsterBar.beforeHp / resultInfo.monsterBar.maxHp) * 100))
+                        : undefined
+                    }
+                    maxValue={resultInfo.monsterBar.maxHp}
+                    kind="monster"
+                    fillKind="monster"
+                  />
                 ) : null}
               </div>
             )}

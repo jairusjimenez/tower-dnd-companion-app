@@ -34,6 +34,7 @@ import type { BeatActionMode } from '../../canvas/drawBeatArena';
 import { useVtt } from '../../context/VttContext';
 import { findClosestNpcInteractCell } from '../../utils/npcInteraction';
 import { StoryFlowchartView } from '../common/StoryFlowchartView';
+import { SegmentedBar } from '../common/SegmentedBar';
 import { TokenIconSvg } from '../common/TokenIconSvg';
 import { BeatArenaCanvas, useBeatPlayerCellAction } from './BeatArenaCanvas';
 import { PlayerCombatHud } from './PlayerCombatHud';
@@ -2654,11 +2655,27 @@ export function BeatDetailView() {
                       <span className="tag tag-cyan">Lv {me.level || 1}</span>
                     </div>
                     <div className="bar-row small mt-xs"><span>HP</span><b>{me.hp}/{me.maxHp}</b></div>
-                    <div className="progress"><div className="progress-fill hp" style={{ width: `${me.maxHp ? Math.max(0, Math.min(100, (me.hp / me.maxHp) * 100)) : 0}%` }} /></div>
+                    <SegmentedBar
+                      pct={me.maxHp ? Math.max(0, Math.min(100, (me.hp / me.maxHp) * 100)) : 0}
+                      maxValue={me.maxHp}
+                      kind="hp"
+                      fillKind="hp"
+                      critical={me.maxHp > 0 && me.hp > 0 && (me.hp / me.maxHp) * 100 <= 20}
+                    />
                     <div className="bar-row small mt-xs"><span>Mana (MP)</span><b>{me.mp}/{me.maxMp}</b></div>
-                    <div className="progress"><div className="progress-fill mp" style={{ width: `${me.maxMp ? Math.max(0, Math.min(100, (me.mp / me.maxMp) * 100)) : 0}%` }} /></div>
+                    <SegmentedBar
+                      pct={me.maxMp ? Math.max(0, Math.min(100, (me.mp / me.maxMp) * 100)) : 0}
+                      maxValue={me.maxMp}
+                      kind="mp"
+                      fillKind="mp"
+                    />
                     <div className="bar-row small mt-xs"><span>Experience (XP)</span><b>{me.xp || 0}/{me.xpToNext || me.level * 100} XP</b></div>
-                    <div className="progress"><div className="progress-fill xp" style={{ width: `${Math.max(0, Math.min(100, ((me.xp || 0) / (me.xpToNext || me.level * 100)) * 100))}%` }} /></div>
+                    <SegmentedBar
+                      pct={Math.max(0, Math.min(100, ((me.xp || 0) / (me.xpToNext || me.level * 100)) * 100))}
+                      maxValue={me.xpToNext || me.level * 100}
+                      kind="xp"
+                      fillKind="xp"
+                    />
                     {(me.activeEffects || []).length > 0 && (
                       <div className="btn-row mt-xs" style={{ flexWrap: 'wrap', gap: '4px' }}>
                         {(me.activeEffects || []).map((eff) => (
@@ -2679,7 +2696,13 @@ export function BeatDetailView() {
                         </strong>
                         <span>HP <b>{ch.hp}/{ch.maxHp}</b> • MP <b>{ch.mp}/{ch.maxMp}</b> • AC {ch.ac} • DR {ch.dr || 0}</span>
                       </div>
-                      <div className="progress"><div className="progress-fill hp" style={{ width: `${ch.maxHp ? Math.max(0, Math.min(100, (ch.hp / ch.maxHp) * 100)) : 0}%` }} /></div>
+                      <SegmentedBar
+                        pct={ch.maxHp ? Math.max(0, Math.min(100, (ch.hp / ch.maxHp) * 100)) : 0}
+                        maxValue={ch.maxHp}
+                        kind="hp"
+                        fillKind="hp"
+                        critical={ch.maxHp > 0 && ch.hp > 0 && (ch.hp / ch.maxHp) * 100 <= 20}
+                      />
                       {(ch.activeEffects || []).length > 0 && (
                         <div className="btn-row mt-xs" style={{ flexWrap: 'wrap', gap: '4px' }}>
                           {(ch.activeEffects || []).map((eff) => (
@@ -2897,7 +2920,13 @@ export function BeatDetailView() {
                           </div>
                         )}
                         {maxHp && (isDm || state.mechanics?.showExactMonsterHpToPlayers) ? (
-                          <div className="progress"><div className="progress-fill monster" style={{ width: `${pct}%` }} /></div>
+                          <SegmentedBar
+                            pct={pct}
+                            maxValue={maxHp}
+                            ticks={liveMon?.hpBarTicks}
+                            kind="monster"
+                            fillKind="monster"
+                          />
                         ) : null}
                         {isDm && liveMon && (
                           <div className="stack-form mt-xs" style={{ gap: '6px' }}>

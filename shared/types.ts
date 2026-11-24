@@ -22,6 +22,7 @@ export type UnitEffectKind =
   | 'regen'
   | 'burn'
   | 'poison'
+  | 'bleed'
   | 'armor_break'
   | 'weaken'
   | 'slow'
@@ -458,6 +459,7 @@ export interface Monster {
   skills?: MonsterSkill[];
   observedByViewer?: boolean;
   hpPct?: number;
+  hpBarTicks?: Array<{ pct: number; major: boolean }>;
 }
 
 export type ChestTier = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
@@ -579,6 +581,7 @@ export interface MapToken {
   hasUsedConsumableThisTurn?: boolean;
   hasCastSpellThisTurn?: boolean;
   attacksUsedThisTurn?: number;
+  activeEffects?: ActiveUnitEffect[];
   // NPC-specific metadata
   npcRole?: string;
   dialogue?: string;
@@ -854,8 +857,23 @@ export interface PendingReaction {
   attackTotal: number;
   attackFormula?: string;
   attackHit?: boolean;
+  attackModifier?: number;
+  attackEffectDelta?: number;
+  attackAuraPenalty?: number;
+  attackCrit?: boolean;
   incomingDamage: number;
   formula: string;
+  damageRolls?: number[];
+  damageSides?: number;
+  damageModifier?: number;
+  damageEffectDelta?: number;
+  counterDamageRoll?: {
+    formula: string;
+    rolls: number[];
+    sides: number;
+    modifier: number;
+    total: number;
+  } | null;
   // Resolution fields once Player rolls their reaction die (or DM resolves)
   resolved?: boolean;
   resolvedAt?: string;
@@ -882,6 +900,9 @@ export interface PendingReaction {
   playerSuccess?: boolean;
   dmgTaken?: number;
   counterDamageDealt?: number;
+  stunnedEnemy?: boolean;
+  bleedApplied?: boolean;
+  mitigationPct?: number;
   resolutionSummary?: string;
 }
 

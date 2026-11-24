@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { formatActiveUnitEffect } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
+import { SegmentedBar } from '../common/SegmentedBar';
 import { TokenIconSvg } from '../common/TokenIconSvg';
 
 export function ObserveModal() {
@@ -119,9 +120,13 @@ export function ObserveModal() {
                     )}
                   </span>
                 </div>
-                <div className="progress">
-                  <div className="progress-fill monster" style={{ width: `${hpPct}%` }} />
-                </div>
+                <SegmentedBar
+                  pct={hpPct}
+                  maxValue={mon.maxHp ?? 0}
+                  ticks={mon.hpBarTicks}
+                  kind="monster"
+                  fillKind="monster"
+                />
               </div>
             )}
 
@@ -197,9 +202,13 @@ export function ObserveModal() {
                       </strong>
                     </span>
                   </div>
-                  <div className="progress">
-                    <div className="progress-fill hp" style={{ width: `${plHpPct}%` }} />
-                  </div>
+                  <SegmentedBar
+                    pct={plHpPct}
+                    maxValue={pl.maxHp}
+                    kind="hp"
+                    fillKind="hp"
+                    critical={plHpPct > 0 && plHpPct <= 20}
+                  />
                 </div>
                 <div className="observe-stat-grid">
                   <div className="observe-stat-tile">

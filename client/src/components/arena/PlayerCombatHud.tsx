@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { SegmentedBar } from '../common/SegmentedBar';
 import {
   DEFAULT_COMBAT_MAX_ROUNDS,
   UNIT_EFFECT_META,
@@ -472,9 +473,14 @@ export function PlayerCombatHud({
                   {me.hp}/{me.maxHp}
                 </b>
               </div>
-              <div className="pcombat-bar-track pcombat-bar-hp">
-                <div className="progress-fill hp" style={{ width: `${hpPct}%` }} />
-              </div>
+              <SegmentedBar
+                pct={hpPct}
+                maxValue={me.maxHp}
+                kind="hp"
+                trackClassName="pcombat-bar-track pcombat-bar-hp"
+                fillKind="hp"
+                critical={hpPct > 0 && hpPct <= 20}
+              />
             </div>
 
             <div className="pcombat-bar-item">
@@ -484,9 +490,13 @@ export function PlayerCombatHud({
                   {me.mp}/{me.maxMp}
                 </b>
               </div>
-              <div className="pcombat-bar-track pcombat-bar-mp">
-                <div className="progress-fill mp" style={{ width: `${mpPct}%` }} />
-              </div>
+              <SegmentedBar
+                pct={mpPct}
+                maxValue={me.maxMp}
+                kind="mp"
+                trackClassName="pcombat-bar-track pcombat-bar-mp"
+                fillKind="mp"
+              />
             </div>
 
             <div className="pcombat-bar-item">
@@ -496,9 +506,13 @@ export function PlayerCombatHud({
                   {me.xp || 0}/{xpTarget}
                 </b>
               </div>
-              <div className="pcombat-bar-track pcombat-bar-xp">
-                <div className="progress-fill xp" style={{ width: `${xpPct}%` }} />
-              </div>
+              <SegmentedBar
+                pct={xpPct}
+                maxValue={xpTarget}
+                kind="xp"
+                trackClassName="pcombat-bar-track pcombat-bar-xp"
+                fillKind="xp"
+              />
             </div>
           </div>
         </div>
@@ -927,9 +941,14 @@ export function PlayerCombatHud({
                                   </div>
                                 )}
                                 {isObserved && maxHp ? (
-                                  <div className="progress mt-xs">
-                                    <div className="progress-fill monster" style={{ width: `${pct}%` }} />
-                                  </div>
+                                  <SegmentedBar
+                                    pct={pct}
+                                    maxValue={maxHp}
+                                    ticks={liveMon?.hpBarTicks}
+                                    kind="monster"
+                                    trackClassName="progress mt-xs"
+                                    fillKind="monster"
+                                  />
                                 ) : null}
                               </div>
                             );
@@ -1227,14 +1246,25 @@ export function PlayerCombatHud({
                     {me.mp}/{me.maxMp} &rarr; {Math.max(0, Number(me.mp || 0) - Number(pendingSpellConfirm.spell.mpCost || 0))}/{me.maxMp} MP
                   </b>
                 </div>
-                <div className="progress mt-xs">
-                  <div
-                    className="progress-fill mp"
-                    style={{
-                      width: `${me.maxMp ? Math.max(0, Math.min(100, (Math.max(0, Number(me.mp || 0) - Number(pendingSpellConfirm.spell.mpCost || 0)) / me.maxMp) * 100)) : 0}%`,
-                    }}
-                  />
-                </div>
+                <SegmentedBar
+                  pct={
+                    me.maxMp
+                      ? Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            (Math.max(0, Number(me.mp || 0) - Number(pendingSpellConfirm.spell.mpCost || 0)) /
+                              me.maxMp) *
+                              100,
+                          ),
+                        )
+                      : 0
+                  }
+                  maxValue={me.maxMp}
+                  kind="mp"
+                  trackClassName="progress mt-xs"
+                  fillKind="mp"
+                />
               </div>
               <div className="btn-row" style={{ justifyContent: 'flex-end', gap: '8px' }}>
                 <button

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   computeCharacterMoveSpaces,
   computePassiveModifiers,
@@ -8,7 +9,9 @@ import {
   type RollLogEntry,
 } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
-import { DiabloEquipmentGrid } from '../common/DiabloEquipmentGrid';
+import { SegmentedBar } from '../common/SegmentedBar';
+
+type StatsSubTab = 'attributes' | 'passives' | 'history';
 
 function tierClass(t: string): string {
   return `tag-tier-${String(t || 'Normal').toLowerCase().replace(/\s+/g, '-')}`;
@@ -27,25 +30,25 @@ export function PlayerStatsTab({
     state,
     sendAction,
     pushLocalToast,
-    setTradeItemId,
     setGachaModalOpen,
     setGachaSpinData,
     setActivePromptModal,
   } = useVtt();
 
+  const [subTab, setSubTab] = useState<StatsSubTab>('attributes');
+  const [showFormula, setShowFormula] = useState(false);
+
   if (!state) return null;
 
-  const isBuildLocked = isStatsAndEquipmentLocked(state);
   const xpNext = ch.xpToNext || ch.level * 100;
-  const canLevelUp = Number(ch.xp || 0) >= xpNext;
   const unspentPts = Number(ch.unspentStatPoints || 0);
+  const canLevelUp = (ch.xp || 0) >= xpNext;
   const milestones = state.mechanics?.statMilestones || [];
-
+  const isBuildLocked = isStatsAndEquipmentLocked(state);
   const passiveTickets = Number(ch.passiveTickets || 0);
   const hasPendingDraw = Boolean(ch.pendingPassiveDraw);
   const ownedPassives = ch.passives || [];
 
-  // Build combined passive summary from structured PassiveModifiers
   const pMods = computePassiveModifiers(ch);
   const agiScore = ch.stats?.AGI ?? ch.stats?.DEX ?? 10;
   const partyFloor = state ? getPartyFloor(state) : 1;
@@ -54,12 +57,12 @@ export function PlayerStatsTab({
     floor: partyFloor,
     passiveSpeedBonus: pMods.bonusSpeedSpaces,
   });
+
   const passiveTotals = new Map<string, { val: number; unit: string }>();
   const addTotal = (label: string, val: number, unit = '') => {
     if (!val) return;
     passiveTotals.set(label, { val, unit });
   };
-
   addTotal('Max HP', pMods.bonusHp);
   addTotal('Max MP', pMods.bonusMp);
   addTotal('Armor Class', pMods.bonusAc);
@@ -139,14 +142,20 @@ export function PlayerStatsTab({
     (state.storyBeats || []).slice().reverse().find((b) => b.presented && b.status === 'active')
     || (state.storyBeats || []).slice().reverse().find((b) => b.presented);
 
+  const unansweredPrompts = (activeBeat?.prompts || []).filter((pr) => {
+    const isForMe = pr.target === 'all' || pr.target === ch.id;
+    const answered = (pr.answers || []).some((a) => a.characterId === ch.id);
+    return isForMe && !answered;
+  });
+
   const feedItems = [
-    ...(state.systemMessages || []).slice(0, 6).map((m) => ({
+    ...(state.systemMessages || []).slice(0, 8).map((m) => ({
       id: m.id,
       ts: m.timestamp,
       kind: 'sys',
       text: `[${m.title}] ${m.message}`,
     })),
-    ...(state.combatLog || []).slice(0, 8).map((c) => ({
+    ...(state.combatLog || []).slice(0, 10).map((c) => ({
       id: c.id,
       ts: c.timestamp,
       kind: 'combat',
@@ -154,7 +163,7 @@ export function PlayerStatsTab({
     })),
   ]
     .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-    .slice(0, 12);
+    .slice(0, 14);
 
   const handleDrawPassive = async () => {
     if (ch.pendingPassiveDraw) {
@@ -169,132 +178,224 @@ export function PlayerStatsTab({
     }
   };
 
+  const hpPct = Math.max(0, Math.min(100, (ch.hp / (ch.maxHp || 1)) * 100));
+  const mpPct = ch.maxMp ? Math.max(0, Math.min(100, (ch.mp / ch.maxMp) * 100)) : 0;
+  const xpPct = Math.max(0, Math.min(100, ((ch.xp || 0) / xpNext) * 100));
+
   return (
-    <div className="two-col">
-      <div className="col stack">
-        <div className="panel card-glow-cyan">
-          <div className="panel-header">
-            <h3>Status</h3>
+    <div className="pstats-shell">
+      {/* CONCEPT A: UNIFIED VITALS CARD */}
+      <section className="pstatus-vitals-card" aria-label="Character Vitals">
+        <div className="pstatus-vital-row">
+          <div className="pstatus-vital-top">
+            <span className="pstatus-vital-label is-hp">HP</span>
+            <strong id="p-hp-readout" className="pstatus-vital-val">
+              {ch.hp} / {ch.maxHp}
+              {ch.tempHp ? ` (+${ch.tempHp} Temp)` : ''}
+            </strong>
           </div>
+          <SegmentedBar
+            pct={hpPct}
+            maxValue={ch.maxHp}
+            kind="hp"
+            trackClassName="progress pstatus-progress"
+            fillKind="hp"
+            fillId="p-hp-fill"
+            critical={hpPct > 0 && hpPct <= 20}
+          />
+        </div>
 
-          <div className="vitals-editor">
-            <div className="bar-card">
-              <div className="bar-row">
-                <span>HP</span>
-                <strong id="p-hp-readout">
-                  {ch.hp} / {ch.maxHp}
-                  {ch.tempHp ? ` (+${ch.tempHp} Temp)` : ''}
-                </strong>
-              </div>
-              <div className="progress">
-                <div
-                  id="p-hp-fill"
-                  className="progress-fill hp"
-                  style={{ width: `${Math.max(0, Math.min(100, (ch.hp / (ch.maxHp || 1)) * 100))}%` }}
-                />
-              </div>
-            </div>
-            <div className="bar-card">
-              <div className="bar-row">
-                <span id="p-mp-name">{state.mechanics?.resourceName || 'Mana (MP)'}</span>
-                <strong id="p-mp-readout">
-                  {ch.mp} / {ch.maxMp}
-                </strong>
-              </div>
-              <div className="progress">
-                <div
-                  id="p-mp-fill"
-                  className="progress-fill mp"
-                  style={{ width: `${ch.maxMp ? Math.max(0, Math.min(100, (ch.mp / ch.maxMp) * 100)) : 0}%` }}
-                />
-              </div>
-            </div>
+        <div className="pstatus-vital-row">
+          <div className="pstatus-vital-top">
+            <span id="p-mp-name" className="pstatus-vital-label is-mp">
+              {state.mechanics?.resourceName || 'MP'}
+            </span>
+            <strong id="p-mp-readout" className="pstatus-vital-val">
+              {ch.mp} / {ch.maxMp}
+            </strong>
           </div>
+          <SegmentedBar
+            pct={mpPct}
+            maxValue={ch.maxMp}
+            kind="mp"
+            trackClassName="progress pstatus-progress"
+            fillKind="mp"
+            fillId="p-mp-fill"
+          />
+        </div>
 
-          <div className="bar-card mt-xs">
-            <div className="bar-row">
-              <span>Experience (XP)</span>
-              <div className="btn-row" style={{ alignItems: 'center', gap: '8px' }}>
-                <strong id="p-xp-readout">
-                  Lv {ch.level} • {ch.xp || 0} / {xpNext} XP
-                </strong>
-                <button
-                  type="button"
-                  id="btn-p-level-up"
-                  className="btn btn-xs btn-gold"
-                  disabled={!canLevelUp}
-                  title={
-                    canLevelUp
-                      ? 'XP bar full — click to Level Up!'
-                      : `Need ${xpNext} XP to level up (${ch.xp || 0}/${xpNext})`
-                  }
-                  onClick={async () => {
-                    const res = await sendAction<{ outcome?: { level: number } }>('level_up', { characterId: ch.id });
-                    if (res?.outcome) {
-                      pushLocalToast({
-                        title: `LEVEL UP! LEVEL ${res.outcome.level}`,
-                        message: `${ch.name} reached Level ${res.outcome.level}! (+2 Stat Points & +1 Passive Skill Ticket)`,
-                        category: 'loot',
-                      });
-                    }
-                  }}
-                >
-                  Level Up
-                </button>
-              </div>
-            </div>
-            <div className="progress">
-              <div
-                id="p-xp-fill"
-                className="progress-fill xp"
-                style={{ width: `${Math.max(0, Math.min(100, ((ch.xp || 0) / xpNext) * 100))}%` }}
-              />
-            </div>
+        <div className="pstatus-vital-row">
+          <div className="pstatus-vital-top">
+            <span className="pstatus-vital-label is-xp">EXP</span>
+            <strong id="p-xp-readout" className="pstatus-vital-val">
+              {ch.xp || 0} / {xpNext} XP
+            </strong>
           </div>
-
-          <div className="mini-stats-strip">
-            <div className="mini-box" title="Armor Class: target roll needed to hit you">
-              <span>Armor Class</span>
-              <strong id="p-ac-val">{ch.ac}</strong>
-              <small className="muted">Hit Defense</small>
-            </div>
-            <div className="mini-box" title="Damage Reduction: flat damage subtracted from incoming hits">
-              <span>Damage Reduction</span>
-              <strong id="p-dr-val">{ch.dr}</strong>
-              <small className="muted">Dmg Reduced</small>
-            </div>
-            <div className="mini-box" title="Movement: Base 3 + AGI (+1 per 4 AGI > 10) + Floor scaling">
-              <span>Move</span>
-              <strong id="p-speed-val">{moveInfo.total} Spaces</strong>
-              <small className="muted">
-                Base {moveInfo.base}
-                {moveInfo.agiBonus > 0 ? ` • AGI +${moveInfo.agiBonus}` : ''}
-                {moveInfo.floorBonus > 0 ? ` • ${partyFloor}F +${moveInfo.floorBonus}` : ''}
-                {moveInfo.passiveBonus > 0 ? ` • Passive +${moveInfo.passiveBonus}` : ''}
-              </small>
-            </div>
-            <div className="mini-box mini-box-locked" title="Favor system is not unlocked yet">
-              <span>Favor</span>
-              <strong id="p-favor-val">1</strong>
-              <small className="muted">Locked</small>
-            </div>
+          <div className="pstatus-xp-bar-row">
+            <SegmentedBar
+              pct={xpPct}
+              maxValue={xpNext}
+              kind="xp"
+              trackClassName="progress pstatus-progress"
+              trackStyle={{ flex: 1 }}
+              fillKind="xp"
+              fillId="p-xp-fill"
+            />
+            <button
+              type="button"
+              id="btn-p-level-up"
+              className="btn btn-xs btn-gold pstatus-lvlup-btn"
+              disabled={!canLevelUp}
+              title={
+                canLevelUp
+                  ? 'XP bar full — click to Level Up!'
+                  : `Need ${xpNext} XP to level up (${ch.xp || 0}/${xpNext})`
+              }
+              onClick={async () => {
+                const res = await sendAction<{ outcome?: { level: number } }>('level_up', { characterId: ch.id });
+                if (res?.outcome) {
+                  pushLocalToast({
+                    title: `LEVEL UP! LEVEL ${res.outcome.level}`,
+                    message: `${ch.name} reached Level ${res.outcome.level}! (+2 Stat Points & +1 Passive Skill Ticket)`,
+                    category: 'loot',
+                  });
+                }
+              }}
+            >
+              Level Up
+            </button>
           </div>
+        </div>
+      </section>
 
-          <div className="panel-subheader">
-            <span>
-              Attributes{' '}
+      {/* CONCEPT B: 3-COLUMN COMBAT STAT BENTO (AC, DR, MOVE) */}
+      <section className="pcombat-stat-bento" aria-label="Combat Stats">
+        <div className="pcombat-bento-tile" title="Armor Class: target roll needed to hit you">
+          <div className="pcombat-bento-head">
+            <svg viewBox="0 0 24 24" width="24" height="24" style={{ flexShrink: 0 }} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <span>AC</span>
+          </div>
+          <strong id="p-ac-val" className="pcombat-bento-val">{ch.ac}</strong>
+          <small className="pcombat-bento-sub">Hit Defense</small>
+        </div>
+
+        <div className="pcombat-bento-tile" title="Damage Reduction: flat damage subtracted from incoming hits">
+          <div className="pcombat-bento-head">
+            <svg viewBox="0 0 24 24" width="24" height="24" style={{ flexShrink: 0 }} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M20 7l-8-4-8 4v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V7z" />
+              <path d="M9 12l2 2 4-4" />
+            </svg>
+            <span>DR</span>
+          </div>
+          <strong id="p-dr-val" className="pcombat-bento-val">{ch.dr}</strong>
+          <small className="pcombat-bento-sub">Dmg Reduced</small>
+        </div>
+
+        <div className="pcombat-bento-tile" title="Movement: Base 3 + AGI (+1 per 4 AGI > 10) + Floor scaling">
+          <div className="pcombat-bento-head">
+            <svg viewBox="0 0 24 24" width="24" height="24" style={{ flexShrink: 0 }} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M13 4v6l5 3M5 20h14" />
+              <circle cx="13" cy="4" r="1" />
+            </svg>
+            <span>MOVE</span>
+          </div>
+          <strong id="p-speed-val" className="pcombat-bento-val">{moveInfo.total} Sp</strong>
+          <small className="pcombat-bento-sub">
+            Base {moveInfo.base}
+            {moveInfo.agiBonus > 0 ? ` • AGI +${moveInfo.agiBonus}` : ''}
+            {moveInfo.floorBonus > 0 ? ` • ${partyFloor}F +${moveInfo.floorBonus}` : ''}
+          </small>
+        </div>
+      </section>
+
+      {/* UNANSWERED DM QUESTION ALERT (ONLY WHEN NEEDED) */}
+      {activeBeat && unansweredPrompts.length > 0 && (
+        <div className="pstats-prompt-callout">
+          <div className="pstats-prompt-text">
+            <span className="tag tag-gold">DM QUESTION</span>
+            <strong>{unansweredPrompts[0].question}</strong>
+          </div>
+          <div className="btn-row" style={{ gap: '6px' }}>
+            <button
+              type="button"
+              className="btn btn-xs btn-gold"
+              onClick={() => setActivePromptModal({ beatId: activeBeat.id, promptId: unansweredPrompts[0].id })}
+            >
+              Answer
+            </button>
+            <button type="button" className="btn btn-xs btn-outline" onClick={() => onOpenBeat(activeBeat.id)}>
+              Open Beat
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CONCEPT C: SEGMENTED SUB-TAB BAR */}
+      <div className="pstats-segmented" role="tablist" aria-label="Character Sheet Sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === 'attributes'}
+          className={`pstats-seg-btn ${subTab === 'attributes' ? 'active' : ''}`}
+          onClick={() => setSubTab('attributes')}
+        >
+          Attributes
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === 'passives'}
+          className={`pstats-seg-btn ${subTab === 'passives' ? 'active' : ''}`}
+          onClick={() => setSubTab('passives')}
+        >
+          Passives ({ownedPassives.length})
+          {(passiveTickets > 0 || hasPendingDraw) && <span className="pstats-seg-dot" aria-hidden="true" />}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === 'history'}
+          className={`pstats-seg-btn ${subTab === 'history' ? 'active' : ''}`}
+          onClick={() => setSubTab('history')}
+        >
+          History
+        </button>
+      </div>
+
+      {/* TAB 1: CONCEPT C ATTRIBUTE ROWS */}
+      {subTab === 'attributes' && (
+        <section className="pstats-panel">
+          <div className="pstats-section-head">
+            <div className="pstats-section-title-row">
+              <span className="pstats-section-label">ATTRIBUTES</span>
               {(isBuildLocked || unspentPts > 0) && (
                 <span id="p-stat-points-pill" className="tag tag-gold">
-                  {isBuildLocked ? `Locked (Active Story Beat) • +${unspentPts} Pts` : `+${unspentPts} Pts Available`}
+                  {isBuildLocked ? 'Locked in Combat' : `+${unspentPts} Pts`}
                 </span>
               )}
-            </span>
-            <code id="p-formula-badge" className="formula-pill">
-              {state.mechanics?.statFormula || 'floor((SCORE-10)/2)'}
-            </code>
+            </div>
+            <button
+              type="button"
+              className="pstats-info-btn"
+              aria-label="Toggle Stat Formula"
+              title="View Stat Modifier Formula"
+              onClick={() => setShowFormula((v) => !v)}
+            >
+              i
+            </button>
           </div>
 
-          <div id="p-stats-grid" className="stats-grid">
+          {showFormula && (
+            <div className="pstats-formula-drawer">
+              <code id="p-formula-badge" className="formula-pill">
+                {state.mechanics?.statFormula || 'floor((SCORE-10)/2)'}
+              </code>
+            </div>
+          )}
+
+          <div id="p-stats-grid" className="pattr-list">
             {(state.mechanics?.stats || []).map((st) => {
               const score = Number(ch.stats?.[st.key] ?? st.defaultValue ?? 10);
               const mod = computeStatModifier(score, state.mechanics, ch);
@@ -306,40 +407,60 @@ export function PlayerStatsTab({
               const nextMs = statMilestones.find((m) => score < Number(m.threshold || 20));
               const msUnlocked = unlockedList.length > 0;
               const latestUnlocked = unlockedList[unlockedList.length - 1];
+              const targetThreshold = Number((nextMs || latestUnlocked)?.threshold || 20);
+              const msPct = Math.max(0, Math.min(100, (score / targetThreshold) * 100));
+              const msLabel = nextMs
+                ? `${score}/${nextMs.threshold} ${nextMs.abilityName}`
+                : latestUnlocked
+                  ? `Awakened: ${latestUnlocked.abilityName}`
+                  : '';
 
               return (
-                <div key={st.key} className={`stat-card ${msUnlocked ? 'card-glow-gold' : ''}`}>
-                  <div className="stat-key">{st.key}</div>
-                  <div className="stat-mod">{modStr}</div>
-                  <div className="btn-row" style={{ justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-                    {score > 1 && (
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-outline"
-                        disabled={isBuildLocked}
-                        title={isBuildLocked ? 'Locked while session and story beat are active' : 'Refund 1 point to Pts Available'}
-                        onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: -1 })}
-                      >
-                        -1
-                      </button>
-                    )}
-                    <input type="number" value={score} readOnly style={{ width: '62px', textAlign: 'center' }} />
-                    {unspentPts > 0 && (
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-gold"
-                        disabled={isBuildLocked}
-                        title={isBuildLocked ? 'Locked while session and story beat are active' : 'Spend 1 point from Pts Available'}
-                        onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: 1 })}
-                      >
-                        +1
-                      </button>
+                <div key={st.key} className={`pattr-row ${msUnlocked ? 'is-awakened' : ''}`}>
+                  <div className="pattr-left">
+                    <span className="pattr-key">{st.key}</span>
+                    <strong className="pattr-score">{score}</strong>
+                    <span className="pattr-mod">{modStr}</span>
+                  </div>
+
+                  <div className="pattr-mid" title={(latestUnlocked || nextMs)?.description || ''}>
+                    {msLabel && (
+                      <>
+                        <div className="pattr-ms-label">{msLabel}</div>
+                        <div className="pattr-ms-track">
+                          <div
+                            className={`pattr-ms-fill ${msUnlocked ? 'is-gold' : ''}`}
+                            style={{ width: `${msPct}%` }}
+                          />
+                        </div>
+                      </>
                     )}
                   </div>
-                  <div className="btn-row mt-xs" style={{ justifyContent: 'center' }}>
+
+                  <div className="pattr-actions">
+                    {!isBuildLocked && score > 1 && (
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-outline pattr-step-btn"
+                        title="Refund 1 point"
+                        onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: -1 })}
+                      >
+                        -
+                      </button>
+                    )}
+                    {!isBuildLocked && unspentPts > 0 && (
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-gold pattr-step-btn"
+                        title="Spend 1 point"
+                        onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: 1 })}
+                      >
+                        +
+                      </button>
+                    )}
                     <button
                       type="button"
-                      className="btn btn-xs btn-outline"
+                      className="btn btn-xs btn-outline pattr-roll-btn"
                       onClick={async () => {
                         const floorNum = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
                         const dc = 10 + Math.floor(floorNum * 1.2);
@@ -363,93 +484,72 @@ export function PlayerStatsTab({
                       d20{modStr}
                     </button>
                   </div>
-                  {statMilestones.length > 0 && (
-                    <div
-                      className="muted small"
-                      style={{ marginTop: '4px', color: msUnlocked ? '#fbbf24' : '#94a3b8' }}
-                      title={(latestUnlocked || nextMs)?.description || ''}
-                    >
-                      {latestUnlocked && (
-                        <div>
-                          AWAKENED ({latestUnlocked.threshold}): {latestUnlocked.abilityName}
-                        </div>
-                      )}
-                      {nextMs && (
-                        <div>
-                          Next {nextMs.threshold}: {nextMs.abilityName}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
 
-          <details className="sub-details mt-sm">
-            <summary>Skills &amp; Proficiencies</summary>
-            <div id="p-skills-list" className="list-stack mt-sm">
-              {(ch.skills || []).map((sk, idx) => {
-                const baseScore = Number(ch.stats?.[sk.stat || ''] ?? 10);
-                const mod = computeStatModifier(baseScore, state.mechanics, ch) + Number(sk.bonus || 0);
-                const sign = mod >= 0 ? `+${mod}` : `${mod}`;
-                return (
-                  <div key={sk.id || `${sk.name}-${idx}`} className="item-card">
-                    <div className="item-card-top">
-                      <strong>
-                        {sk.name} {sk.stat ? <span className="muted small">({sk.stat})</span> : null}
-                      </strong>
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-cyan"
-                        onClick={async () => {
-                          const floorNum = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
-                          const dc = 10 + Math.floor(floorNum * 1.2);
-                          const res = await sendAction<{ roll?: RollLogEntry }>('roll_dice', {
-                            count: 1,
-                            sides: 20,
-                            modifier: mod,
-                            dc,
-                            label: `${sk.name} Check (DC ${dc})`,
-                            rollerName: ch.name,
-                          });
-                          if (res?.roll) {
-                            pushLocalToast({
-                              title: sk.name.toUpperCase(),
-                              message: `Rolled ${res.roll.total} vs DC ${dc} (${res.roll.passed ? 'SUCCESS' : 'FAILED'})`,
-                              category: res.roll.passed ? 'loot' : 'warning',
+          {(ch.skills || []).length > 0 && (
+            <details className="sub-details mt-sm">
+              <summary>Skills &amp; Proficiencies ({(ch.skills || []).length})</summary>
+              <div id="p-skills-list" className="list-stack mt-xs">
+                {(ch.skills || []).map((sk, idx) => {
+                  const baseScore = Number(ch.stats?.[sk.stat || ''] ?? 10);
+                  const mod = computeStatModifier(baseScore, state.mechanics, ch) + Number(sk.bonus || 0);
+                  const sign = mod >= 0 ? `+${mod}` : `${mod}`;
+                  return (
+                    <div key={sk.id || `${sk.name}-${idx}`} className="item-card small">
+                      <div className="item-card-top">
+                        <strong>
+                          {sk.name} {sk.stat ? <span className="muted small">({sk.stat})</span> : null}
+                        </strong>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-cyan"
+                          onClick={async () => {
+                            const floorNum = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
+                            const dc = 10 + Math.floor(floorNum * 1.2);
+                            const res = await sendAction<{ roll?: RollLogEntry }>('roll_dice', {
+                              count: 1,
+                              sides: 20,
+                              modifier: mod,
+                              dc,
+                              label: `${sk.name} Check (DC ${dc})`,
+                              rollerName: ch.name,
                             });
-                          }
-                        }}
-                      >
-                        Roll {sign}
-                      </button>
+                            if (res?.roll) {
+                              pushLocalToast({
+                                title: sk.name.toUpperCase(),
+                                message: `Rolled ${res.roll.total} vs DC ${dc} (${res.roll.passed ? 'SUCCESS' : 'FAILED'})`,
+                                category: res.roll.passed ? 'loot' : 'warning',
+                              });
+                            }
+                          }}
+                        >
+                          Roll {sign}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </details>
+                  );
+                })}
+              </div>
+            </details>
+          )}
+        </section>
+      )}
 
-          <div className="panel-subheader mt-sm">
-            <span>
-              Passive Skills{' '}
-              <span id="p-passive-tickets-pill" className="tag tag-gold">
-                {passiveTickets} Ticket{passiveTickets === 1 ? '' : 's'}
-              </span>
+      {/* TAB 2: PASSIVES */}
+      {subTab === 'passives' && (
+        <section className="pstats-panel">
+          <div className="pstats-section-head">
+            <span id="p-passive-tickets-pill" className="tag tag-gold">
+              {passiveTickets} Ticket{passiveTickets === 1 ? '' : 's'}
             </span>
             <button
               type="button"
               id="btn-roll-passive-gacha"
               className="btn btn-xs btn-purple"
               disabled={!hasPendingDraw && passiveTickets < 1}
-              title={
-                hasPendingDraw
-                  ? 'You have an unresolved Passive Skill Lottery draw — click to Acquire or Decline'
-                  : passiveTickets < 1
-                    ? 'Level up to earn a Passive Skill Ticket'
-                    : 'Spend 1 Passive Skill Ticket to draw a passive skill'
-              }
               onClick={handleDrawPassive}
             >
               {hasPendingDraw ? 'Resume Pending Draw' : 'Draw Passive (1 Ticket)'}
@@ -458,35 +558,32 @@ export function PlayerStatsTab({
 
           {ownedPassives.length > 0 && (
             <div id="p-passives-summary" className="list-stack mt-xs">
-              <div className="gacha-odds-bar" style={{ marginBottom: '6px' }}>
-                <span className="small muted">Acquired Tiers:</span>
+              <div className="gacha-odds-bar">
                 {tierOrder
                   .filter((t) => tierCounts[t] > 0)
                   .map((t) => (
                     <span key={t} className={`tag ${tierClass(t)}`}>
-                      {t} ×{tierCounts[t]}
+                      {t} &times;{tierCounts[t]}
                     </span>
                   ))}
               </div>
-              <div className="item-card">
-                <div className="small muted" style={{ marginBottom: '4px' }}>
-                  <strong>Combined Passive Effects</strong>
+              {(passiveTotals.size > 0 || specialEffects.size > 0) && (
+                <div className="item-card small">
+                  <div className="gacha-odds-bar">
+                    {Array.from(passiveTotals.entries()).map(([label, { val, unit }]) => (
+                      <span key={label} className="tag tag-cyan">
+                        +{val}
+                        {unit} {label}
+                      </span>
+                    ))}
+                    {Array.from(specialEffects.values()).map((s) => (
+                      <span key={s.text} className="tag tag-purple">
+                        {s.text}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-                <div className="gacha-odds-bar">
-                  {Array.from(passiveTotals.entries()).map(([label, { val, unit }]) => (
-                    <span key={label} className="tag tag-cyan">
-                      +{val}
-                      {unit} {label}
-                    </span>
-                  ))}
-                  {Array.from(specialEffects.values()).map((s) => (
-                    <span key={s.text} className="tag tag-purple">
-                      {s.text}
-                      {s.count > 1 ? ` (×${s.count})` : s.multPct > 100 ? ` (${s.multPct}%)` : ''}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -496,11 +593,11 @@ export function PlayerStatsTab({
                 const stacks = Number(p.stacks || 1);
                 const multPct = Number(p.multiplierPct || 100);
                 return (
-                  <div key={p.id} className="item-card">
+                  <div key={p.id} className="item-card small">
                     <div className="item-card-top">
                       <strong>
                         {p.name} <span className={`tag ${tierClass(p.tier)}`}>{p.tier}</span>
-                        {stacks > 1 && <span className="tag tag-gold">×{stacks} ({multPct}%)</span>}
+                        {stacks > 1 && <span className="tag tag-gold">&times;{stacks} ({multPct}%)</span>}
                       </strong>
                     </div>
                     <div className="small muted">{p.description}</div>
@@ -508,7 +605,7 @@ export function PlayerStatsTab({
                 );
               })
             ) : (
-              <div className="small muted">No passive skills acquired yet. Level up to earn tickets!</div>
+              <div className="item-card small muted">No passive skills acquired yet. Level up to earn tickets!</div>
             )}
           </div>
 
@@ -523,168 +620,50 @@ export function PlayerStatsTab({
                 ))}
               </div>
               <div className="small muted mt-xs">
-                Pool size: {pool.length} passive skills. Duplicate pulls multiply the passive's effect (+50%, +60%, +70%, +80%, ...). Declining a draw grants Gold &amp; XP scaled to your floor level.
+                Pool size: {pool.length} passive skills. Duplicate pulls multiply the passive&apos;s effect (+50%, +60%, +70%, ...).
               </div>
             </div>
           </details>
-        </div>
-      </div>
+        </section>
+      )}
 
-      <div className="col stack">
-        {activeBeat && (
-          <div id="p-active-story-card" className="panel card-glow-gold">
-            <div className="panel-header">
-              <h3>{activeBeat.title}</h3>
-              <div className="btn-row">
-                <span className={`tag ${activeBeat.beatType === 'narration' ? 'tag-purple' : 'tag-crimson'}`}>
-                  {activeBeat.beatType === 'narration' ? 'NARRATION' : 'COMBAT'}
-                </span>
-                <span className="tag tag-gold">{activeBeat.floor}F</span>
+      {/* TAB 3: HISTORY */}
+      {subTab === 'history' && (
+        <section className="pstats-panel">
+          {activeBeat && (
+            <div className="item-card small mb-xs" style={{ borderColor: 'rgba(251, 191, 36, 0.4)' }}>
+              <div className="item-card-top">
+                <strong>
+                  {activeBeat.title} <span className="tag tag-gold">{activeBeat.floor}F</span>
+                </strong>
+                <div className="btn-row" style={{ gap: '6px' }}>
+                  <button type="button" className="btn btn-xs btn-gold" onClick={() => onOpenBeat(activeBeat.id)}>
+                    Open
+                  </button>
+                  {activeBeat.beatType !== 'narration' && (
+                    <button type="button" className="btn btn-xs btn-cyan" onClick={() => onOpenBeatMap(activeBeat.id)}>
+                      Map
+                    </button>
+                  )}
+                </div>
               </div>
+              {activeBeat.narration && <div className="small muted mt-xs">{activeBeat.narration}</div>}
             </div>
-            <div className="story-narration">{activeBeat.narration}</div>
-            {(activeBeat.prompts || []).length > 0 && (
-              <div className="list-stack mt-xs">
-                {activeBeat.prompts!.map((pr) => {
-                  const isForMe = pr.target === 'all' || pr.target === ch.id;
-                  const myAns = (pr.answers || []).find((a) => a.characterId === ch.id);
-                  const partyCount = Object.keys(state.characters || {}).length;
-                  const allGroupDone =
-                    pr.target === 'all'
-                      ? partyCount > 0 && (pr.answers || []).length >= partyCount
-                      : (pr.answers || []).length >= 1;
-                  return (
-                    <div key={pr.id} className="item-card" style={{ borderColor: 'rgba(168, 85, 247, 0.45)' }}>
-                      <div className="item-card-top">
-                        <strong className="small">
-                          <span className={`tag ${pr.target === 'all' ? 'tag-cyan' : 'tag-gold'}`}>
-                            {pr.target === 'all' ? 'DM Asks Group' : `DM Asks ${pr.targetName}`}
-                          </span>{' '}
-                          &ldquo;{pr.question}&rdquo;
-                        </strong>
-                        {isForMe && (
-                          <button
-                            type="button"
-                            className="btn btn-xs btn-gold"
-                            onClick={() => setActivePromptModal({ beatId: activeBeat.id, promptId: pr.id })}
-                          >
-                            {myAns ? (allGroupDone ? 'View Poll' : 'Waiting Status') : 'Answer in Modal'}
-                          </button>
-                        )}
-                      </div>
-                      {myAns && !allGroupDone ? (
-                        <div className="small mt-xs" style={{ color: '#fbbf24' }}>
-                          Waiting on other players to make an answer...
-                        </div>
-                      ) : (
-                        (pr.answers || []).map((ans) => (
-                          <div key={ans.id} className="small mt-xs" style={{ paddingLeft: '6px', borderLeft: '2px solid #38bdf8' }}>
-                            <b style={{ color: '#38bdf8' }}>{ans.characterName}:</b> &ldquo;{ans.answer}&rdquo;
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <div className="btn-row mt-xs">
-              <button type="button" className="btn btn-xs btn-gold" onClick={() => onOpenBeat(activeBeat.id)}>
-                View Beat{(activeBeat.prompts || []).length > 0 ? ' & Answer DM' : ''}
-              </button>
-              {activeBeat.beatType !== 'narration' && (
-                <button type="button" className="btn btn-xs btn-cyan" onClick={() => onOpenBeatMap(activeBeat.id)}>
-                  View Map ({activeBeat.arena?.cols || 20}×{activeBeat.arena?.rows || 20})
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+          )}
 
-        <div className="panel card-glow-cyan">
-          <div className="panel-header">
-            <h3>Equipment &amp; Inventory</h3>
-            <span id="p-stats-currency" className="tag tag-gold">
-              {ch.currency?.gold || 0} Gold • {ch.currency?.manaStones || 0} Mana Stones
-            </span>
-          </div>
-          <div className="panel-subheader"><span>Equipped Gear</span></div>
-          <div id="p-stats-equip-list" className="d2-equip-grid mt-xs">
-            <DiabloEquipmentGrid equipment={ch.equipment} />
-          </div>
-          <div className="panel-subheader mt-sm"><span>Inventory</span></div>
-          <div id="p-stats-inv-list" className="list-stack mt-xs" style={{ maxHeight: '260px', overflowY: 'auto' }}>
-            {(ch.inventory || []).length > 0 ? (
-              ch.inventory.map((it) => {
-                const isEquippable = it.category !== 'consumable' && it.category !== 'skill_book';
-                return (
-                  <div key={it.id} className="item-card">
-                    <div className="item-card-top">
-                      <strong>
-                        {it.name} <span className="tag tag-cyan">{it.category || 'item'}</span>
-                      </strong>
-                      <span>
-                        Qty {it.qty || 1}
-                        {it.damageDice ? ` • ${it.damageDice}` : ''}
-                      </span>
-                    </div>
-                    {it.notes && <div className="muted small">{it.notes}</div>}
-                    <div className="btn-row mt-xs">
-                      {it.category === 'consumable' && (
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-cyan"
-                          onClick={() => sendAction('inventory_action', { characterId: ch.id, subAction: 'use_consumable', itemId: it.id })}
-                        >
-                          Use
-                        </button>
-                      )}
-                      {isEquippable && (
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-gold"
-                          disabled={isBuildLocked}
-                          title={isBuildLocked ? 'Locked while session and story beat are active' : undefined}
-                          onClick={() => sendAction('equipment_action', { characterId: ch.id, subAction: 'equip', itemId: it.id })}
-                        >
-                          Equip
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-outline"
-                        onClick={() => {
-                          const others = Object.values(state.characters || {}).filter((o) => o.id !== ch.id);
-                          if (!others.length) {
-                            pushLocalToast({ title: 'NO PLAYERS', message: 'No other players available to trade with.', category: 'warning' });
-                            return;
-                          }
-                          setTradeItemId(it.id);
-                        }}
-                      >
-                        Trade
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
+          <div id="p-system-feed" className="feed-list">
+            {feedItems.length > 0 ? (
+              feedItems.map((f) => (
+                <div key={f.id} className={`feed-entry ${f.kind}`}>
+                  {f.text}
+                </div>
+              ))
             ) : (
-              <div className="muted small">Your inventory is empty.</div>
+              <div className="item-card small muted">No recent combat or system events yet.</div>
             )}
           </div>
-        </div>
-
-        <details className="panel sub-details-panel">
-          <summary>System &amp; Combat Feed</summary>
-          <div id="p-system-feed" className="feed-list mt-sm">
-            {feedItems.map((f) => (
-              <div key={f.id} className={`feed-entry ${f.kind}`}>
-                {f.text}
-              </div>
-            ))}
-          </div>
-        </details>
-      </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -261,38 +261,117 @@ export interface PlayerReactionStyleInfo {
   label: string;
   statTag: string;
   shortDesc: string;
+  effectTag: string;
+}
+
+export function computeBlockMitigationPct(vit: number): number {
+  const v = Number(vit || 10);
+  return Math.max(20, Math.min(95, Math.round(25 + Math.max(0, v - 10) * 1.4)));
+}
+
+export function computeParryStunChancePct(str: number, per: number): number {
+  const avg = Math.round((Number(str || 10) + Number(per || 10)) / 2);
+  return Math.max(25, Math.min(75, Math.round(25 + Math.max(0, avg - 10) * 2)));
+}
+
+export function computeCounterBleedChancePct(agi: number): number {
+  const a = Number(agi || 10);
+  return Math.max(20, Math.min(60, Math.round(20 + Math.max(0, a - 10) * 1.5)));
 }
 
 export function resolvePlayerReactionStyle(ch?: { stats?: Record<string, number> } | null): PlayerReactionStyleInfo {
   const str = Number(ch?.stats?.STR ?? 10);
   const per = Number(ch?.stats?.PER ?? 10);
-  const vit = Number(ch?.stats?.VIT ?? 10);
   const agi = Number(ch?.stats?.AGI ?? 10);
 
   const parryScore = (str + per) / 2;
-  const blockScore = vit;
   const counterScore = agi;
 
-  if (counterScore > parryScore && counterScore > blockScore) {
+  if (counterScore > parryScore) {
+    const bleedChance = computeCounterBleedChancePct(agi);
     return {
       style: 'counter',
-      label: 'Counter-Attack',
+      label: 'Counter',
       statTag: 'AGI',
-      shortDesc: 'Weapon riposte on win',
+      shortDesc: 'Strike back mid-swing to halve incoming damage.',
+      effectTag: `Riposte • ${bleedChance}% Bleed`,
     };
   }
-  if (blockScore > parryScore && blockScore >= counterScore) {
-    return {
-      style: 'block',
-      label: 'Block',
-      statTag: 'VIT',
-      shortDesc: 'Absorb the incoming blow',
-    };
-  }
+  const stunChance = computeParryStunChancePct(str, per);
   return {
     style: 'parry',
     label: 'Parry',
     statTag: 'STR/PER',
-    shortDesc: 'Deflect the incoming strike',
+    shortDesc: 'Deflect the strike cleanly and stagger your foe.',
+    effectTag: `0 Dmg on Win • ${stunChance}% Stun`,
   };
+}
+
+export interface PlayerDefenseReactionInfo {
+  choice: 'block' | 'dodge';
+  label: string;
+  statTag: string;
+  mitigationPct?: number;
+  shortDesc: string;
+  effectTag: string;
+}
+
+export function resolvePlayerDefenseReaction(ch?: { stats?: Record<string, number> } | null): PlayerDefenseReactionInfo {
+  const vit = Number(ch?.stats?.VIT ?? 10);
+  const agi = Number(ch?.stats?.AGI ?? 10);
+
+  if (vit > agi) {
+    const mitigationPct = computeBlockMitigationPct(vit);
+    return {
+      choice: 'block',
+      label: 'Block',
+      statTag: 'VIT',
+      mitigationPct,
+      shortDesc: 'Brace your guard to absorb the brunt of the blow.',
+      effectTag: `Up to ${mitigationPct}% Mitigated`,
+    };
+  }
+  return {
+    choice: 'dodge',
+    label: 'Dodge',
+    statTag: 'AGI',
+    shortDesc: 'Slip past the attack completely — all or nothing.',
+    effectTag: '0 Dmg on Win • Full on Fail',
+  };
+}
+
+export interface BarTick {
+  pct: number;
+  major: boolean;
+}
+
+const BAR_STEP_LADDER = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+const XP_STEP_LADDER = [20, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+
+/**
+ * Computes Dota 2-style proportional divider ticks for HP, MP, EXP, or Monster HP bars.
+ * Minor ticks represent a consistent unit step; every 5th tick is a bold major divider.
+ */
+export function computeSegmentedBarTicks(
+  maxValue: number,
+  kind: 'hp' | 'mp' | 'xp' | 'monster' = 'hp',
+): BarTick[] {
+  const max = Number(maxValue);
+  if (!Number.isFinite(max) || max <= 0) return [];
+
+  const ladder = kind === 'xp' ? XP_STEP_LADDER : BAR_STEP_LADDER;
+  const maxTicks = 18;
+  const step =
+    ladder.find((candidate) => Math.round(max / candidate) <= maxTicks + 1) ??
+    ladder[ladder.length - 1];
+
+  const segments = Math.max(1, Math.round(max / step));
+  const ticks: BarTick[] = [];
+  for (let i = 1; i < segments; i++) {
+    ticks.push({
+      pct: Number(((i / segments) * 100).toFixed(4)),
+      major: i % 5 === 0,
+    });
+  }
+  return ticks;
 }

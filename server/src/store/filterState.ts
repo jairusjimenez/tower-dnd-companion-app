@@ -1,5 +1,6 @@
 import {
   PASSIVE_SKILL_POOL,
+  computeSegmentedBarTicks,
   getPartyFloor,
   getPassiveOddsForFloor,
   type FilteredGameState,
@@ -31,14 +32,15 @@ export function maskMonsterForRole(
     mon.maxHp && mon.maxHp > 0
       ? Math.max(0, Math.min(100, Math.round((Number(mon.hp ?? 0) / Number(mon.maxHp)) * 100)))
       : 0;
+  const hpBarTicks = computeSegmentedBarTicks(Number(mon.maxHp ?? 0), 'monster');
   if (role === 'dm') {
-    return { ...mon, healthTier, hpPct, observedByViewer: true };
+    return { ...mon, healthTier, hpPct, hpBarTicks, observedByViewer: true };
   }
   const hasObserved = Boolean(
     characterId && state.characters?.[characterId]?.observedMonsterIds?.includes(mon.id),
   );
   if (hasObserved) {
-    return { ...mon, healthTier, hpPct, observedByViewer: true };
+    return { ...mon, healthTier, hpPct, hpBarTicks, observedByViewer: true };
   }
   return {
     ...mon,
@@ -51,6 +53,7 @@ export function maskMonsterForRole(
     skills: [],
     healthTier: 'Unknown',
     hpPct,
+    hpBarTicks,
     observedByViewer: false,
   };
 }

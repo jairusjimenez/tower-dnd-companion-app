@@ -1,4 +1,4 @@
-# The Tower — DnD Companion App (`v0.7`)
+# The Tower — DnD Companion App (`v0.7.1`)
 
 A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** virtual tabletop and companion app built with **Full-Stack TypeScript, React 18 (Vite), and Fastify**, synchronized live across Dungeon Masters and Players via **Server-Sent Events (SSE)**.
 
@@ -26,7 +26,7 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 
 ---
 
-## What's Implemented (`Version 0.7`)
+## What's Implemented (`Version 0.7.1`)
 
 ### 1. Security, Signed Cookie Sessions & RBAC Onboarding
 - **Two-Step Authentication (`The Tower — DnD Companion App`)**: Clean glassmorphic **Username or Email -> Password** login flow with **no mock accounts or demo quick-login shortcuts**.
@@ -84,6 +84,16 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 - **AGI & Floor-Scaled Movement + Floor-Scaled Loot & Boss Chests**:
   - Lowered Level 1 / 1F base movement to `3 Spaces`, scaling with **AGI** (`+1` per `+4 AGI` above `10`) and **Floor Level** (`+1` at `5F`, `+2` at `15F`, etc.) via `computeCharacterMoveSpaces`.
   - Added floor-scaled monster loot (`getFloorLootProfile`, `scaleLootDropForFloor`), restricted automatic chest drops exclusively to Boss/Mini-Boss monsters (`shouldMonsterDropChest`), added glowing halos on unopened chests, added AI DM turn execution (`aiDm.ts`), and attributed DoT (`burn`/`poison`) defeat rewards & modals (`MonsterDefeatedModal`) accurately.
+
+### 7. Mobile Player Status Redesign, Dynamic Segmented Bars, Clash Mechanics & Unit Tooltips (`v0.7.1`)
+- **Mobile-First Player Status Redesign (`PlayerStatsTab` & `PlayerView`)**: Rebuilt the player screen with a compact hero card, stacked HP/MP/EXP vitals with an inline **Level Up** button on the EXP bar, a 3-column **AC / DR / Move** bento with enlarged `24×24` icons, segmented **Attributes / Passives / History** sub-tabs, and a persistent 4-tab bottom navigation bar.
+- **Dota 2-Style Equal-Width Segmented HP/MP/EXP & Monster Bars (`SegmentedBar`)**: Replaced static CSS gradients with `computeSegmentedBarTicks` (and server-masked `hpBarTicks` for unobserved monsters) so divider density scales proportionally with max HP, MP, EXP, or Monster HP using equal-width segments and bold major ticks every 5th bar — unified across Status, Combat HUD, Beat Detail, Observe, Attack Roll, Clash, Consumable Preview modals, and both HTML5 Canvas maps (`drawBeatArena.ts` & `drawTowerMap.ts`).
+- **Opposed Dice Clash Overhaul (`CombatClashModal`, `combatActions.ts`, `gameHelpers.ts`)**:
+  - Moved **Block** to the 3rd reaction slot (`VIT > AGI` → **Block** with VIT-scaled mitigation up to **95%**; `AGI >= VIT` → **Dodge**).
+  - Added a **Stun** proc chance (`25%–75%`, `100%` on nat 20) on successful **Parry** (`STR/PER`).
+  - Added a stacking, `% max HP`, start-of-round **Bleed** debuff (`3%` max HP per stack for `3` rounds, ticked via `tickBleedEffectsOnRoundStart`) triggered by **Counter-Attack** (`20%–60%` AGI-scaled proc, `100%` on nat 20).
+  - Upgraded the Monster Attack stage to display separate **Accuracy `[1d20]`** and **Damage** dice alongside an explicit **Hit & Damage calculation breakdown**, added a **Counter-Attack Damage** die, and added live **Expected Damage / Heal** numbers with inline segmented HP preview bars on **Counter**, **Cast Spell**, **Dodge**, and **Block**.
+- **Unit Hover Tooltips with Buff/Debuff Stack Counts (`TokenTooltip`)**: Hovering (or touch-holding) over any player, monster, or NPC token on the map displays grouped **`BUFFS (N)`** and **`DEBUFFS (N)`** pills with **`×N`** stack badges and remaining durations.
 
 ---
 
