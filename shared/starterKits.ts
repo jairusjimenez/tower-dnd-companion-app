@@ -51,6 +51,16 @@ export const STARTER_WOODEN_WEAPONS: { melee: StarterWeaponDef[]; ranged: Starte
       body: { name: 'Shadow Apprentice Cloak', acBonus: 2, drBonus: 1 },
       boots: { name: 'Silent Cloth Boots', acBonus: 1, drBonus: 0 },
     },
+    {
+      id: 'wood-gauntlets',
+      name: 'Wooden Gauntlets',
+      damageDice: '1d6+1',
+      damageType: 'Bludgeoning',
+      attackBonus: 4,
+      rangeSpaces: 1,
+      body: { name: 'Brawler Leather Gi', acBonus: 2, drBonus: 1 },
+      boots: { name: 'Wrapped Martial Boots', acBonus: 1, drBonus: 0 },
+    },
   ],
   ranged: [
     {
