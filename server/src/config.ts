@@ -53,6 +53,7 @@ export function resolveConfig(overrides: Partial<ServerConfig> = {}): ServerConf
   const stateFile = overrides.stateFile || path.join(dataDir, 'state.json');
   const backupDir = overrides.backupDir || path.join(dataDir, 'backups');
   const clientDistDir = overrides.clientDistDir || path.join(rootDir, 'dist', 'client');
+  const isProduction = overrides.isProduction ?? process.env.NODE_ENV === 'production';
 
   return {
     port: overrides.port ?? Number(process.env.PORT || 3456),
@@ -60,12 +61,15 @@ export function resolveConfig(overrides: Partial<ServerConfig> = {}): ServerConf
     dataDir,
     stateFile,
     backupDir,
-    dmPasscode: overrides.dmPasscode || process.env.DM_PASSCODE || 'dm123',
+    dmPasscode:
+      overrides.dmPasscode ||
+      process.env.DM_PASSCODE ||
+      (isProduction ? crypto.randomBytes(24).toString('hex') : 'dm123'),
     sessionSecret: overrides.sessionSecret || loadOrCreateSessionSecret(dataDir),
     sessionCookieName: overrides.sessionCookieName || 'tower_vtt_session',
     sessionMaxAgeSec: overrides.sessionMaxAgeSec ?? 60 * 60 * 24 * 7,
     maxBackups: overrides.maxBackups ?? 10,
     clientDistDir,
-    isProduction: overrides.isProduction ?? process.env.NODE_ENV === 'production',
+    isProduction,
   };
 }

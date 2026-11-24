@@ -397,6 +397,9 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: ServerContext): vo
   });
 
   app.post('/api/auth/mock-player', async (req, reply) => {
+    if (config.isProduction) {
+      return reply.code(404).send({ ok: false, error: 'Not found.' });
+    }
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as {
       joinBeat?: boolean;
       storyShowcase?: boolean;

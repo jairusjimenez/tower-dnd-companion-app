@@ -4,11 +4,11 @@ services:
     runtime: node
     plan: free
     buildCommand: npm ci && npm run build
-    startCommand: npm start
+    startCommand: npm run start:prod
     envVars:
       - key: NODE_ENV
         value: production
       - key: DM_PASSCODE
-        value: dm123
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
