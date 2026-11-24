@@ -104,6 +104,8 @@ export interface Spell {
   attackAreaModifier?: number;
   healFormula?: string;
   effectSpec?: UnitEffectSpec | null;
+  spellCategory?: 'damage' | 'utility';
+  scalesWithLevel?: boolean;
   actionType: 'Action' | 'Reaction' | string;
   explanation: string;
 }
@@ -328,6 +330,7 @@ export interface Character {
   xp: number;
   xpToNext: number;
   unspentStatPoints: number;
+  statsConfirmed?: boolean;
   passiveTickets: number;
   passives: PassiveSkill[];
   pendingPassiveDraw?: PendingPassiveDraw | null;
@@ -746,6 +749,7 @@ export interface StoryBeatPrompt {
   triggeredRewardSummary?: string;
   spawnedCombatBeatId?: string;
   spawnedCombatBeatTitle?: string;
+  isFollowUp?: boolean;
   askedAt: string;
   answers: StoryBeatPromptAnswer[];
 }
@@ -766,6 +770,17 @@ export interface CombatDefeatRecord {
   penalties: CombatDefeatPenaltyEntry[];
 }
 
+export interface CombatVictoryRecord {
+  timestamp: string;
+  roundsTaken: number;
+  monstersDefeated: number;
+  defeatedMonsterNames: string[];
+  totalXpGained: number;
+  totalGoldGained: number;
+  totalManaStonesGained: number;
+  itemsLooted: Array<{ name: string; category: string; tier?: string }>;
+}
+
 export interface StoryBeat {
   id: string;
   order: number;
@@ -780,6 +795,8 @@ export interface StoryBeat {
   maxRounds?: number;
   aiDmEnabled?: boolean;
   defeatSummary?: CombatDefeatRecord | null;
+  defeatedLog?: MonsterDefeatSummary[];
+  victorySummary?: CombatVictoryRecord | null;
   arena: BeatArena;
   encounters: BeatEncounterSpec[];
   treasures: BeatTreasureSpec[];

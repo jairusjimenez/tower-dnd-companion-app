@@ -22,7 +22,7 @@ interface LoginResponse {
 }
 
 export function LoginView() {
-  const { enterSession, pushLocalToast, setActiveBeatDetailId } = useVtt();
+  const { enterSession, pushLocalToast } = useVtt();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [step2Ready, setStep2Ready] = useState(false);
@@ -98,34 +98,6 @@ export function LoginView() {
     } catch (err) {
       setDenied(true);
       setErrorMsg(err instanceof Error ? err.message : 'Login failed.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleMockPlayerLogin = async (joinBeat: boolean) => {
-    setErrorMsg('');
-    setDenied(false);
-    setSubmitting(true);
-    try {
-      const res = await apiFetch<LoginResponse>('/api/auth/mock-player', { joinBeat });
-      if (res.session) {
-        resetStep();
-        await enterSession(res.session, { showOnboarding: false });
-        if (res.beatId) {
-          setActiveBeatDetailId(res.beatId);
-        }
-        pushLocalToast({
-          title: joinBeat ? 'COMBAT STORY BEAT JOINED' : 'MOCK PLAYER SESSION',
-          message: joinBeat
-            ? `Entered live combat story beat as ${res.session.name}!`
-            : `Entered the Tower as ${res.session.name}.`,
-          category: 'info',
-        });
-      }
-    } catch (err) {
-      setDenied(true);
-      setErrorMsg(err instanceof Error ? err.message : 'Mock player login failed.');
     } finally {
       setSubmitting(false);
     }
@@ -265,27 +237,6 @@ export function LoginView() {
                   {submitting ? 'Entering...' : 'Enter The Tower'}
                 </button>
               </form>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(148, 163, 184, 0.2)' }}>
-                <button
-                  type="button"
-                  id="btn-mock-player-combat"
-                  className="btn btn-gold btn-lg"
-                  disabled={submitting}
-                  onClick={() => handleMockPlayerLogin(true)}
-                >
-                  {submitting ? 'Entering...' : 'Mock Player: Join Combat Story Beat'}
-                </button>
-                <button
-                  type="button"
-                  id="btn-mock-player-login"
-                  className="btn btn-outline"
-                  disabled={submitting}
-                  onClick={() => handleMockPlayerLogin(false)}
-                >
-                  {submitting ? 'Entering...' : 'Quick Player Mock Login (Dashboard)'}
-                </button>
-              </div>
 
               {errorMsg && (
                 <div id="player-login-error" className="error-box" role="alert">

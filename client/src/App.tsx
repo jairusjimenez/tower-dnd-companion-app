@@ -17,6 +17,8 @@ import { MonsterDefeatedModal } from './components/modals/MonsterDefeatedModal';
 import { NpcDialogueModal } from './components/modals/NpcDialogueModal';
 import { ObserveModal } from './components/modals/ObserveModal';
 import { PassiveGachaModal } from './components/modals/PassiveGachaModal';
+import { PlayerDeathOverlay } from './components/modals/PlayerDeathOverlay';
+import { StoryBeatFinishedModal } from './components/modals/StoryBeatFinishedModal';
 import { StoryPromptModal } from './components/modals/StoryPromptModal';
 import { TradeModal } from './components/modals/TradeModal';
 import { TurnNotificationModal } from './components/modals/TurnNotificationModal';
@@ -78,6 +80,8 @@ export function App() {
       <NpcDialogueModal />
       <ObserveModal />
       <PassiveGachaModal />
+      <PlayerDeathOverlay />
+      <StoryBeatFinishedModal />
       <StoryPromptModal />
       <TradeModal />
       <TurnNotificationModal />

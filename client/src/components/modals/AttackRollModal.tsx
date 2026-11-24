@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MonsterDefeatSummary } from '@shared/index';
+import { scaleSpellForLevel, type MonsterDefeatSummary } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 import { SegmentedBar } from '../common/SegmentedBar';
 
@@ -134,7 +134,9 @@ export function AttackRollModal() {
 
     const timer = window.setTimeout(async () => {
       try {
-        const sp = attackRollRequest.spell;
+        const sp = attackRollRequest.spell
+          ? scaleSpellForLevel(attackRollRequest.spell, attackRollRequest.me.level)
+          : undefined;
         const res = sp
           ? await sendActionRef.current<DamageRes>(
               'spell_action',
@@ -318,8 +320,9 @@ export function AttackRollModal() {
 
   if (!attackRollRequest) return null;
 
-  const { monTok, me, wep, skillName, spell, isSelfSpell, onComplete } = attackRollRequest;
-  const formula = spell ? (spell.damageDice || 'Support') : (attackRollRequest.diceFormulaOverride || wep?.damageDice || '1d6');
+  const { monTok, me, wep, skillName, spell: rawSpell, isSelfSpell, onComplete } = attackRollRequest;
+  const spell = rawSpell ? scaleSpellForLevel(rawSpell, me?.level || 1) : undefined;
+  const formula = spell ? (spell.damageDice && spell.damageDice !== '0' ? spell.damageDice : 'Support') : (attackRollRequest.diceFormulaOverride || wep?.damageDice || '1d6');
   const dmgType = attackRollRequest.damageTypeOverride || wep?.damageType || 'Physical';
   const wepName = spell
     ? `${spell.element || spell.damageType || 'Arcane'} • ${spell.mpCost} MP`

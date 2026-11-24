@@ -397,61 +397,174 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: ServerContext): vo
   });
 
   app.post('/api/auth/mock-player', async (req, reply) => {
-    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as { joinBeat?: boolean };
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as {
+      joinBeat?: boolean;
+      storyShowcase?: boolean;
+      firstTimeOnboarding?: boolean;
+    };
     const joinBeat = Boolean(body.joinBeat);
-    const mockEmail = 'mock.player@tower.gg';
-    const mockUsername = 'mock_climber';
+    const storyShowcase = Boolean(body.storyShowcase);
+    const firstTimeOnboarding = Boolean(body.firstTimeOnboarding);
     const state = repo.getState();
+
+    if (firstTimeOnboarding) {
+      state.session.status = 'stopped';
+      const mockEmail = 'new.climber@tower.gg';
+      const mockUsername = 'new_climber';
+      const prevAccount = state.playerAccounts[mockEmail];
+      if (prevAccount?.characterId) {
+        const oldCharId = prevAccount.characterId;
+        delete state.characters[oldCharId];
+        if (state.map?.tokens) {
+          state.map.tokens = state.map.tokens.filter((t) => t.id !== oldCharId);
+        }
+        for (const beat of state.storyBeats || []) {
+          if (beat.arena?.tokens) {
+            beat.arena.tokens = beat.arena.tokens.filter((t) => t.id !== oldCharId);
+          }
+        }
+      }
+
+      const freshCh = createNewCharacterRecord(state, {
+        name: 'New Adventurer',
+        race: 'Human',
+        className: 'Adventurer',
+      });
+      state.characters[freshCh.id] = freshCh;
+      recalculateCharacterAcAndDr(state, freshCh);
+
+      const { salt, hash } = hashPassword('mockpass');
+      const nowIso = new Date().toISOString();
+      const account = {
+        id: prevAccount?.id || `acc-onb-${Date.now().toString(36)}`,
+        email: mockEmail,
+        username: mockUsername,
+        characterId: freshCh.id,
+        activated: true,
+        invitedAt: prevAccount?.invitedAt || nowIso,
+        salt,
+        passwordHash: hash,
+        lastLoginAt: nowIso,
+      };
+      state.playerAccounts[mockEmail] = account;
+      state.version++;
+      repo.save(state);
+      sseHub.broadcast('state');
+
+      const session: SessionIdentity = {
+        role: 'player',
+        email: account.email,
+        username: account.username,
+        characterId: account.characterId,
+        name: freshCh.name,
+      };
+      setSessionCookie(req, reply, session, config);
+      return reply.code(200).send({ ok: true, firstTimeActivated: true, session });
+    }
+
+    const mockEmail = storyShowcase ? 'story.showcase@tower.gg' : 'mock.player@tower.gg';
+    const mockUsername = storyShowcase ? 'kaelen_showcase' : 'mock_climber';
 
     let account = state.playerAccounts[mockEmail];
     if (!account || !state.characters[account.characterId]) {
-      const ch = createNewCharacterRecord(state, {
-        name: 'Sung Jin-Woo (Mock)',
-        race: 'Human',
-        className: 'Assassin',
-      });
-      ch.level = 3;
-      ch.xp = 80;
-      ch.xpToNext = 220;
-      ch.hp = 42;
-      ch.maxHp = 42;
-      ch.mp = 24;
-      ch.maxMp = 24;
-      ch.currency = { gold: 150, manaStones: 3 };
-      ch.equipment = buildStarterEquipment('dagger', 'Iron').equipment;
-      ch.spells = [
-        {
-          id: `sp-mock-slash-${Date.now().toString(36)}`,
-          name: 'Shadow Slash',
-          element: 'Dark',
-          mpCost: 3,
-          damageDice: '2d6+3',
-          damageType: 'Dark',
-          rangeSpaces: 2,
-          areaText: '2 Spaces',
-          attackArea: 'single',
-          attackAreaModifier: 0,
-          actionType: 'Action',
-          effectSpec: { kind: 'burn', potency: 4, duration: 2, target: 'enemy' },
-          explanation: 'Dark-infused blade strike that inflicts Burn.',
-        },
-        {
-          id: `sp-mock-mend-${Date.now().toString(36)}`,
-          name: 'Mending Light',
-          element: 'Light',
-          mpCost: 3,
-          damageDice: '1d4',
-          damageType: 'Light',
-          rangeSpaces: 4,
-          areaText: '4 Spaces',
-          attackArea: 'single',
-          attackAreaModifier: 0,
-          actionType: 'Action',
-          healFormula: '2d6+3',
-          effectSpec: { kind: 'shield', potency: 2, duration: 2, target: 'self' },
-          explanation: 'Restores HP and raises a protective Light barrier.',
-        },
-      ];
+      const ch = storyShowcase
+        ? createNewCharacterRecord(state, {
+            name: 'Kaelen Vance (Showcase)',
+            race: 'Elf',
+            className: 'Spellblade',
+          })
+        : createNewCharacterRecord(state, {
+            name: 'Sung Jin-Woo (Mock)',
+            race: 'Human',
+            className: 'Assassin',
+          });
+      if (storyShowcase) {
+        ch.level = 4;
+        ch.xp = 180;
+        ch.xpToNext = 320;
+        ch.hp = 58;
+        ch.maxHp = 58;
+        ch.mp = 36;
+        ch.maxMp = 36;
+        ch.stats = { STR: 14, AGI: 16, VIT: 15, INT: 16, PER: 15, LUCK: 12 };
+        ch.currency = { gold: 240, manaStones: 5 };
+        ch.equipment = buildStarterEquipment('sword', 'Iron').equipment;
+        ch.spells = [
+          {
+            id: `sp-showcase-riposte-${Date.now().toString(36)}`,
+            name: 'Arcane Riposte',
+            element: 'Light',
+            mpCost: 3,
+            damageDice: '2d6+2',
+            damageType: 'Light',
+            rangeSpaces: 3,
+            areaText: '3 Spaces',
+            attackArea: 'single',
+            attackAreaModifier: 0,
+            actionType: 'Reaction',
+            explanation: 'Instant counter-bolt triggered when a foe strikes.',
+          },
+          {
+            id: `sp-showcase-pulse-${Date.now().toString(36)}`,
+            name: 'Mending Pulse',
+            element: 'Water',
+            mpCost: 4,
+            damageDice: '',
+            damageType: 'Water',
+            rangeSpaces: 1,
+            areaText: 'Self',
+            attackArea: 'single',
+            attackAreaModifier: 0,
+            actionType: 'Reaction',
+            healFormula: '2d6+4',
+            effectSpec: { kind: 'shield', potency: 2, duration: 2, target: 'self' },
+            explanation: 'Emergency reaction mend that restores HP and raises a barrier.',
+          },
+        ];
+      } else {
+        ch.level = 3;
+        ch.xp = 80;
+        ch.xpToNext = 220;
+        ch.hp = 42;
+        ch.maxHp = 42;
+        ch.mp = 24;
+        ch.maxMp = 24;
+        ch.currency = { gold: 150, manaStones: 3 };
+        ch.equipment = buildStarterEquipment('dagger', 'Iron').equipment;
+        ch.spells = [
+          {
+            id: `sp-mock-slash-${Date.now().toString(36)}`,
+            name: 'Shadow Slash',
+            element: 'Dark',
+            mpCost: 3,
+            damageDice: '2d6+3',
+            damageType: 'Dark',
+            rangeSpaces: 2,
+            areaText: '2 Spaces',
+            attackArea: 'single',
+            attackAreaModifier: 0,
+            actionType: 'Action',
+            effectSpec: { kind: 'burn', potency: 4, duration: 2, target: 'enemy' },
+            explanation: 'Dark-infused blade strike that inflicts Burn.',
+          },
+          {
+            id: `sp-mock-mend-${Date.now().toString(36)}`,
+            name: 'Mending Light',
+            element: 'Light',
+            mpCost: 3,
+            damageDice: '1d4',
+            damageType: 'Light',
+            rangeSpaces: 4,
+            areaText: '4 Spaces',
+            attackArea: 'single',
+            attackAreaModifier: 0,
+            actionType: 'Action',
+            healFormula: '2d6+3',
+            effectSpec: { kind: 'shield', potency: 2, duration: 2, target: 'self' },
+            explanation: 'Restores HP and raises a protective Light barrier.',
+          },
+        ];
+      }
       ch.inventory = [
         createInventoryItem({
           name: 'Healing Vial',
@@ -485,6 +598,8 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: ServerContext): vo
     if (ch) {
       for (const beat of state.storyBeats || []) {
         if (!beat.arena) continue;
+        if (storyShowcase && beat.id.startsWith('beat-mock-combat')) continue;
+        if (!storyShowcase && beat.id.startsWith('beat-mock-story-')) continue;
         beat.arena.tokens = beat.arena.tokens || [];
         if (!beat.arena.tokens.some((t) => t.id === ch.id)) {
           const cols = Number(beat.arena.cols || 20);
@@ -499,14 +614,177 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: ServerContext): vo
             hp: ch.hp,
             maxHp: ch.maxHp,
             hiddenFromPlayers: false,
-            label: 'SJ',
+            label: storyShowcase ? 'KV' : 'SJ',
           });
         }
       }
     }
 
     let joinedBeatId: string | undefined;
-    if (joinBeat && ch) {
+    if (storyShowcase && ch) {
+      state.session.status = 'active';
+      if (!state.session.startedAt) state.session.startedAt = new Date().toISOString();
+
+      ch.hp = ch.maxHp;
+      ch.mp = ch.maxMp;
+      ch.activeEffects = [];
+      ch.combatPassiveFlags = {};
+      recalculateCharacterAcAndDr(state, ch);
+      state.pendingReactions = [];
+      state.lastResolvedClash = null;
+      const priorShowcaseCombatIds = new Set(
+        (state.storyBeats || [])
+          .filter((b) => b.id.startsWith('beat-mock-story-'))
+          .flatMap((b) => (b.prompts || []).map((p) => p.spawnedCombatBeatId).filter((id): id is string => Boolean(id))),
+      );
+      state.storyBeats = (state.storyBeats || []).filter(
+        (b) => !b.id.startsWith('beat-mock-story-') && !priorShowcaseCombatIds.has(b.id),
+      );
+
+      const showcaseArena = createDefaultBeatArena(20, 20);
+      const reserved = new Set<string>(['9,13', '9,8', '6,11', '12,10']);
+      const gen = generateArenaTerrainFromPrompt(
+        'ancient ice crystal sanctum with pillars and frozen altar',
+        20,
+        20,
+        'ice',
+        reserved,
+      );
+      showcaseArena.biome = gen.biome;
+      showcaseArena.terrain = gen.terrain;
+      showcaseArena.tokens = [
+        {
+          id: ch.id,
+          name: ch.name.split(' ')[0],
+          type: 'player',
+          x: 9,
+          y: 13,
+          color: '#38bdf8',
+          hp: ch.hp,
+          maxHp: ch.maxHp,
+          hiddenFromPlayers: false,
+          label: 'KV',
+        },
+        {
+          id: `npc-showcase-orin-${Date.now().toString(36)}`,
+          name: 'Archivist Orin',
+          npcRole: 'Lorekeeper',
+          iconId: 'merchant',
+          dialogue:
+            'The Astral Seal fractures by the hour. Read the runes carefully—or shatter the vault if you seek battle.',
+          rewardType: 'xp',
+          rewardItemName: '',
+          rewardItemCategory: 'relic',
+          rewardSkillDesc: '',
+          rewardXp: 60,
+          rewardGold: 25,
+          rewardClaimed: false,
+          type: 'npc',
+          x: 6,
+          y: 11,
+          color: '#10b981',
+          hp: null,
+          maxHp: null,
+          hiddenFromPlayers: false,
+          label: 'AO',
+        },
+      ];
+      showcaseArena.chests = [
+        {
+          id: `chest-showcase-${Date.now().toString(36)}`,
+          name: 'Sanctum Relic Casket',
+          tier: 'Rare',
+          x: 12,
+          y: 10,
+          gold: 85,
+          manaStones: 2,
+          itemName: 'Runed Ward Charm',
+          itemCategory: 'relic',
+          opened: false,
+        },
+      ];
+
+      const nowIso = new Date().toISOString();
+      const showcaseBeat: StoryBeat = {
+        id: `beat-mock-story-${Date.now().toString(36)}`,
+        order: (state.storyBeats || []).length + 1,
+        floor: 3,
+        beatType: 'narration',
+        title: 'The Shattered Spire of Aethelgard',
+        narration:
+          'Floating sapphire shards hum above a fractured Runic Altar in the 3F Astral Sanctum. Beside a frost-locked vault, Archivist Orin gestures toward three glowing glyphs—each promising a different fate for your climb.',
+        dmSecret: null,
+        presented: true,
+        status: 'active',
+        xpReward: 150,
+        maxRounds: DEFAULT_COMBAT_MAX_ROUNDS,
+        aiDmEnabled: true,
+        arena: showcaseArena,
+        encounters: [],
+        treasures: [],
+        prompts: [
+          {
+            id: `prompt-showcase-${Date.now().toString(36)}`,
+            question: 'How do you approach the fractured Runic Altar?',
+            target: ch.id,
+            targetName: ch.name,
+            options: [
+              'Decipher the Astral Seal',
+              'Shatter the Frost Vault & Engage',
+              'Parley with Archivist Orin',
+            ],
+            branches: [
+              {
+                option: 'Decipher the Astral Seal',
+                scenario:
+                  'You trace the starlight sigils in reverse order. The seal parts smoothly, revealing an Aethelgard Signet!',
+                statCheckStat: 'PER',
+                statCheckDc: 11,
+                rewardType: 'treasure',
+                rewardItemName: 'Aethelgard Signet',
+                rewardItemCategory: 'relic',
+                rewardGold: 120,
+                rewardManaStones: 2,
+                nextQuestion: 'With the Astral Seal unlocked, where do you head next?',
+                nextOptions: ['Ascend the Sapphire Stairway', 'Rest at the Sanctum Brazier'],
+              },
+              {
+                option: 'Shatter the Frost Vault & Engage',
+                scenario:
+                  'Your blade splits the frost lock in a thunderous crack—waking two Spire Sentinels from their slumber!',
+                statCheckStat: 'STR',
+                statCheckDc: 12,
+                rewardType: 'chest',
+                rewardChestTier: 'Rare',
+                rewardGold: 150,
+                rewardManaStones: 2,
+                endsInCombat: true,
+                combatMonsterQty: 2,
+              },
+              {
+                option: 'Parley with Archivist Orin',
+                scenario:
+                  'Impressed by your grasp of Old Tower script, Orin hands over a Frostward Elixir and marks the safe path.',
+                statCheckStat: 'INT',
+                statCheckDc: 10,
+                rewardType: 'treasure',
+                rewardItemName: 'Frostward Elixir',
+                rewardItemCategory: 'consumable',
+                rewardGold: 90,
+                rewardManaStones: 1,
+                nextQuestion: 'Orin opens a hidden passage behind the archives. Do you step through?',
+                nextOptions: ['Enter the Hidden Passage', 'Thank Orin & Inspect the Altar'],
+              },
+            ],
+            askedAt: nowIso,
+            answers: [],
+          },
+        ],
+      } as StoryBeat;
+
+      state.storyBeats.push(showcaseBeat);
+      joinedBeatId = showcaseBeat.id;
+    } else if (joinBeat && ch) {
       state.session.status = 'active';
       if (!state.session.startedAt) state.session.startedAt = new Date().toISOString();
 
@@ -524,8 +802,15 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: ServerContext): vo
 
       let targetBeat =
         (state.storyBeats || []).find(
-          (b) => b.beatType !== 'narration' && b.presented && b.status !== 'resolved',
-        ) || (state.storyBeats || []).find((b) => b.presented && b.status !== 'resolved');
+          (b) =>
+            !b.id.startsWith('beat-mock-story-') &&
+            b.beatType !== 'narration' &&
+            b.presented &&
+            b.status !== 'resolved',
+        ) ||
+        (state.storyBeats || []).find(
+          (b) => !b.id.startsWith('beat-mock-story-') && b.presented && b.status !== 'resolved',
+        );
 
       if (!targetBeat) {
         const arena = createDefaultBeatArena(20, 20);
@@ -675,7 +960,10 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: ServerContext): vo
           targetBeat.aiDmEnabled = true;
         }
         joinedBeatId = targetBeat.id;
-        targetBeat.arena.tokens = targetBeat.arena.tokens || [];
+        const otherMockCharId = state.playerAccounts?.['story.showcase@tower.gg']?.characterId;
+        targetBeat.arena.tokens = (targetBeat.arena.tokens || []).filter(
+          (t) => !(otherMockCharId && otherMockCharId !== ch.id && t.id === otherMockCharId),
+        );
         const pTok = targetBeat.arena.tokens.find((t) => t.id === ch.id);
         if (pTok) {
           pTok.hasMovedThisTurn = false;
@@ -695,7 +983,11 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: ServerContext): vo
 
         const livingMonIds = new Set(beatMons.map((m) => m.id));
         const syncedCombatants = (state.combat.combatants || [])
-          .filter((c) => c.type === 'player' || livingMonIds.has(c.id))
+          .filter(
+            (c) =>
+              (c.type === 'player' && !(otherMockCharId && otherMockCharId !== ch.id && c.id === otherMockCharId)) ||
+              livingMonIds.has(c.id),
+          )
           .map((c) => ({ ...c, hiddenFromPlayers: false }));
 
         if (!syncedCombatants.some((c) => c.id === ch.id)) {

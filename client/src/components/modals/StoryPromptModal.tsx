@@ -214,15 +214,16 @@ export function StoryPromptModal() {
                   </div>
                   {prompt.options!.map((opt, idx) => {
                     const isSelected = selectedOption === opt;
+                    const matchedBr = (prompt.branches || []).find(
+                      (b) => b.option.trim().toLowerCase() === opt.trim().toLowerCase(),
+                    );
+                    const statKey = matchedBr?.statCheckStat ? String(matchedBr.statCheckStat).toUpperCase() : '';
                     return (
                       <button
                         key={`${opt}-${idx}`}
                         type="button"
-                        className={`btn ${isSelected ? 'btn-gold' : 'btn-outline'}`}
+                        className={`btn prompt-option-btn ${isSelected ? 'btn-gold' : 'btn-outline'}`}
                         style={{
-                          justifyContent: 'flex-start',
-                          textAlign: 'left',
-                          padding: '10px 14px',
                           borderColor: isSelected ? '#fbbf24' : 'rgba(148, 163, 184, 0.35)',
                         }}
                         onClick={() => {
@@ -230,10 +231,22 @@ export function StoryPromptModal() {
                           setCustomAnswer('');
                         }}
                       >
-                        <span className="tag tag-cyan" style={{ marginRight: '8px' }}>
+                        <span className="tag tag-cyan prompt-opt-badge">
                           Option {idx + 1}
                         </span>
-                        <span>{opt}</span>
+                        <span className="prompt-opt-text">{opt}</span>
+                        {(statKey || matchedBr?.endsInCombat) && (
+                          <span className="prompt-opt-tags">
+                            {statKey && (
+                              <span className={`tag prompt-stat-tag is-${statKey.toLowerCase()}`}>
+                                {statKey} Check{matchedBr?.statCheckDc ? ` • DC ${matchedBr.statCheckDc}` : ''}
+                              </span>
+                            )}
+                            {matchedBr?.endsInCombat && (
+                              <span className="tag tag-crimson prompt-opt-badge">COMBAT</span>
+                            )}
+                          </span>
+                        )}
                       </button>
                     );
                   })}

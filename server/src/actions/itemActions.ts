@@ -6,11 +6,13 @@ import {
   clampAttackAreaModifier,
   clampSpellToFloor,
   computePassiveModifiers,
-  getMaxSpellsForLevel,
   getPartyFloor,
+  getSpellCategory,
   isStatsAndEquipmentLocked,
   normalizeSpellElement,
   resolveConsumableEffects,
+  scaleSpellForLevel,
+  validateStarterSpellSlot,
   type AttackArea,
   type EquipmentItem,
   type EquipmentSlot,
@@ -30,6 +32,7 @@ import {
   recalculateCharacterAcAndDr,
   resolveAuthorizedCharacter,
   syncCharacterDerived,
+  syncMonsterDerived,
 } from '../services/gameHelpers';
 import { inflictDamageAction } from './combatActions';
 import type { ActionRequestContext, ActionResult } from './types';
@@ -47,14 +50,8 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
       return { status: 403, error: 'Cannot modify another player spells.' };
     }
     if (ch && !isDm) {
-      const maxSpells = getMaxSpellsForLevel(ch.level);
-      if ((ch.spells || []).length >= maxSpells) {
-        const nextLv = (Math.floor(Math.max(1, Number(ch.level || 1)) / 3) + 1) * 3;
-        const msg = maxSpells >= 10
-          ? `Maximum spell limit reached (${ch.spells.length}/10).`
-          : `Spell limit reached (${ch.spells.length}/${maxSpells}). Next spell slot unlocks at Level ${nextLv}.`;
-        return { status: 400, error: msg };
-      }
+      const slotErr = validateStarterSpellSlot(ch, sp);
+      if (slotErr) return { status: 400, error: slotErr };
     }
 
     const normElement = normalizeSpellElement(sp.element);
@@ -93,6 +90,7 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
       attackAreaModifier: spellAreaMod,
       ...(spHeal ? { healFormula: spHeal } : {}),
       ...(spEffect ? { effectSpec: spEffect } : {}),
+      spellCategory: getSpellCategory(sp),
       actionType: sp.actionType === 'Reaction' ? 'Reaction' : 'Action',
       explanation: String(sp.explanation || 'Custom free-flow magic manifestation.').slice(0, 400),
     };
@@ -117,19 +115,16 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
     const sp = ctx.state.grimoire.find((g) => g.id === payload.spellId);
     if (!sp) return { status: 404, error: 'Grimoire spell not found.' };
     if (!authChar.spells.some((s) => s.id === sp.id)) {
-      const maxSpells = getMaxSpellsForLevel(authChar.level);
-      if (!isDm && authChar.spells.length >= maxSpells) {
-        const nextLv = (Math.floor(Math.max(1, Number(authChar.level || 1)) / 3) + 1) * 3;
-        const msg = maxSpells >= 10
-          ? `Maximum spell limit reached (${authChar.spells.length}/10).`
-          : `Spell limit reached (${authChar.spells.length}/${maxSpells}). Next spell slot unlocks at Level ${nextLv}.`;
-        return { status: 400, error: msg };
+      if (!isDm) {
+        const slotErr = validateStarterSpellSlot(authChar, sp);
+        if (slotErr) return { status: 400, error: slotErr };
       }
       authChar.spells.push({ ...sp });
     }
   } else if (sub === 'forget') {
     authChar.spells = authChar.spells.filter((s) => s.id !== payload.spellId);
   } else if (sub === 'update_area') {
+    if (!isDm) return { status: 403, error: 'Learned spell range and area are fixed.' };
     const sp = authChar.spells.find((s) => s.id === payload.spellId);
     if (!sp) return { status: 404, error: 'Spell not found.' };
     if (payload.attackArea !== undefined && PLAYER_ATTACK_AREAS.includes(String(payload.attackArea) as AttackArea)) {
@@ -139,8 +134,12 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
       sp.attackAreaModifier = clampAttackAreaModifier(payload.attackAreaModifier);
     }
   } else if (sub === 'cast') {
-    const sp = authChar.spells.find((s) => s.id === payload.spellId) || ctx.state.grimoire.find((g) => g.id === payload.spellId);
-    if (!sp) return { status: 404, error: 'Spell not found.' };
+    if (!isDm && ctx.state.session?.status !== 'active') {
+      return { status: 403, error: 'Cannot cast spells while the session is paused/locked.' };
+    }
+    const rawSp = authChar.spells.find((s) => s.id === payload.spellId) || ctx.state.grimoire.find((g) => g.id === payload.spellId);
+    if (!rawSp) return { status: 404, error: 'Spell not found.' };
+    const sp = scaleSpellForLevel(rawSp, authChar.level);
     const hasPendingReaction = (ctx.state.pendingReactions || []).some((r) => r.targetCharacterId === authChar.id);
     if (sp.actionType === 'Reaction' && !payload.reactionId && !hasPendingReaction) {
       return { status: 400, error: 'Reaction spells can only be used when a monster attacks you.' };
@@ -210,6 +209,32 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
         ? payload.healFormula.trim()
         : sp.healFormula;
       const castEffectSpec = payload.effectSpec !== undefined ? payload.effectSpec : sp.effectSpec;
+      const isPureDebuffUtility =
+        (!sp.damageDice || sp.damageDice.trim() === '0') &&
+        Boolean(castEffectSpec && (castEffectSpec as UnitEffectSpec).kind && UNIT_EFFECT_META[(castEffectSpec as UnitEffectSpec).kind]);
+      if (isPureDebuffUtility) {
+        const eff = castEffectSpec as UnitEffectSpec;
+        const applied = applyUnitEffect(targetMon, eff, sp.name, authChar.id);
+        syncMonsterDerived(ctx, targetMon.id);
+        if (castTok && !isReactionCast) {
+          castTok.hasCastSpellThisTurn = true;
+        }
+        const summary = `${authChar.name} cast ${sp.name} on ${targetMon.name} — applied ${applied.name} (${applied.turnsRemaining}t, ${cost} MP).`;
+        ctx.state.combatLog.unshift({
+          id: `cblog-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          attacker: authChar.name,
+          target: targetMon.name,
+          rawDamage: 0,
+          finalDamage: 0,
+          damageType: sp.damageType || sp.element,
+          remainingHp: targetMon.hp,
+          summary,
+        });
+        ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
+        commitState(ctx);
+        return { ok: true, summary, monster: targetMon };
+      }
       const dmgRes = inflictDamageAction(ctx, {
         monsterId: payload.targetMonsterId,
         attackerId: authChar.id,
@@ -221,8 +246,8 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
         attackRoll: true,
         isSpell: true,
         rangeSpaces: sp.rangeSpaces,
-        attackArea: payload.attackArea ?? sp.attackArea ?? 'single',
-        attackAreaModifier: payload.attackAreaModifier ?? sp.attackAreaModifier ?? 0,
+        attackArea: isDm ? (payload.attackArea ?? sp.attackArea ?? 'single') : (sp.attackArea ?? 'single'),
+        attackAreaModifier: isDm ? (payload.attackAreaModifier ?? sp.attackAreaModifier ?? 0) : (sp.attackAreaModifier ?? 0),
         ...(castHealFormula ? { healFormula: castHealFormula } : {}),
         ...(castEffectSpec ? { effectSpec: castEffectSpec } : {}),
       });

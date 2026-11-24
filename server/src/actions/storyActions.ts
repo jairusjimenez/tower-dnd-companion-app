@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {
   BALANCE,
   CHEST_TIERS,
+  DEFAULT_COMBAT_MAX_ROUNDS,
   PASSIVE_SKILL_POOL,
   TOKEN_ICON_META,
   VALID_FLOOR_THEME_IDS,
@@ -25,10 +26,12 @@ import {
   spaceDistanceBetweenPoints,
   type BeatEncounterSpec,
   type BeatTreasureSpec,
+  type Character,
   type ChestLootSummary,
   type ChestPassiveTrigger,
   type ChestTier,
   type EquipmentSlot,
+  type GameState,
   type MapToken,
   type Monster,
   type StoryBeat,
@@ -166,6 +169,19 @@ function sanitizePromptBranches(rawBranches: unknown): StoryPromptBranch[] {
   return list.slice(0, 12);
 }
 
+function getActivePromptPartyIds(state: GameState): string[] {
+  const allIds = Object.keys(state.characters || {});
+  if (allIds.length <= 1) return allIds;
+  const mockCharIds = new Set<string>(
+    [
+      state.playerAccounts?.['mock.player@tower.gg']?.characterId,
+      state.playerAccounts?.['story.showcase@tower.gg']?.characterId,
+    ].filter((id): id is string => Boolean(id)),
+  );
+  const nonMockIds = allIds.filter((id) => !mockCharIds.has(id));
+  return nonMockIds.length > 0 ? nonMockIds : allIds;
+}
+
 function executePromptBranchSideEffects(
   ctx: ActionRequestContext,
   beat: StoryBeat,
@@ -176,7 +192,7 @@ function executePromptBranchSideEffects(
   const targetIds =
     promptObj.target !== 'all' && ctx.state.characters?.[promptObj.target]
       ? [promptObj.target]
-      : Object.keys(ctx.state.characters || {});
+      : getActivePromptPartyIds(ctx.state);
 
   promptObj.triggeredOption = matchedBranch.option;
   promptObj.triggeredScenario = matchedBranch.scenario;
@@ -447,7 +463,15 @@ function executePromptBranchSideEffects(
       }
     }
 
-    const combatArena = createDefaultBeatArena(20, 20, ctx.state.characters);
+    const combatPlayerIds = promptObj.target !== 'all' && ctx.state.characters?.[promptObj.target]
+      ? [promptObj.target]
+      : getActivePromptPartyIds(ctx.state);
+    const combatChars: Record<string, Character> = {};
+    for (const cid of combatPlayerIds) {
+      const charRec = ctx.state.characters?.[cid];
+      if (charRec) combatChars[cid] = charRec;
+    }
+    const combatArena = createDefaultBeatArena(20, 20, combatChars);
     combatArena.biome = themed.biome;
     const occ = new Set(combatArena.tokens.map((t) => `${t.x},${t.y}`));
     const genTerrain = generateArenaTerrainFromPrompt(
@@ -488,21 +512,33 @@ function executePromptBranchSideEffects(
       presented: Boolean(beat.presented),
       status: beat.presented ? 'active' : 'upcoming',
       xpReward: Math.max(100, themed.xpReward),
+      maxRounds: beat.maxRounds ?? DEFAULT_COMBAT_MAX_ROUNDS,
+      aiDmEnabled: Boolean(beat.aiDmEnabled),
       arena: combatArena,
       encounters,
       treasures: [],
     };
 
+    // Carry over any NPCs from the parent story beat into the generated combat arena
+    for (const parentTok of beat.arena?.tokens || []) {
+      if (parentTok.type === 'npc' && !combatArena.tokens.some((t) => t.id === parentTok.id)) {
+        combatArena.tokens.push({ ...parentTok });
+      }
+    }
+
     // Spawn the attached monsters onto the new combat beat's arena map immediately
+    const spawnedMonsters: Monster[] = [];
     for (let idx = 0; idx < encounters.length; idx++) {
       const enc = encounters[idx];
-      const res = spawnMonsterAction(ctx, { ...enc, floor });
+      const res = spawnMonsterAction({ ...ctx, role: 'dm' }, { ...enc, floor });
       const spawnedMon = res.monster as Monster | undefined;
       if (spawnedMon) {
+        spawnedMonsters.push(spawnedMon);
         combatArena.tokens.push({
           id: spawnedMon.id,
           name: spawnedMon.name,
           type: 'monster',
+          iconId: spawnedMon.iconId,
           x: enc.startX ? Math.max(0, Math.min(19, Number(enc.startX) - 1)) : Math.min(19, 7 + idx * 2),
           y: enc.startY ? Math.max(0, Math.min(19, Number(enc.startY) - 1)) : 3,
           color: '#ef4444',
@@ -512,6 +548,51 @@ function executePromptBranchSideEffects(
           label: spawnedMon.name.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2) || 'MN',
         });
       }
+    }
+
+    if (combatBeat.presented && spawnedMonsters.length > 0) {
+      const combatPlayerIds = promptObj.target !== 'all' && ctx.state.characters?.[promptObj.target]
+        ? [promptObj.target]
+        : getActivePromptPartyIds(ctx.state);
+      const combatants = [
+        ...combatPlayerIds
+          .map((cid) => ctx.state.characters?.[cid])
+          .filter((c): c is Character => Boolean(c && Number(c.hp ?? 0) > 0))
+          .map((c) => ({
+            id: c.id,
+            name: c.name,
+            type: 'player' as const,
+            hp: c.hp,
+            maxHp: c.maxHp,
+            ac: c.ac,
+            initiative: 19,
+            initMod: 3,
+            hiddenFromPlayers: false,
+          })),
+        ...spawnedMonsters.map((m, idx) => ({
+          id: m.id,
+          name: m.name,
+          type: 'monster' as const,
+          hp: Number(m.hp ?? m.maxHp ?? 20),
+          maxHp: Number(m.maxHp ?? 20),
+          ac: m.ac,
+          initiative: 14 - idx,
+          initMod: 1,
+          hiddenFromPlayers: false,
+        })),
+      ];
+      combatants.sort((a, b) => {
+        const diff = Number(b.initiative ?? 0) - Number(a.initiative ?? 0);
+        if (diff !== 0) return diff;
+        if (a.type !== b.type) return a.type === 'player' ? -1 : 1;
+        return 0;
+      });
+      ctx.state.combat = {
+        active: true,
+        round: 1,
+        turnIndex: 0,
+        combatants,
+      };
     }
 
     // Resolve the current story beat and transition to the newly generated Combat Story Beat
@@ -542,10 +623,18 @@ function executePromptBranchSideEffects(
         ...(matchedBranch.nextOptions && matchedBranch.nextOptions.length > 0
           ? { options: matchedBranch.nextOptions }
           : {}),
+        isFollowUp: true,
         askedAt: new Date().toISOString(),
         answers: [],
       });
     }
+  } else if (beat.beatType === 'narration' && !matchedBranch.endsInCombat && !matchedBranch.nextQuestion) {
+    beat.status = 'resolved';
+    pushSystemToast(ctx, {
+      title: 'STORY BEAT CONCLUDED',
+      message: `"${beat.title}" has reached its conclusion!`,
+      category: 'loot',
+    });
   }
 }
 
@@ -553,7 +642,7 @@ function tryEvaluatePromptBranches(ctx: ActionRequestContext, beat: StoryBeat, p
   const branches = promptObj.branches || [];
   if (branches.length === 0) return;
 
-  const partyIds = Object.keys(ctx.state.characters || {});
+  const partyIds = getActivePromptPartyIds(ctx.state);
   const totalExpected = promptObj.target === 'all' ? Math.max(1, partyIds.length) : 1;
   const answers = promptObj.answers || [];
   if (answers.length < totalExpected) return;
@@ -790,6 +879,23 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
   } else if (sub === 'set_status') {
     if (typeof payload.status === 'string' && ['upcoming', 'active', 'resolved', 'failed'].includes(payload.status)) {
       beat.status = payload.status;
+      if (payload.status === 'resolved') {
+        ctx.state.pendingReactions = [];
+        ctx.state.lastResolvedClash = null;
+      }
+      if (payload.status === 'resolved' && beat.beatType !== 'narration' && !beat.victorySummary) {
+        const log = beat.defeatedLog || [];
+        beat.victorySummary = {
+          timestamp: new Date().toISOString(),
+          roundsTaken: Math.max(1, Number(ctx.state.combat?.round || 1)),
+          monstersDefeated: log.length,
+          defeatedMonsterNames: log.map((d) => d.monsterName),
+          totalXpGained: log.reduce((acc, d) => acc + Number(d.xpGained || 0), 0),
+          totalGoldGained: log.reduce((acc, d) => acc + Number(d.goldGained || 0), 0),
+          totalManaStonesGained: log.reduce((acc, d) => acc + Number(d.manaStonesGained || 0), 0),
+          itemsLooted: log.flatMap((d) => d.items || []),
+        };
+      }
     }
     if (payload.maxRounds !== undefined) {
       beat.maxRounds = clampCombatMaxRounds(payload.maxRounds);
@@ -1656,6 +1762,23 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
     }
     if (typeof payload.status === 'string' && ['upcoming', 'active', 'resolved', 'failed'].includes(payload.status)) {
       beat.status = payload.status;
+      if (payload.status === 'resolved') {
+        ctx.state.pendingReactions = [];
+        ctx.state.lastResolvedClash = null;
+      }
+      if (payload.status === 'resolved' && beat.beatType !== 'narration' && !beat.victorySummary) {
+        const log = beat.defeatedLog || [];
+        beat.victorySummary = {
+          timestamp: new Date().toISOString(),
+          roundsTaken: Math.max(1, Number(ctx.state.combat?.round || 1)),
+          monstersDefeated: log.length,
+          defeatedMonsterNames: log.map((d) => d.monsterName),
+          totalXpGained: log.reduce((acc, d) => acc + Number(d.xpGained || 0), 0),
+          totalGoldGained: log.reduce((acc, d) => acc + Number(d.goldGained || 0), 0),
+          totalManaStonesGained: log.reduce((acc, d) => acc + Number(d.manaStonesGained || 0), 0),
+          itemsLooted: log.flatMap((d) => d.items || []),
+        };
+      }
     }
     if (payload.maxRounds !== undefined) {
       beat.maxRounds = clampCombatMaxRounds(payload.maxRounds);
@@ -1696,6 +1819,7 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
       tok.attacksUsedThisTurn = 0;
       tok.hasObservedThisTurn = false;
       tok.hasUsedConsumableThisTurn = false;
+      tok.hasCastSpellThisTurn = false;
     }
 
     const nextCombatants: typeof ctx.state.combat.combatants = [];
@@ -1820,6 +1944,18 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
       category: 'info',
     });
     tryEvaluatePromptBranches(ctx, beat, promptObj);
+    if (beat.beatType === 'narration' && promptObj.isFollowUp && beat.status !== 'resolved') {
+      const expectedCount =
+        promptObj.target === 'all' ? Math.max(1, getActivePromptPartyIds(ctx.state).length) : 1;
+      if ((promptObj.answers || []).length >= expectedCount) {
+        beat.status = 'resolved';
+        pushSystemToast(ctx, {
+          title: 'STORY BEAT CONCLUDED',
+          message: `"${beat.title}" has reached its conclusion!`,
+          category: 'loot',
+        });
+      }
+    }
   } else if (sub === 'trigger_prompt_branch') {
     const promptId = String(payload.promptId || '');
     const optionName = String(payload.option || '').trim();

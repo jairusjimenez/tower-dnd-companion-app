@@ -59,8 +59,10 @@ export function PlayerView() {
     }
   };
 
+  const isDead = Number(ch.hp ?? 0) <= 0;
+
   return (
-    <section id="player-view" className="view active app-shell player-shell pview-shell">
+    <section id="player-view" className={`view active app-shell player-shell pview-shell${isDead ? ' is-dead-view' : ''}`}>
       {/* CONCEPT B HERO CARD */}
       <header className="phero-wrap">
         <div className="phero-card">

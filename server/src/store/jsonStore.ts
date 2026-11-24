@@ -7,7 +7,7 @@ import {
   scaleMonsterSkillForFloor,
   type GameState,
 } from '../../../shared';
-import { getInitialState } from './initialState';
+import { DEFAULT_TOWER_GRIMOIRE, getInitialState } from './initialState';
 import type { StateRepository } from './repository';
 
 export function migrateGameState(raw: unknown): GameState {
@@ -32,6 +32,36 @@ export function migrateGameState(raw: unknown): GameState {
   if (!Array.isArray(parsed.systemMessages)) parsed.systemMessages = [];
   if (!Array.isArray(parsed.pendingReactions)) parsed.pendingReactions = [];
   if (!Array.isArray(parsed.recentMonsterDefeats)) parsed.recentMonsterDefeats = [];
+
+  const LEGACY_GRIMOIRE_IDS = new Set([
+    'sp-shinsu-lance',
+    'sp-crimson-nova',
+    'sp-shadow-riposte',
+    'sp-aegis-pulse',
+    'sp-tempest-arrow',
+    'sp-sanctuary-ray',
+  ]);
+  if (Array.isArray(parsed.grimoire) && parsed.grimoire.some((g) => LEGACY_GRIMOIRE_IDS.has(g.id) && !g.spellCategory)) {
+    const customSpells = parsed.grimoire.filter((g) => !LEGACY_GRIMOIRE_IDS.has(g.id));
+    parsed.grimoire = [...DEFAULT_TOWER_GRIMOIRE.map((s) => ({ ...s })), ...customSpells];
+  }
+  const defaultGrimoireIds = new Set(DEFAULT_TOWER_GRIMOIRE.map((s) => s.id));
+  if (Array.isArray(parsed.grimoire)) {
+    for (const g of parsed.grimoire) {
+      if (defaultGrimoireIds.has(g.id) && g.scalesWithLevel === undefined) {
+        g.scalesWithLevel = true;
+      }
+    }
+  }
+  for (const ch of Object.values(parsed.characters || {})) {
+    if (Array.isArray(ch?.spells)) {
+      for (const s of ch.spells) {
+        if (defaultGrimoireIds.has(s.id) && s.scalesWithLevel === undefined) {
+          s.scalesWithLevel = true;
+        }
+      }
+    }
+  }
   if (!Array.isArray(parsed.storyBeats)) {
     parsed.storyBeats = fresh.storyBeats;
   } else {

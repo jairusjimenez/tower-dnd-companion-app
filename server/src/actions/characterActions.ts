@@ -184,6 +184,16 @@ export function allocateStatAction(ctx: ActionRequestContext, payload: Record<st
     return { status: 403, error: 'Stats are locked while a session and story beat are active.' };
   }
 
+  if (payload.subAction === 'confirm') {
+    if (Number(ch.unspentStatPoints || 0) !== 0) {
+      return { status: 400, error: 'Spend all unspent stat points before confirming.' };
+    }
+    ch.statsConfirmed = true;
+    logPlayerHistory(ctx.state, ch.id, 'stat', 'Confirmed stat allocation');
+    commitState(ctx);
+    return { ok: true, character: ch };
+  }
+
   const statKey = String(payload.statKey || '').trim().toUpperCase();
   const rawAmount = Math.trunc(Number(payload.amount || 1));
   if (!statKey || rawAmount === 0) return { status: 400, error: 'Stat key and non-zero amount are required.' };
@@ -199,6 +209,9 @@ export function allocateStatAction(ctx: ActionRequestContext, payload: Record<st
     applyStatInvestmentToPools(ch, statKey, rawAmount);
     logPlayerHistory(ctx.state, ch.id, 'stat', `Allocated +${rawAmount} ${statKey} (now ${ch.stats[statKey]})`);
   } else {
+    if (ctx.role !== 'dm' && ch.statsConfirmed && available === 0) {
+      return { status: 400, error: 'Stats are confirmed and locked until your next level up.' };
+    }
     const refund = Math.abs(rawAmount);
     if (currentVal - refund < 1) return { status: 400, error: `${statKey} cannot go below 1.` };
     const milestones = ctx.state.mechanics?.statMilestones || DEFAULT_STAT_MILESTONES;
@@ -419,6 +432,7 @@ export function levelUpAction(ctx: ActionRequestContext, payload: Record<string,
   ch.xpToNext = xpToNextForLevel(ch.level);
   const gainedPoints = statPointsForLevelUp(ch.level);
   ch.unspentStatPoints = Number(ch.unspentStatPoints || 0) + gainedPoints;
+  ch.statsConfirmed = false;
   ch.passiveTickets = Number(ch.passiveTickets || 0) + 1;
 
   const vitMod = computeStatModifier(Number(ch.stats?.VIT ?? 10), ctx.state.mechanics, ch);

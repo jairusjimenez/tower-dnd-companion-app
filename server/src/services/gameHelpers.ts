@@ -500,8 +500,29 @@ export function syncCharacterDerived(ctx: ActionRequestContext, charId: string):
       btok.maxHp = ch.maxHp;
     }
   }
-  const cb = ctx.state.combat.combatants.find((c) => c.id === charId);
-  if (cb) {
+  const cbIdx = ctx.state.combat.combatants.findIndex((c) => c.id === charId);
+  if (ch.hp <= 0) {
+    if (cbIdx >= 0) {
+      ctx.state.combat.combatants.splice(cbIdx, 1);
+      if (ctx.state.combat.combatants.length === 0) {
+        ctx.state.combat.turnIndex = 0;
+      } else if (cbIdx < ctx.state.combat.turnIndex) {
+        ctx.state.combat.turnIndex = Math.max(0, ctx.state.combat.turnIndex - 1);
+      } else if (ctx.state.combat.turnIndex >= ctx.state.combat.combatants.length) {
+        ctx.state.combat.turnIndex = 0;
+      }
+      pushSystemToast(ctx, {
+        title: 'YOU HAVE DIED',
+        message: `${ch.name} has fallen and was removed from turn order.`,
+        category: 'combat',
+        target: ch.id,
+      });
+    }
+    ctx.state.pendingReactions = (ctx.state.pendingReactions || []).filter(
+      (r) => r.targetCharacterId !== charId,
+    );
+  } else if (cbIdx >= 0) {
+    const cb = ctx.state.combat.combatants[cbIdx];
     cb.name = ch.name;
     cb.hp = ch.hp;
     cb.maxHp = ch.maxHp;

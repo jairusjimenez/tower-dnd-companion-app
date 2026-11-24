@@ -1,14 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   PLAYER_ATTACK_AREAS,
   SPELL_ELEMENTS,
   UNIT_EFFECT_KINDS,
   UNIT_EFFECT_META,
   formatMonsterAttackArea,
+  formatSpellScalingHint,
   formatUnitEffectSpec,
   getMaxSpellsForLevel,
+  getNextSpellSlotLevel,
+  getSpellCategory,
   getSpellCraftLimits,
   normalizeSpellElement,
+  scaleSpellForLevel,
+  validateStarterSpellSlot,
   type AttackArea,
   type Character,
   type UnitEffectKind,
@@ -30,6 +35,8 @@ const DICE_TIERS = [
   { val: '8d12+16', dice: 8, sides: 12, minFloor: 15 },
 ];
 
+const SHOW_PATRON_DEITY_PANEL = false;
+
 export function PlayerSpellsTab({ ch }: { ch: Character }) {
   const { state, sendAction, pushLocalToast } = useVtt();
   const [spName, setSpName] = useState('');
@@ -45,31 +52,21 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
   const [spEffectKind, setSpEffectKind] = useState<UnitEffectKind | ''>('');
   const [spEffectPotency, setSpEffectPotency] = useState(3);
   const [spEffectDuration, setSpEffectDuration] = useState(2);
-  const [targetMonsterId, setTargetMonsterId] = useState('');
-
-  const livingMonsters = (state?.monsters || []).filter((m) => m.hp === null || m.hp > 0);
-
-  useEffect(() => {
-    if (livingMonsters.length === 0) {
-      if (targetMonsterId) setTargetMonsterId('');
-    } else if (!livingMonsters.some((m) => m.id === targetMonsterId)) {
-      setTargetMonsterId(livingMonsters[0].id);
-    }
-  }, [state?.monsters, targetMonsterId]);
 
   if (!state) return null;
 
+  const isSessionLocked = state.session?.status !== 'active';
   const pendingReaction = (state.pendingReactions || []).find((r) => r.targetCharacterId === ch.id);
   const maxSpells = getMaxSpellsForLevel(ch.level);
   const spellCount = (ch.spells || []).length;
   const atSpellCap = spellCount >= maxSpells;
-  const nextSpellLevel = (Math.floor(Math.max(1, Number(ch.level || 1)) / 3) + 1) * 3;
+  const nextSpellLevel = getNextSpellSlotLevel(ch.level);
+  const damageCount = (ch.spells || []).filter((s) => getSpellCategory(s) === 'damage').length;
+  const utilityCount = (ch.spells || []).filter((s) => getSpellCategory(s) === 'utility').length;
   const capSuffix = maxSpells >= 10 ? 'MAX 10' : `NEXT LV ${nextSpellLevel}`;
 
   const craftFloor = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
   const craftLimits = getSpellCraftLimits(craftFloor);
-
-  const defaultMonsterId = targetMonsterId || livingMonsters[0]?.id || '';
 
   const handleCraftSubmit = async (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -108,38 +105,39 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
   };
 
   return (
-    <div className="two-col">
+    <div className={SHOW_PATRON_DEITY_PANEL ? 'two-col' : 'stack'}>
       <div className="panel card-glow-purple">
         <div className="panel-header">
           <h3>Spells</h3>
           <span id="p-spell-slots-badge" className="tag tag-purple">
-            {spellCount} / {maxSpells} SPELLS{atSpellCap ? ` • ${capSuffix}` : ''}
+            {maxSpells === 2
+              ? `DMG ${damageCount}/1 • UTIL ${utilityCount}/1`
+              : `${spellCount} / ${maxSpells} SPELLS${atSpellCap ? ` • ${capSuffix}` : ''}`}
           </span>
         </div>
 
-        {livingMonsters.length > 0 && (
-          <label className="mb-xs" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="small muted">Target Monster:</span>
-            <select value={defaultMonsterId} onChange={(e) => setTargetMonsterId(e.target.value)} style={{ maxWidth: '240px' }}>
-              {livingMonsters.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.observedByViewer && m.hp !== null ? `${m.name} (${m.hp}/${m.maxHp} HP)` : m.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
         <div id="p-my-spells" className="list-stack">
-          {(ch.spells || []).map((sp) => {
+          {(ch.spells || []).map((rawSp) => {
+            const sp = scaleSpellForLevel(rawSp, ch.level);
+            const scaleHint = formatSpellScalingHint(rawSp);
             const elName = normalizeSpellElement(sp.element || sp.damageType);
             const isReaction = sp.actionType === 'Reaction';
+            const cat = getSpellCategory(sp);
+            const hasDiceDmg = Boolean(sp.damageDice && sp.damageDice.trim() !== '0');
+            const isEnemyTargeted = !isReaction && (hasDiceDmg || sp.effectSpec?.target === 'enemy');
+            const statChip = hasDiceDmg
+              ? `${sp.damageDice} • ${sp.rangeSpaces} Sp • ${sp.mpCost} MP`
+              : `${sp.healFormula ? `Heal ${sp.healFormula}` : sp.effectSpec ? formatUnitEffectSpec(sp.effectSpec) : 'Utility'} • ${sp.rangeSpaces} Sp • ${sp.mpCost} MP`;
             return (
               <div key={sp.id} className="item-card">
                 <div className="item-card-top">
                   <strong>
                     {sp.name} <span className={`tag tag-el-${elName.toLowerCase()}`}>{elName}</span>
+                    <span className={`tag ${cat === 'utility' ? 'tag-green' : 'tag-crimson'}`}>
+                      {cat === 'utility' ? 'Utility' : 'Damage'}
+                    </span>
                     {isReaction && <span className="tag tag-purple">Reaction</span>}
+                    {scaleHint && <span className="tag tag-gold" title={scaleHint}>Lv-Scaled</span>}
                     {sp.healFormula && <span className="tag tag-green">Heal {sp.healFormula}</span>}
                     {sp.effectSpec && (
                       <span className={`tag ${UNIT_EFFECT_META[sp.effectSpec.kind]?.category === 'buff' ? 'tag-green' : 'tag-crimson'}`}>
@@ -147,49 +145,7 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
                       </span>
                     )}
                   </strong>
-                  <span className="tag tag-cyan">
-                    {sp.damageDice} • {sp.rangeSpaces} Sp • {sp.mpCost} MP
-                  </span>
-                </div>
-                <div className="btn-row mt-xs" style={{ flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-                  <select
-                    aria-label={`${sp.name} Attack Area`}
-                    value={sp.attackArea || 'single'}
-                    onChange={(e) =>
-                      sendAction('spell_action', {
-                        characterId: ch.id,
-                        subAction: 'update_area',
-                        spellId: sp.id,
-                        attackArea: e.target.value,
-                      })
-                    }
-                    style={{ width: 'auto', minHeight: '24px', padding: '2px 6px', fontSize: '0.75rem' }}
-                  >
-                    {PLAYER_ATTACK_AREAS.map((a) => (
-                      <option key={a} value={a}>
-                        Area: {formatMonsterAttackArea(a)}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    aria-label={`${sp.name} Area Modifier`}
-                    value={sp.attackAreaModifier ?? 0}
-                    onChange={(e) =>
-                      sendAction('spell_action', {
-                        characterId: ch.id,
-                        subAction: 'update_area',
-                        spellId: sp.id,
-                        attackAreaModifier: Number(e.target.value),
-                      })
-                    }
-                    style={{ width: 'auto', minHeight: '24px', padding: '2px 6px', fontSize: '0.75rem' }}
-                  >
-                    {[-2, -1, 0, 1, 2, 3, 4].map((m) => (
-                      <option key={m} value={m}>
-                        Mod: {m > 0 ? `+${m}` : m} Sp
-                      </option>
-                    ))}
-                  </select>
+                  <span className="tag tag-cyan">{statChip}</span>
                 </div>
                 <details className="small muted">
                   <summary>
@@ -201,9 +157,17 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
                 <div className="btn-row">
                   <button
                     type="button"
-                    className="btn btn-xs btn-crimson"
-                    disabled={isReaction && !pendingReaction}
-                    title={isReaction && !pendingReaction ? 'Reaction spells are only used when a monster attacks you' : undefined}
+                    className={`btn btn-xs ${isSessionLocked || isEnemyTargeted || (isReaction && !pendingReaction) ? 'btn-outline' : 'btn-crimson'}`}
+                    disabled={isSessionLocked || isEnemyTargeted || (isReaction && !pendingReaction)}
+                    title={
+                      isSessionLocked
+                        ? 'Cannot cast spells while the session is paused/locked'
+                        : isEnemyTargeted
+                          ? 'Cast enemy-targeted spells from the Combat Arena map'
+                          : isReaction && !pendingReaction
+                            ? 'Reaction spells are only used when a monster attacks you'
+                            : undefined
+                    }
                     onClick={async () => {
                       if (isReaction && pendingReaction) {
                         const res = await sendAction<{ summary?: string }>('resolve_reaction', {
@@ -216,34 +180,21 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
                         }
                         return;
                       }
-                      const res = await sendAction<{
-                        summary?: string;
-                        monster?: { name: string; hp: number | null; maxHp: number | null; healthTier?: string };
-                      }>('spell_action', {
+                      const res = await sendAction<{ summary?: string }>('spell_action', {
                         characterId: ch.id,
                         subAction: 'cast',
                         spellId: sp.id,
-                        targetMonsterId: defaultMonsterId || undefined,
                       });
-                      if (res?.monster) {
-                        const hpLabel = res.monster.hp !== null
-                          ? `HP: ${res.monster.hp}/${res.monster.maxHp}`
-                          : res.monster.healthTier || 'Hit';
-                        pushLocalToast({
-                          title: 'SPELL CAST!',
-                          message: `Inflicted dmg to ${res.monster.name} (${hpLabel})`,
-                          category: 'combat',
-                        });
-                      } else if (res?.summary) {
+                      if (res?.summary) {
                         pushLocalToast({ title: 'SPELL CAST!', message: res.summary, category: 'combat' });
                       }
                     }}
                   >
-                    {isReaction ? 'Reaction Cast' : 'Cast'}
+                    {isSessionLocked ? 'Session Locked' : isReaction ? 'Reaction Cast' : isEnemyTargeted ? 'Cast in Arena' : 'Cast'}
                   </button>
                   <button
                     type="button"
-                    className="btn btn-xs btn-outline"
+                    className="btn btn-xs btn-outline readonly-allow"
                     onClick={() => sendAction('spell_action', { characterId: ch.id, subAction: 'forget', spellId: sp.id })}
                   >
                     Remove
@@ -257,27 +208,51 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
         <details className="sub-details mt-sm">
           <summary>Tower Grimoire</summary>
           <div id="p-grimoire-list" className="list-stack mt-sm">
-            {(state.grimoire || []).map((sp) => {
+            {(state.grimoire || []).map((rawSp) => {
+              const sp = scaleSpellForLevel(rawSp, ch.level);
+              const scaleHint = formatSpellScalingHint(rawSp);
               const known = (ch.spells || []).some((s) => s.id === sp.id);
               const elName = normalizeSpellElement(sp.element || sp.damageType);
               const isReaction = sp.actionType === 'Reaction';
+              const cat = getSpellCategory(sp);
+              const slotErr = known ? null : validateStarterSpellSlot(ch, sp);
+              const hasDiceDmg = Boolean(sp.damageDice && sp.damageDice.trim() !== '0');
+              const statSummary = hasDiceDmg
+                ? `${sp.damageDice} • Range: ${sp.rangeSpaces} Spaces • ${sp.mpCost} MP`
+                : `${sp.healFormula ? `Heal ${sp.healFormula}` : sp.effectSpec ? formatUnitEffectSpec(sp.effectSpec) : 'Utility'} • Range: ${sp.rangeSpaces} Spaces • ${sp.mpCost} MP`;
+              const disabledLabel = known
+                ? 'Known'
+                : atSpellCap
+                  ? maxSpells >= 10
+                    ? 'Max 10 Reached'
+                    : `Slot Full (Lv ${nextSpellLevel})`
+                  : slotErr
+                    ? cat === 'damage'
+                      ? 'Damage Slot Full'
+                      : 'Utility Slot Full'
+                    : 'Learn Spell';
               return (
                 <div key={sp.id} className="item-card">
                   <div className="item-card-top">
                     <strong>
                       {sp.name} <span className={`tag tag-el-${elName.toLowerCase()}`}>{elName}</span>
+                      <span className={`tag ${cat === 'utility' ? 'tag-green' : 'tag-crimson'}`}>
+                        {cat === 'utility' ? 'Utility' : 'Damage'}
+                      </span>
                       {isReaction && <span className="tag tag-purple">Reaction</span>}
+                      {scaleHint && <span className="tag tag-gold" title={scaleHint}>Lv-Scaled</span>}
                     </strong>
-                    <span className="small">
-                      {sp.damageDice} • Range: {sp.rangeSpaces} Spaces • {sp.mpCost} MP
-                    </span>
+                    <span className="small">{statSummary}</span>
                   </div>
-                  <div className="muted small">{sp.explanation}</div>
+                  <div className="muted small">
+                    {sp.explanation}
+                    {scaleHint ? <div style={{ color: '#fbbf24', marginTop: '3px' }}>{scaleHint}</div> : null}
+                  </div>
                   <div className="btn-row">
                     <button
                       type="button"
-                      className={`btn btn-xs ${known || atSpellCap ? 'btn-outline' : 'btn-cyan'}`}
-                      disabled={known || atSpellCap}
+                      className={`btn btn-xs ${known || Boolean(slotErr) ? 'btn-outline' : 'btn-cyan'} readonly-allow`}
+                      disabled={known || Boolean(slotErr)}
                       onClick={() =>
                         sendAction('spell_action', {
                           characterId: ch.id,
@@ -286,13 +261,7 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
                         })
                       }
                     >
-                      {known
-                        ? 'Known'
-                        : atSpellCap
-                          ? maxSpells >= 10
-                            ? 'Max 10 Reached'
-                            : `Slot Full (Lv ${nextSpellLevel})`
-                          : 'Learn Spell'}
+                      {disabledLabel}
                     </button>
                   </div>
                 </div>
@@ -432,39 +401,41 @@ export function PlayerSpellsTab({ ch }: { ch: Character }) {
         </details>
       </div>
 
-      <div className="panel card-glow-gold deity-panel-locked">
-        <div className="panel-header">
-          <h3>Patron Deity</h3>
-          <div className="btn-row">
-            <span className="tag tag-tier-normal">LOCKED • FLOOR 1</span>
-            <span className="tag tag-tier-normal">
-              FAVOR: <b id="p-deity-favor">1</b>
-            </span>
-          </div>
-        </div>
-        <div className="deity-locked-stage">
-          <div className="deity-obscured-wrap" aria-hidden="true">
-            <div id="p-deity-active-card" className="system-callout">
-              Patron Deity Locked on Floor 1
+      {SHOW_PATRON_DEITY_PANEL && (
+        <div className="panel card-glow-gold deity-panel-locked">
+          <div className="panel-header">
+            <h3>Patron Deity</h3>
+            <div className="btn-row">
+              <span className="tag tag-tier-normal">LOCKED • FLOOR 1</span>
+              <span className="tag tag-tier-normal">
+                FAVOR: <b id="p-deity-favor">1</b>
+              </span>
             </div>
-            <div id="p-deity-list" className="list-stack mt-sm">
-              {(state.deities || []).map((d) => (
-                <div key={d.id} className="item-card">
-                  <div className="item-card-top">
-                    <strong>{d.name}</strong>
-                    <span className="tag tag-gold">{d.domain}</span>
+          </div>
+          <div className="deity-locked-stage">
+            <div className="deity-obscured-wrap" aria-hidden="true">
+              <div id="p-deity-active-card" className="system-callout">
+                Patron Deity Locked on Floor 1
+              </div>
+              <div id="p-deity-list" className="list-stack mt-sm">
+                {(state.deities || []).map((d) => (
+                  <div key={d.id} className="item-card">
+                    <div className="item-card-top">
+                      <strong>{d.name}</strong>
+                      <span className="tag tag-gold">{d.domain}</span>
+                    </div>
+                    <div className="small">{d.blessingName}: {d.blessingDescription}</div>
                   </div>
-                  <div className="small">{d.blessingName}: {d.blessingDescription}</div>
-                </div>
-              ))}
+                ))}
+              </div>
+            </div>
+            <div className="deity-locked-overlay">
+              <strong>Patron Deity System Locked</strong>
+              <span className="small muted">Not available on Floor 1 of the Tower yet.</span>
             </div>
           </div>
-          <div className="deity-locked-overlay">
-            <strong>Patron Deity System Locked</strong>
-            <span className="small muted">Not available on Floor 1 of the Tower yet.</span>
-          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

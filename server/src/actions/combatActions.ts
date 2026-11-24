@@ -33,6 +33,7 @@ import {
   resolvePlayerDefenseReaction,
   resolvePlayerReactionStyle,
   scaleLootDropForFloor,
+  scaleSpellForLevel,
   scaleMonsterSkillForFloor,
   shouldMonsterDropChest,
   spaceDistanceBetweenPoints,
@@ -222,6 +223,15 @@ export function updateMonsterAction(ctx: ActionRequestContext, payload: Record<s
   const mon = ctx.state.monsters.find((m) => m.id === payload.monsterId);
   if (!mon) return { status: 404, error: 'Monster not found.' };
 
+  const prevHp = Number(mon.hp ?? mon.maxHp ?? 0);
+  const affectedBeats = (ctx.state.storyBeats || []).filter(
+    (b) =>
+      b.beatType !== 'narration' &&
+      b.status !== 'resolved' &&
+      b.status !== 'failed' &&
+      (b.arena?.tokens || []).some((t) => t.type === 'monster' && t.id === mon.id),
+  );
+
   if (payload.remove) {
     ctx.state.monsters = ctx.state.monsters.filter((m) => m.id !== mon.id);
     removeMonsterTokensFromMaps(ctx.state, mon.id);
@@ -231,6 +241,9 @@ export function updateMonsterAction(ctx: ActionRequestContext, payload: Record<s
       ctx.state.combat.turnIndex = 0;
     } else if (ctx.state.combat.turnIndex >= ctx.state.combat.combatants.length) {
       ctx.state.combat.turnIndex = ctx.state.combat.turnIndex % ctx.state.combat.combatants.length;
+    }
+    for (const beat of affectedBeats) {
+      checkAndTriggerBeatVictory(ctx, beat);
     }
   } else {
     const maxHp = payload.maxHp !== undefined ? Math.max(1, Number(payload.maxHp)) : Number(mon.maxHp || 1);
@@ -264,7 +277,15 @@ export function updateMonsterAction(ctx: ActionRequestContext, payload: Record<s
       if (tok) tok.y = getFloorCenterRow(ctx.state, mon.floor);
     }
     syncMonsterDerived(ctx, mon.id);
-    if (Number(mon.hp ?? 0) <= 0) removeMonsterTokensFromMaps(ctx.state, mon.id);
+    if (Number(mon.hp ?? 0) <= 0) {
+      removeMonsterTokensFromMaps(ctx.state, mon.id);
+      if (prevHp > 0) {
+        for (const beat of affectedBeats) {
+          recordNonPlayerMonsterDefeat(ctx, mon, beat, 'Dungeon Master');
+          checkAndTriggerBeatVictory(ctx, beat);
+        }
+      }
+    }
   }
 
   commitState(ctx);
@@ -557,6 +578,63 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
   };
 }
 
+function checkAndTriggerBeatVictory(ctx: ActionRequestContext, beat: StoryBeat | null | undefined): boolean {
+  if (!beat || beat.beatType === 'narration' || beat.status === 'resolved' || beat.status === 'failed') {
+    return false;
+  }
+  const remainingLiving = (beat.arena?.tokens || []).filter((t) => {
+    if (t.type !== 'monster') return false;
+    const m = ctx.state.monsters.find((mon) => mon.id === t.id);
+    return Boolean(m && Number(m.hp ?? 0) > 0);
+  });
+  if (remainingLiving.length > 0) return false;
+
+  const log = beat.defeatedLog || [];
+  beat.status = 'resolved';
+  beat.victorySummary = {
+    timestamp: new Date().toISOString(),
+    roundsTaken: Math.max(1, Number(ctx.state.combat?.round || 1)),
+    monstersDefeated: log.length,
+    defeatedMonsterNames: log.map((d) => d.monsterName),
+    totalXpGained: log.reduce((acc, d) => acc + Number(d.xpGained || 0), 0),
+    totalGoldGained: log.reduce((acc, d) => acc + Number(d.goldGained || 0), 0),
+    totalManaStonesGained: log.reduce((acc, d) => acc + Number(d.manaStonesGained || 0), 0),
+    itemsLooted: log.flatMap((d) => d.items || []),
+  };
+  ctx.state.combat.active = false;
+  ctx.state.pendingReactions = [];
+  ctx.state.lastResolvedClash = null;
+  pushSystemToast(ctx, {
+    title: 'VICTORY!',
+    message: `All ${log.length} monster${log.length === 1 ? '' : 's'} defeated in "${beat.title}"!`,
+    category: 'loot',
+  });
+  return true;
+}
+
+function recordNonPlayerMonsterDefeat(
+  ctx: ActionRequestContext,
+  monster: Monster,
+  beat: StoryBeat | null | undefined,
+  killerName: string,
+): void {
+  const summary: MonsterDefeatSummary = {
+    id: `defeat-${Date.now().toString(36)}-${crypto.randomInt(100, 999)}`,
+    monsterId: monster.id,
+    monsterName: monster.name,
+    floor: Math.max(1, Number(monster.floor || 1)),
+    killerName,
+    xpGained: 0,
+    goldGained: 0,
+    manaStonesGained: 0,
+    items: [],
+  };
+  ctx.state.recentMonsterDefeats = [summary, ...(ctx.state.recentMonsterDefeats || [])].slice(0, 20);
+  if (beat) {
+    beat.defeatedLog = [...(beat.defeatedLog || []), summary];
+  }
+}
+
 function awardMonsterDefeatLoot(
   ctx: ActionRequestContext,
   monster: Monster,
@@ -688,6 +766,11 @@ function awardMonsterDefeatLoot(
       'combat',
       `Defeated ${monster.name} via ${opts.defeatCause} (+${xpGained} XP, +${goldGained}g)`,
     );
+  }
+  if (opts?.dropBeat) {
+    const beat = opts.dropBeat;
+    beat.defeatedLog = [...(beat.defeatedLog || []), summary];
+    checkAndTriggerBeatVictory(ctx, beat);
   }
   return summary;
 }
@@ -925,12 +1008,13 @@ export function resolveReactionAction(ctx: ActionRequestContext, payload: Record
       summary = `${ch.name} failed to dodge ${reaction.monsterName}'s strike (Roll ${dodgeRoll.total} vs ${reaction.attackTotal}) — took ${dmgTaken} dmg!`;
     }
   } else if (effectiveChoice === 'spell') {
-    const spell = payload.spellId
+    const rawSpell = payload.spellId
       ? ((ch.spells || []).find((s) => s.id === payload.spellId) || ctx.state.grimoire.find((s) => s.id === payload.spellId))
       : (ch.spells || []).find((s) => s.actionType === 'Reaction');
-    if (!spell) {
+    if (!rawSpell) {
       return { status: 400, error: 'No reaction spell selected or learned.' };
     }
+    const spell = scaleSpellForLevel(rawSpell, ch.level);
     if (spell.actionType !== 'Reaction') {
       return { status: 400, error: 'Only Reaction spells can be cast during an opposed clash.' };
     }
@@ -1494,9 +1578,17 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
         if (!otherMon) continue;
         const dist = Math.max(Math.abs(otherTok.x - monTok.x), Math.abs(otherTok.y - monTok.y));
         if (dist <= maxDist) {
-          otherMon.hp = Math.max(0, Number(otherMon.hp ?? 0) - finalDamage);
+          const prevOtherHp = Number(otherMon.hp ?? 0);
+          const otherTokPos = { x: otherTok.x, y: otherTok.y };
+          otherMon.hp = Math.max(0, prevOtherHp - finalDamage);
           syncMonsterDerived(ctx, otherMon.id, { skipAutoLoot: true });
-          if (otherMon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, otherMon.id);
+          if (prevOtherHp > 0 && otherMon.hp <= 0) {
+            removeMonsterTokensFromMaps(ctx.state, otherMon.id);
+            awardMonsterDefeatLoot(ctx, otherMon, attackerChar, {
+              dropBeat: activeBeat,
+              monTokPos: otherTokPos,
+            });
+          }
           hitExtras += 1;
         }
       }
@@ -1550,9 +1642,17 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
         const otherMon = ctx.state.monsters.find((m) => m.id === otherTok.id && Number(m.hp ?? 0) > 0);
         if (!otherMon) continue;
         const secDmg = Math.max(0, finalDamage);
-        otherMon.hp = Math.max(0, Number(otherMon.hp ?? 0) - secDmg);
+        const prevOtherHp = Number(otherMon.hp ?? 0);
+        const otherTokPos = { x: otherTok.x, y: otherTok.y };
+        otherMon.hp = Math.max(0, prevOtherHp - secDmg);
         syncMonsterDerived(ctx, otherMon.id, { skipAutoLoot: true });
-        if (otherMon.hp <= 0) removeMonsterTokensFromMaps(ctx.state, otherMon.id);
+        if (prevOtherHp > 0 && otherMon.hp <= 0) {
+          removeMonsterTokensFromMaps(ctx.state, otherMon.id);
+          awardMonsterDefeatLoot(ctx, otherMon, attackerChar, {
+            dropBeat: aoeBeat,
+            monTokPos: otherTokPos,
+          });
+        }
         targetsHit.push(otherMon.id);
         extraHitNames.push(`${otherMon.name} (${otherMon.hp}/${otherMon.maxHp} HP)`);
       }
@@ -1665,6 +1765,9 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
         dropBeat,
         monTokPos: monTokPos ? { x: monTokPos.x, y: monTokPos.y } : null,
       });
+    } else if (dropBeat) {
+      recordNonPlayerMonsterDefeat(ctx, monster, dropBeat, attackerName);
+      checkAndTriggerBeatVictory(ctx, dropBeat);
     }
   }
 

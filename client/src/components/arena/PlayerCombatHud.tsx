@@ -7,6 +7,7 @@ import {
   formatMonsterAttackArea,
   formatUnitEffectSpec,
   normalizeSpellElement,
+  scaleSpellForLevel,
   spaceDistanceBetweenPoints,
   type AttackArea,
   type Character,
@@ -281,6 +282,7 @@ export function PlayerCombatHud({
     return () => ro.disconnect();
   }, [arena.cols, arena.rows]);
 
+  const isDead = Number(me.hp ?? 0) <= 0;
   const hpPct = me.maxHp ? Math.max(0, Math.min(100, (me.hp / me.maxHp) * 100)) : 0;
   const mpPct = me.maxMp ? Math.max(0, Math.min(100, (me.mp / me.maxMp) * 100)) : 0;
   const xpTarget = me.xpToNext || (me.level || 1) * 100;
@@ -354,7 +356,14 @@ export function PlayerCombatHud({
 
   const effectiveCellPx = fitCellPx ? Math.max(14, Math.min(72, Math.round(fitCellPx * zoom))) : null;
 
+  useEffect(() => {
+    if (!isDead) return;
+    setSheet('none');
+    setSelectedSpell(null);
+  }, [isDead]);
+
   const handleGuardedCellClick = (x: number, y: number) => {
+    if (isDead) return;
     if (Date.now() < suppressClickUntilRef.current) return;
     if (effectiveMode === 'spell' && selectedSpell) {
       if (!isMyCombatTurn) {
@@ -399,7 +408,7 @@ export function PlayerCombatHud({
   };
 
   return (
-    <section id="beat-detail-view" className="view active pcombat-shell">
+    <section id="beat-detail-view" className={`view active pcombat-shell${isDead ? ' is-dead-hud' : ''}`}>
       {/* TOP HUD: Compact header + HP / MP / EXP bars */}
       <header className="pcombat-top">
         <div className="pcombat-header-row">
@@ -434,20 +443,22 @@ export function PlayerCombatHud({
             </div>
           </div>
 
-          <button
-            type="button"
-            id="btn-pcombat-info"
-            className={`btn btn-xs ${sheet === 'info' ? 'btn-cyan' : 'btn-outline'} pcombat-info-btn`}
-            onClick={() => toggleSheet('info')}
-            aria-label="Battle Info"
-          >
-            <span>Info</span>
-            {(arenaMons.length > 0 || unansweredPromptCount > 0) && (
-              <span className="pcombat-info-badge">
-                {unansweredPromptCount > 0 ? `!${unansweredPromptCount}` : arenaMons.length}
-              </span>
-            )}
-          </button>
+          {!isDead && (
+            <button
+              type="button"
+              id="btn-pcombat-info"
+              className={`btn btn-xs ${sheet === 'info' ? 'btn-cyan' : 'btn-outline'} pcombat-info-btn`}
+              onClick={() => toggleSheet('info')}
+              aria-label="Battle Info"
+            >
+              <span>Info</span>
+              {(arenaMons.length > 0 || unansweredPromptCount > 0) && (
+                <span className="pcombat-info-badge">
+                  {unansweredPromptCount > 0 ? `!${unansweredPromptCount}` : arenaMons.length}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
         <div className="pcombat-vitals">
@@ -524,7 +535,7 @@ export function PlayerCombatHud({
           </div>
         )}
 
-        {pendingReactionObj && (
+        {!isDead && pendingReactionObj && (
           <div id="beat-reaction-banner" className="reaction-banner pcombat-compact-banner">
             <div className="reaction-info">
               <span className="tag tag-crimson">REACTION</span>
@@ -662,33 +673,35 @@ export function PlayerCombatHud({
         </div>
 
         {/* Floating End Turn / AI Turn action */}
-        <div className="pcombat-endturn-wrap">
-          {beat.aiDmEnabled && activeCombatant?.type === 'monster' && !pendingReactionObj ? (
-            <button
-              type="button"
-              id="btn-beat-run-ai-dm"
-              className="btn btn-sm btn-purple pcombat-endturn-fab"
-              onClick={() => sendAction('initiative_action', { subAction: 'run_ai_dm' })}
-            >
-              Run AI Turn
-            </button>
-          ) : (
-            <button
-              type="button"
-              id="btn-beat-end-turn"
-              className={`btn btn-sm ${isMyCombatTurn ? 'btn-gold' : 'btn-outline'} pcombat-endturn-fab`}
-              disabled={!isMyCombatTurn}
-              onClick={async () => {
-                setSheet('none');
-                setSelectedSpell(null);
-                await sendAction('initiative_action', { subAction: 'end_turn', characterId });
-                pushLocalToast({ title: 'TURN ENDED', message: 'Passed turn to the next combatant.', category: 'info' });
-              }}
-            >
-              {isMyCombatTurn ? 'End Turn' : `Wait (${activeCombatant?.name || 'Turn'})`}
-            </button>
-          )}
-        </div>
+        {!isDead && (
+          <div className="pcombat-endturn-wrap">
+            {beat.aiDmEnabled && activeCombatant?.type === 'monster' && !pendingReactionObj ? (
+              <button
+                type="button"
+                id="btn-beat-run-ai-dm"
+                className="btn btn-sm btn-purple pcombat-endturn-fab"
+                onClick={() => sendAction('initiative_action', { subAction: 'run_ai_dm' })}
+              >
+                Run AI Turn
+              </button>
+            ) : (
+              <button
+                type="button"
+                id="btn-beat-end-turn"
+                className={`btn btn-sm ${isMyCombatTurn ? 'btn-gold' : 'btn-outline'} pcombat-endturn-fab`}
+                disabled={!isMyCombatTurn}
+                onClick={async () => {
+                  setSheet('none');
+                  setSelectedSpell(null);
+                  await sendAction('initiative_action', { subAction: 'end_turn', characterId });
+                  pushLocalToast({ title: 'TURN ENDED', message: 'Passed turn to the next combatant.', category: 'info' });
+                }}
+              >
+                {isMyCombatTurn ? 'End Turn' : `Wait (${activeCombatant?.name || 'Turn'})`}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* SLIDE-UP SHEETS ABOVE BOTTOM DOCK */}
         {sheet !== 'none' && (
@@ -719,9 +732,11 @@ export function PlayerCombatHud({
                   <div className="stack-form" style={{ gap: '10px' }}>
                     <div id="beat-detail-spells" className="list-stack">
                       {(me.spells || []).length > 0 ? (
-                        me.spells.map((sp) => {
+                        me.spells.map((rawSp) => {
+                          const sp = scaleSpellForLevel(rawSp, me.level);
                           const elName = normalizeSpellElement(sp.element || sp.damageType);
                           const isReaction = sp.actionType === 'Reaction';
+                          const hasDiceDmg = Boolean(sp.damageDice && sp.damageDice.trim() !== '0');
                           return (
                             <div key={sp.id} className="item-card">
                               <div className="item-card-top">
@@ -731,7 +746,7 @@ export function PlayerCombatHud({
                                   {isReaction && <span className="tag tag-purple">Reaction</span>}
                                 </strong>
                                 <span className="tag tag-cyan">
-                                  {sp.damageDice} • {sp.mpCost} MP
+                                  {hasDiceDmg ? `${sp.damageDice} • ` : ''}{sp.mpCost} MP
                                 </span>
                               </div>
                               <div className="btn-row mt-xs" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'nowrap', gap: '8px' }}>
@@ -754,7 +769,10 @@ export function PlayerCombatHud({
                                   type="button"
                                   className="btn btn-xs btn-crimson"
                                   style={{ flexShrink: 0 }}
-                                  disabled={isReaction ? !pendingReact : (!isMyCombatTurn || spellsLockedThisTurn || Number(me.mp || 0) < Number(sp.mpCost || 0))}
+                                  disabled={
+                                    state.session?.status !== 'active' ||
+                                    (isReaction ? !pendingReact : (!isMyCombatTurn || spellsLockedThisTurn || Number(me.mp || 0) < Number(sp.mpCost || 0)))
+                                  }
                                   onClick={async () => {
                                     setSheet('none');
                                     if (isReaction && pendingReactionObj) {
@@ -1101,7 +1119,8 @@ export function PlayerCombatHud({
       </main>
 
       {/* BOTTOM ACTION DOCK: Move, Attack, Spells, Observe, Items */}
-      <nav id="beat-detail-action-bar" className="pcombat-dock" aria-label="Combat Actions">
+      {!isDead && (
+        <nav id="beat-detail-action-bar" className="pcombat-dock" aria-label="Combat Actions">
         <button
           type="button"
           className={`pcombat-dock-btn is-cyan ${effectiveMode === 'move' && sheet === 'none' ? 'is-active' : ''}`}
@@ -1190,6 +1209,7 @@ export function PlayerCombatHud({
           <span>Items</span>
         </button>
       </nav>
+      )}
 
       {pendingSpellConfirm && (
         <div
@@ -1228,7 +1248,7 @@ export function PlayerCombatHud({
                   <span className={`tag tag-el-${normalizeSpellElement(pendingSpellConfirm.spell.element || pendingSpellConfirm.spell.damageType).toLowerCase()}`}>
                     {normalizeSpellElement(pendingSpellConfirm.spell.element || pendingSpellConfirm.spell.damageType)}
                   </span>
-                  {pendingSpellConfirm.spell.damageDice && (
+                  {pendingSpellConfirm.spell.damageDice && pendingSpellConfirm.spell.damageDice !== '0' && (
                     <span className="tag tag-crimson">{pendingSpellConfirm.spell.damageDice}</span>
                   )}
                   {pendingSpellConfirm.spell.healFormula && (

@@ -78,7 +78,98 @@ export function normalizeSpellElement(raw: unknown): SpellElement {
 
 export function getMaxSpellsForLevel(level: number): number {
   const lv = Math.max(1, Number(level || 1));
-  return Math.min(10, 1 + Math.floor(lv / 3));
+  return Math.min(10, 2 + Math.floor((lv - 1) / 3));
+}
+
+export function getNextSpellSlotLevel(level: number): number {
+  const lv = Math.max(1, Number(level || 1));
+  return Math.floor((lv - 1) / 3) * 3 + 4;
+}
+
+export function getSpellCategory(sp: Partial<Spell>): 'damage' | 'utility' {
+  if (sp.spellCategory === 'damage' || sp.spellCategory === 'utility') {
+    return sp.spellCategory;
+  }
+  const dmg = String(sp.damageDice || '').trim();
+  if ((!dmg || dmg === '0') && (Boolean(sp.healFormula) || Boolean(sp.effectSpec))) {
+    return 'utility';
+  }
+  return 'damage';
+}
+
+export function scaleDiceFormulaByLevel(formula: string, level: number): string {
+  const raw = String(formula || '').trim();
+  if (!raw || raw === '0') return raw;
+  const m = raw.match(/^(\d+)\s*d\s*(\d+)(?:\s*([+-])\s*(\d+))?$/i);
+  if (!m) return raw;
+  const lv = Math.max(1, Math.floor(Number(level || 1)));
+  const count = Math.max(1, Number(m[1]));
+  const sides = Math.max(2, Number(m[2]));
+  const baseBonus = m[4] ? (m[3] === '-' ? -Number(m[4]) : Number(m[4])) : 0;
+  const extraDice = Math.min(6, Math.floor((lv - 1) / 3));
+  const extraFlat = Math.floor((lv - 1) / 2);
+  const totalBonus = baseBonus + extraFlat;
+  return `${count + extraDice}d${sides}${totalBonus > 0 ? `+${totalBonus}` : totalBonus < 0 ? `${totalBonus}` : ''}`;
+}
+
+export function scaleSpellForLevel(sp: Spell, characterLevel: number): Spell {
+  if (!sp.scalesWithLevel) return sp;
+  const lv = Math.max(1, Math.floor(Number(characterLevel || 1)));
+  if (lv <= 1) return sp;
+  const hasDiceDmg = Boolean(sp.damageDice && sp.damageDice.trim() !== '0');
+  const scaledDamageDice = hasDiceDmg ? scaleDiceFormulaByLevel(sp.damageDice, lv) : sp.damageDice;
+  const scaledHealFormula = sp.healFormula ? scaleDiceFormulaByLevel(sp.healFormula, lv) : undefined;
+  let scaledEffect = sp.effectSpec;
+  if (sp.effectSpec) {
+    const rawBonus = Math.floor((lv - 1) / 3);
+    const maxBonus = sp.effectSpec.kind === 'haste' || sp.effectSpec.kind === 'shield' ? 4 : 8;
+    const potencyBonus = Math.min(maxBonus, rawBonus);
+    const durationBonus = lv >= 7 ? 1 : 0;
+    scaledEffect = {
+      ...sp.effectSpec,
+      potency: Math.max(1, Number(sp.effectSpec.potency || 1) + potencyBonus),
+      duration: Math.max(1, Number(sp.effectSpec.duration || 1) + durationBonus),
+    };
+  }
+  return {
+    ...sp,
+    damageDice: scaledDamageDice,
+    ...(scaledHealFormula ? { healFormula: scaledHealFormula } : {}),
+    ...(scaledEffect ? { effectSpec: scaledEffect } : {}),
+  };
+}
+
+export function formatSpellScalingHint(sp: Partial<Spell>): string | null {
+  if (!sp.scalesWithLevel) return null;
+  const hasDiceDmg = Boolean(sp.damageDice && sp.damageDice.trim() !== '0');
+  if (hasDiceDmg || sp.healFormula) {
+    return 'Scales w/ Lv (+1 die / 3 Lv, +1 / 2 Lv)';
+  }
+  return 'Scales w/ Lv (+1 potency / 3 Lv, +1t at Lv 7)';
+}
+
+export function validateStarterSpellSlot(
+  ch: { level?: number; spells?: Spell[] },
+  candidate: Partial<Spell>,
+): string | null {
+  const maxSpells = getMaxSpellsForLevel(Number(ch.level || 1));
+  const known = ch.spells || [];
+  if (known.length >= maxSpells) {
+    const nextLv = getNextSpellSlotLevel(Number(ch.level || 1));
+    return maxSpells >= 10
+      ? `Maximum spell limit reached (${known.length}/10).`
+      : `Spell limit reached (${known.length}/${maxSpells}). Next spell slot unlocks at Level ${nextLv}.`;
+  }
+  if (maxSpells === 2) {
+    const cat = getSpellCategory(candidate);
+    const hasCat = known.some((s) => getSpellCategory(s) === cat);
+    if (hasCat) {
+      return cat === 'damage'
+        ? 'Starter Damage spell slot is full (1/1). Learn a Utility spell for your second slot (next general slot unlocks at Level 4).'
+        : 'Starter Utility spell slot is full (1/1). Learn a Damage spell for your second slot (next general slot unlocks at Level 4).';
+    }
+  }
+  return null;
 }
 
 export function getSpellCraftLimits(floorLevel: number): SpellCraftLimits {
@@ -95,8 +186,15 @@ export function clampSpellToFloor(
   floorLevel: number,
 ): { damageDice: string; rangeSpaces: number; mpCost: number; limits: SpellCraftLimits; minMp: number } {
   const lim = getSpellCraftLimits(floorLevel);
-  const rawDice = String(sp.damageDice || '1d8+2').trim();
-  const m = rawDice.match(/^(\d+)\s*d\s*(\d+)(?:\s*([+-])\s*(\d+))?$/i);
+  const rawDice = String(sp.damageDice || '').trim();
+  const isPureUtility = getSpellCategory(sp) === 'utility' && (!rawDice || rawDice === '0');
+  const rangeSpaces = Math.max(1, Math.min(lim.maxRange, Number(sp.rangeSpaces || lim.maxRange)));
+  if (isPureUtility) {
+    const minMp = 4;
+    const mpCost = Math.max(minMp, Number(sp.mpCost || 5));
+    return { damageDice: '0', rangeSpaces, mpCost, limits: lim, minMp };
+  }
+  const m = (rawDice || '1d8+2').match(/^(\d+)\s*d\s*(\d+)(?:\s*([+-])\s*(\d+))?$/i);
   let count = m ? Math.max(1, Number(m[1])) : 1;
   let sides = m ? Math.max(4, Number(m[2])) : 8;
   let bonus = m && m[4] ? (m[3] === '-' ? -Number(m[4]) : Number(m[4])) : 0;
@@ -107,7 +205,6 @@ export function clampSpellToFloor(
   const clampedDice = `${count}d${sides}${bonus > 0 ? `+${bonus}` : ''}`;
   const avgDmg = count * ((sides + 1) / 2) + bonus;
   const minMp = Math.max(2, Math.ceil(avgDmg / BALANCE.spellMpDivisor));
-  const rangeSpaces = Math.max(1, Math.min(lim.maxRange, Number(sp.rangeSpaces || lim.maxRange)));
   const mpCost = Math.max(minMp, Number(sp.mpCost || minMp));
   return { damageDice: clampedDice, rangeSpaces, mpCost, limits: lim, minMp };
 }

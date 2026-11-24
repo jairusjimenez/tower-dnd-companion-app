@@ -375,6 +375,9 @@ export function PlayerStatsTab({
                   {isBuildLocked ? 'Locked in Combat' : `+${unspentPts} Pts`}
                 </span>
               )}
+              {!isBuildLocked && Boolean(ch.statsConfirmed) && unspentPts === 0 && (
+                <span className="tag tag-green">Confirmed</span>
+              )}
             </div>
             <button
               type="button"
@@ -438,10 +441,10 @@ export function PlayerStatsTab({
                   </div>
 
                   <div className="pattr-actions">
-                    {!isBuildLocked && score > 1 && (
+                    {!isBuildLocked && !(Boolean(ch.statsConfirmed) && unspentPts === 0) && score > 1 && (
                       <button
                         type="button"
-                        className="btn btn-xs btn-outline pattr-step-btn"
+                        className="btn btn-xs btn-outline pattr-step-btn readonly-allow"
                         title="Refund 1 point"
                         onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: -1 })}
                       >
@@ -451,7 +454,7 @@ export function PlayerStatsTab({
                     {!isBuildLocked && unspentPts > 0 && (
                       <button
                         type="button"
-                        className="btn btn-xs btn-gold pattr-step-btn"
+                        className="btn btn-xs btn-gold pattr-step-btn readonly-allow"
                         title="Spend 1 point"
                         onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: 1 })}
                       >
@@ -488,6 +491,27 @@ export function PlayerStatsTab({
               );
             })}
           </div>
+
+          {!isBuildLocked && unspentPts === 0 && !ch.statsConfirmed && (
+            <button
+              type="button"
+              id="btn-confirm-stats"
+              className="btn btn-cyan btn-glow-cyan readonly-allow mt-sm"
+              style={{ width: '100%' }}
+              onClick={async () => {
+                const res = await sendAction('allocate_stat', { characterId: ch.id, subAction: 'confirm' });
+                if (res) {
+                  pushLocalToast({
+                    title: 'STATS CONFIRMED',
+                    message: 'Your stat allocation is locked in until your next level up.',
+                    category: 'info',
+                  });
+                }
+              }}
+            >
+              Confirm Stats
+            </button>
+          )}
 
           {(ch.skills || []).length > 0 && (
             <details className="sub-details mt-sm">

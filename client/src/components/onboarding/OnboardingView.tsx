@@ -3,14 +3,103 @@ import { STARTER_WOODEN_WEAPONS } from '@shared/index';
 import { useVtt } from '../../context/VttContext';
 import { compressPortraitFileToDataUrl } from '../../utils/imageUpload';
 
+type StarterKitCardSpec = {
+  id: 'archer' | 'swordsman' | 'sword_shield' | 'mage';
+  title: string;
+  weapon: string;
+  armor: string;
+  defense: string;
+  tag: string;
+};
+
+const STARTER_KIT_CARDS: StarterKitCardSpec[] = [
+  {
+    id: 'archer',
+    title: 'Archer',
+    weapon: 'Oak Shortbow (1d6+2)',
+    armor: 'Scout Leather Tunic',
+    defense: '+2 AC • +1 DR',
+    tag: 'Ranged',
+  },
+  {
+    id: 'swordsman',
+    title: 'Swordsman',
+    weapon: 'Iron Longsword (1d8+3)',
+    armor: 'Trainee Brigandine',
+    defense: '+2 AC • +1 DR',
+    tag: 'Melee',
+  },
+  {
+    id: 'sword_shield',
+    title: 'Sword & Shield',
+    weapon: 'Iron Broadsword (1d8+2)',
+    armor: 'Oak Kite Shield & Initiate Leather Coat',
+    defense: '+4 AC • +2 DR',
+    tag: 'Defense',
+  },
+  {
+    id: 'mage',
+    title: 'Mage',
+    weapon: 'Apprentice Mana Staff (1d6+2)',
+    armor: 'Scholar Mana Robes & Cracked Shinsu Focus',
+    defense: '+2 AC • +1 DR',
+    tag: 'Magic',
+  },
+];
+
+function KitIcon({ id }: { id: StarterKitCardSpec['id'] }) {
+  if (id === 'archer') {
+    return (
+      <svg viewBox="0 0 36 36" width="28" height="28" fill="none" aria-hidden="true">
+        <path d="M9 27C10.5 17 17 10.5 27 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <line x1="9" y1="27" x2="27" y2="9" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.55" />
+        <line x1="11" y1="25" x2="29" y2="7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <path d="M23 7h6v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (id === 'swordsman') {
+    return (
+      <svg viewBox="0 0 36 36" width="28" height="28" fill="none" aria-hidden="true">
+        <path d="M27 7l-11 11-3-3L24 4l3 3z" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
+        <path d="M11 16l9 9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+        <path d="M14 22l-6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (id === 'sword_shield') {
+    return (
+      <svg viewBox="0 0 36 36" width="28" height="28" fill="none" aria-hidden="true">
+        <path d="M18 6l9 4v7c0 6-4 10.5-9 13-5-2.5-9-7-9-13v-7l9-4z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        <path d="M18 11v12M13.5 16h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 36 36" width="28" height="28" fill="none" aria-hidden="true">
+      <line x1="9" y1="29" x2="23" y2="15" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <circle cx="25" cy="11" r="4.5" stroke="currentColor" strokeWidth="2" />
+      <path d="M25 4v2M25 16v2M18 11h2M30 11h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function OnboardingView() {
-  const { session, state, sendAction, setShowOnboarding, pushLocalToast } = useVtt();
+  const {
+    session,
+    state,
+    sendAction,
+    setShowOnboarding,
+    setActiveBeatDetailId,
+    setLastAutoOpenedBeatId,
+    pushLocalToast,
+  } = useVtt();
   const ch = session?.characterId ? state?.characters?.[session.characterId] : undefined;
 
   const [step, setStep] = useState(1);
-  const [name, setName] = useState(ch?.name || '');
-  const [race, setRace] = useState('Human');
-  const [className, setClassName] = useState('Adventurer');
+  const [name, setName] = useState(ch?.name || 'New Adventurer');
+  const race = 'Human';
+  const className = 'Adventurer';
 
   const [kit, setKit] = useState('archer');
   const [customStyle, setCustomStyle] = useState<'melee' | 'ranged'>('melee');
@@ -31,7 +120,9 @@ export function OnboardingView() {
   const armorSummary = pickedWeapon
     ? [
         `${pickedWeapon.body.name} (+${pickedWeapon.body.acBonus} AC, +${pickedWeapon.body.drBonus} DR)`,
-        pickedWeapon.offHand ? `${pickedWeapon.offHand.name} (+${pickedWeapon.offHand.acBonus} AC${pickedWeapon.offHand.drBonus ? `, +${pickedWeapon.offHand.drBonus} DR` : ''})` : '',
+        pickedWeapon.offHand
+          ? `${pickedWeapon.offHand.name} (+${pickedWeapon.offHand.acBonus} AC${pickedWeapon.offHand.drBonus ? `, +${pickedWeapon.offHand.drBonus} DR` : ''})`
+          : '',
         pickedWeapon.boots ? `${pickedWeapon.boots.name} (+${pickedWeapon.boots.acBonus} AC)` : '',
         pickedWeapon.head ? `${pickedWeapon.head.name} (+${pickedWeapon.head.acBonus} AC)` : '',
       ]
@@ -40,6 +131,14 @@ export function OnboardingView() {
     : '';
 
   const finishOnboarding = () => {
+    const currentPresentedBeat = state
+      ? (state.storyBeats || []).slice().reverse().find((b) => b.presented && b.status === 'active') ||
+        (state.storyBeats || []).slice().reverse().find((b) => b.presented)
+      : undefined;
+    if (currentPresentedBeat) {
+      setLastAutoOpenedBeatId(currentPresentedBeat.id);
+    }
+    setActiveBeatDetailId(null);
     setShowOnboarding(false);
     window.scrollTo(0, 0);
   };
@@ -77,7 +176,7 @@ export function OnboardingView() {
     if (!session?.characterId) return;
     const res = await sendAction<{ engine?: string }>('generate_character_art', {
       characterId: session.characterId,
-      prompt: artPrompt.trim() || ch?.name || 'Tower Climber',
+      prompt: artPrompt.trim() || ch?.name || 'Tower Adventurer',
       style: artStyle,
     });
     pushLocalToast({ title: 'PORTRAIT READY', message: `Portrait updated via ${res?.engine || 'synth'}!`, category: 'loot' });
@@ -94,7 +193,7 @@ export function OnboardingView() {
         prompt: 'Uploaded Portrait',
         style: 'Custom Upload',
       });
-      pushLocalToast({ title: 'PORTRAIT UPLOADED', message: 'Your character portrait is ready!', category: 'loot' });
+      pushLocalToast({ title: 'PORTRAIT UPLOADED', message: 'Your Adventurer portrait is ready!', category: 'loot' });
     } catch (err) {
       pushLocalToast({ title: 'UPLOAD ERROR', message: err instanceof Error ? err.message : 'Failed to upload image.', category: 'warning' });
     } finally {
@@ -102,100 +201,164 @@ export function OnboardingView() {
     }
   };
 
-  const stepTitles: Record<number, string> = {
-    1: 'Step 1 of 4 — Create Your Character',
-    2: 'Step 2 of 4 — Choose Starting Equipment',
-    3: 'Step 3 of 4 — Upload Image or Generate AI Art',
-    4: 'Step 4 of 4 — The Tower & Game Mechanics',
+  const stepLabels: Record<number, string> = {
+    1: 'Identity',
+    2: 'Loadout',
+    3: 'Portrait',
+    4: 'The Tower',
   };
 
+  const displayName = name.trim() || ch?.name || 'New Adventurer';
+
   return (
-    <section id="player-onboarding-view" className="view active app-shell player-shell">
-      <header className="topbar">
-        <div className="topbar-left">
-          <span className="badge-tower">AWAKENING</span>
-          <div>
-            <strong id="onb-char-name">Welcome, {ch?.name || 'Climber'}</strong>
-            <div className="muted small" id="onb-step-subtitle">{stepTitles[step] || stepTitles[1]}</div>
-          </div>
+    <section id="player-onboarding-view" className="view active onb-deck-shell">
+      {/* Edge-to-edge thin gradient progress bar + compact header */}
+      <header className="onb-topbar">
+        <div className="onb-progress-track" aria-hidden="true">
+          <div className="onb-progress-fill" style={{ width: `${step * 25}%` }} />
         </div>
-        <div className="topbar-right">
-          <button type="button" id="btn-onb-enter" className="btn btn-sm btn-outline" onClick={finishOnboarding}>
-            Skip to Player Screen &rarr;
+        <div className="onb-topbar-inner">
+          <div className="onb-step-pill" id="onb-step-subtitle">
+            <span>Step {step} of 4</span>
+            <span className="onb-step-dot">&bull;</span>
+            <span>{stepLabels[step] || 'Identity'}</span>
+          </div>
+          <button type="button" id="btn-onb-enter" className="onb-skip-btn" onClick={finishOnboarding}>
+            Skip &rarr;
           </button>
         </div>
       </header>
 
-      <main className="app-content" style={{ maxWidth: '820px', margin: '0 auto' }}>
-        <div className="btn-row mb-sm" id="onb-step-pills" style={{ justifyContent: 'center', gap: '8px' }}>
-          {[
-            { num: 1, label: '1. Create Character' },
-            { num: 2, label: '2. Starting Equipment' },
-            { num: 3, label: '3. Portrait & AI Art' },
-            { num: 4, label: '4. The Tower & Mechanics' },
-          ].map((p) => (
-            <span key={p.num} className={`tag ${p.num === step ? 'tag-cyan' : p.num < step ? 'tag-green' : ''}`}>
-              {p.label}
-            </span>
-          ))}
-        </div>
-
+      <main className="onb-main">
         {step === 1 && (
-          <div id="onb-step-1" className="panel card-glow-cyan">
-            <div className="panel-header"><h3>Step 1: Create Your Character</h3></div>
-            <p className="muted small">Choose your Climber's name, race, and combat role before entering the Tower.</p>
-            <form id="onb-char-form" className="stack-form mt-sm" onSubmit={handleSaveProfile}>
+          <div id="onb-step-1" className="onb-step-stack">
+            {/* Hero Identity Preview */}
+            <div className="onb-hero-identity">
+              <div className="onb-avatar-ring">
+                {ch?.portraitUrl ? (
+                  <img src={ch.portraitUrl} alt={displayName} className="onb-avatar-img" />
+                ) : (
+                  <svg viewBox="0 0 64 64" width="44" height="44" fill="none" aria-hidden="true">
+                    <circle cx="32" cy="23" r="10" stroke="#7dd3fc" strokeWidth="2.2" />
+                    <path d="M14 52c2.5-9.5 9.5-14 18-14s15.5 4.5 18 14" stroke="#7dd3fc" strokeWidth="2.2" strokeLinecap="round" />
+                  </svg>
+                )}
+                <span className="onb-lv-badge">Lv {ch?.level || 1}</span>
+              </div>
+              <h2 className="onb-hero-name" id="onb-char-name">{displayName}</h2>
+              <p className="onb-hero-sub">{race} &bull; {className}</p>
+            </div>
+
+            <form id="onb-char-form" className="onb-card stack-form" onSubmit={handleSaveProfile}>
               <label>
-                <span>Character Name</span>
+                <span>Adventurer Name</span>
                 <input
                   id="onb-char-name-input"
                   type="text"
                   maxLength={48}
-                  placeholder="e.g. Bam, Rachel, Khun Aguero"
+                  placeholder="e.g. Bam, Sung Jin-Woo, Khun"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
               </label>
-              <div className="grid-2">
-                <label>
-                  <span>Race</span>
-                  <select id="onb-char-race" required value={race} onChange={(e) => setRace(e.target.value)}>
-                    <option value="Human">Human</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Class / Role</span>
-                  <select id="onb-char-class" required value={className} onChange={(e) => setClassName(e.target.value)}>
-                    <option value="Adventurer">Adventurer</option>
-                  </select>
-                </label>
+
+              <div className="onb-identity-tiles">
+                <div className="onb-identity-tile is-active">
+                  <span className="onb-tile-kicker">Race</span>
+                  <strong>Human</strong>
+                  <span className="onb-tile-meta">Tower Initiate</span>
+                </div>
+                <div className="onb-identity-tile is-active">
+                  <span className="onb-tile-kicker">Role</span>
+                  <strong>Adventurer</strong>
+                  <span className="onb-tile-meta">Versatile Class</span>
+                </div>
               </div>
-              <div className="btn-row mt-sm" style={{ justifyContent: 'flex-end' }}>
-                <button type="submit" className="btn btn-cyan btn-lg btn-glow-cyan">Save Character &amp; Next &rarr;</button>
+
+              <div className="onb-stat-strip" aria-label="Starting vitals">
+                <div className="onb-stat-pill">
+                  <span className="onb-stat-val">{ch?.maxHp ?? 24}</span>
+                  <span className="onb-stat-lbl">HP</span>
+                </div>
+                <div className="onb-stat-pill">
+                  <span className="onb-stat-val">{ch?.maxMp ?? 15}</span>
+                  <span className="onb-stat-lbl">MP</span>
+                </div>
+                <div className="onb-stat-pill">
+                  <span className="onb-stat-val">{ch?.unspentStatPoints ?? 6}</span>
+                  <span className="onb-stat-lbl">Stat Pts</span>
+                </div>
               </div>
             </form>
+
+            <div className="onb-footer">
+              <div className="onb-footer-inner">
+                <button type="submit" form="onb-char-form" className="btn btn-cyan btn-lg btn-glow-cyan onb-cta-full">
+                  Continue to Loadout &rarr;
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
         {step === 2 && (
-          <div id="onb-step-2" className="panel card-glow-cyan">
-            <div className="panel-header"><h3>Step 2: Choose Starting Equipment</h3></div>
-            <p className="muted small">Pick a preset starter loadout or customize your starting wooden weapon.</p>
-            <form id="onb-equip-form" className="stack-form mt-sm" onSubmit={handleSaveEquipment}>
-              <label>
-                <span>Starter Loadout</span>
-                <select id="onb-equip-kit" value={kit} onChange={(e) => setKit(e.target.value)}>
-                  <option value="archer">Archer Starter Equipment (Oak Shortbow • Scout Leather Tunic)</option>
-                  <option value="swordsman">Swordsman Starter Equipment (Iron Longsword • Trainee Brigandine)</option>
-                  <option value="sword_shield">Sword &amp; Shield Starter Equipment (Iron Broadsword • Oak Kite Shield • Leather Coat)</option>
-                  <option value="mage">Mage Starter Equipment (Apprentice Mana Staff • Scholar Robes • Shinsu Focus)</option>
-                  <option value="custom">Custom Starter Equipment (Choose Wooden Melee or Ranged)</option>
-                </select>
-              </label>
+          <div id="onb-step-2" className="onb-step-stack">
+            <div className="onb-section-head">
+              <h2>Choose Your Starter Kit</h2>
+              <p className="muted small">Each kit includes your starting weapon and protective armor.</p>
+            </div>
+
+            <form id="onb-equip-form" className="stack-form" onSubmit={handleSaveEquipment}>
+              <div className="onb-kit-grid" role="radiogroup" aria-label="Starter equipment kits">
+                {STARTER_KIT_CARDS.map((card) => {
+                  const selected = kit === card.id;
+                  return (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className={`onb-kit-card${selected ? ' is-selected' : ''}`}
+                      aria-pressed={selected}
+                      onClick={() => setKit(card.id)}
+                    >
+                      {selected && (
+                        <span className="onb-kit-check" aria-hidden="true">
+                          <svg viewBox="0 0 16 16" width="12" height="12" fill="none">
+                            <path d="M3.5 8.5l3 3 6-6.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      )}
+                      <div className="onb-kit-icon">
+                        <KitIcon id={card.id} />
+                      </div>
+                      <strong className="onb-kit-title">{card.title}</strong>
+                      <div className="onb-kit-gear">
+                        <span className="onb-kit-weapon">{card.weapon}</span>
+                        <span className="onb-kit-armor">Armor: {card.armor}</span>
+                        <span className="onb-kit-def">{card.defense}</span>
+                      </div>
+                      <span className="onb-kit-tag">{card.tag}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                id="btn-onb-custom-kit"
+                className={`onb-custom-toggle${kit === 'custom' ? ' is-selected' : ''}`}
+                aria-pressed={kit === 'custom'}
+                onClick={() => setKit('custom')}
+              >
+                <div>
+                  <strong>Custom Wooden Weapon</strong>
+                  <span className="muted small">Pick a wooden melee or ranged weapon + fitted armor</span>
+                </div>
+                <span aria-hidden="true">{kit === 'custom' ? 'Selected' : 'Choose →'}</span>
+              </button>
 
               {kit === 'custom' && (
-                <div id="onb-custom-equip-box" className="stack-form">
+                <div id="onb-custom-equip-box" className="onb-card stack-form">
                   <div className="grid-2">
                     <label>
                       <span>Combat Style</span>
@@ -223,45 +386,57 @@ export function OnboardingView() {
                       </select>
                     </label>
                   </div>
-                  <div id="onb-custom-armor-preview" className="small muted">Fitted Armor: {armorSummary}</div>
+                  <div id="onb-custom-armor-preview" className="onb-armor-preview">
+                    <strong>Included Armor:</strong> {armorSummary}
+                  </div>
                 </div>
               )}
+            </form>
 
-              <div className="btn-row mt-md" style={{ justifyContent: 'space-between' }}>
+            <div className="onb-footer">
+              <div className="onb-footer-inner onb-footer-split">
                 <button type="button" id="btn-onb-equip-back" className="btn btn-outline" onClick={() => setStep(1)}>
                   &larr; Back
                 </button>
-                <button type="submit" className="btn btn-cyan btn-lg btn-glow-cyan">Equip &amp; Next: Portrait &rarr;</button>
+                <button type="submit" form="onb-equip-form" className="btn btn-cyan btn-lg btn-glow-cyan">
+                  Equip &amp; Next: Portrait &rarr;
+                </button>
               </div>
-            </form>
+            </div>
           </div>
         )}
 
         {step === 3 && (
-          <div id="onb-step-3" className="panel card-glow-gold">
-            <div className="panel-header"><h3>Step 3: Upload Image or Generate AI Art</h3></div>
-            <p className="muted small">This portrait becomes your character icon on all Story Beat Arena Maps.</p>
-            <div style={{ textAlign: 'center', margin: '12px 0' }}>
+          <div id="onb-step-3" className="onb-step-stack">
+            <div className="onb-section-head">
+              <h2>Adventurer Portrait</h2>
+              <p className="muted small">Displayed as your Adventurer token on all Story Beat Arena Maps.</p>
+            </div>
+
+            <div className="onb-portrait-stage">
               <img
                 id="onb-art-preview"
                 src={ch?.portraitUrl || ''}
-                alt="Character Portrait Preview"
-                style={{ width: '200px', height: '200px', objectFit: 'cover', borderRadius: '14px', border: '2px solid var(--cyan)' }}
+                alt="Adventurer Portrait Preview"
+                className="onb-portrait-img"
               />
             </div>
-            <div className="stack-form">
-              <label>
-                <span>Option A: Upload Your Own Image</span>
+
+            <div className="onb-card stack-form">
+              <label className="onb-upload-box">
+                <span>Upload Your Own Portrait</span>
                 <input id="onb-art-upload" type="file" accept="image/*" onChange={handleUploadArt} />
               </label>
-              <div className="panel-subheader mt-xs"><span>Option B: Generate AI Character Art</span></div>
+
+              <div className="onb-divider"><span>Or Generate AI Character Art</span></div>
+
               <div className="grid-2">
                 <label>
                   <span>Art Prompt</span>
                   <input
                     id="onb-art-prompt"
                     type="text"
-                    placeholder="e.g. Silver-haired elf mage with cyan staff"
+                    placeholder="e.g. Silver-haired mage with cyan staff"
                     value={artPrompt}
                     onChange={(e) => setArtPrompt(e.target.value)}
                   />
@@ -280,46 +455,87 @@ export function OnboardingView() {
                 Generate AI Art
               </button>
             </div>
-            <div className="btn-row mt-md" style={{ justifyContent: 'space-between' }}>
-              <button type="button" id="btn-onb-step3-back" className="btn btn-outline" onClick={() => setStep(2)}>
-                &larr; Back
-              </button>
-              <button type="button" id="btn-onb-step3-next" className="btn btn-cyan btn-lg btn-glow-cyan" onClick={() => setStep(4)}>
-                Next: The Tower &amp; Mechanics &rarr;
-              </button>
+
+            <div className="onb-footer">
+              <div className="onb-footer-inner onb-footer-split">
+                <button type="button" id="btn-onb-step3-back" className="btn btn-outline" onClick={() => setStep(2)}>
+                  &larr; Back
+                </button>
+                <button type="button" id="btn-onb-step3-next" className="btn btn-cyan btn-lg btn-glow-cyan" onClick={() => setStep(4)}>
+                  Next: The Tower &rarr;
+                </button>
+              </div>
             </div>
           </div>
         )}
 
         {step === 4 && (
-          <div id="onb-step-4" className="stack">
-            <div className="panel card-glow-cyan">
-              <div className="panel-header"><h3>Step 4: The World, The Tower &amp; Your Objective</h3></div>
+          <div id="onb-step-4" className="onb-step-stack">
+            <div className="onb-section-head">
+              <h2>The Tower &amp; Mechanics</h2>
+              <p className="muted small">Essential survival briefing for new Adventurers.</p>
+            </div>
+
+            <div className="onb-card stack-form">
+              <h3 className="onb-card-title">The Game &amp; The World</h3>
               <p className="small">
-                You have been summoned into <strong>The Tower</strong> — an ascending spire of distinct realms (from <strong>1F Forest</strong> to <strong>2F Desert</strong>, <strong>3F Underworld</strong>, and uncharted floors above). Each floor contains live <strong>Story Beats</strong>, NPCs, traps, and Floor Guardians.
+                A live, DM-led tactical RPG set inside <strong>The Tower</strong> — a 100-floor spire of shifting realms, hidden NPCs, lethal traps, and Floor Guardians. Play through branching <strong>Story Beats</strong> and grid-based <strong>Arena Battles</strong> in real time with your party.
               </p>
-              <ul className="small" style={{ margin: '6px 0 0 18px', lineHeight: 1.6 }}>
-                <li><strong>Story Beats &amp; Exploration</strong>: Cooperate with your party, move across tactical Arena Maps, avoid impassable terrain, open <strong>Treasure Chests</strong>, and talk to <strong>NPCs</strong> for Items, Skill Books, and XP.</li>
-                <li><strong>Combat &amp; Loot</strong>: Strike monsters with weapons or free-flow magic, react in real time when attacked (Counter, Parry, or Spell), and claim monster loot drops.</li>
+              <div className="onb-realm-chips">
+                <span className="tag tag-cyan">1F–100F Ascent</span>
+                <span className="tag tag-gold">Live DM</span>
+                <span className="tag tag-green">Co-op Party</span>
+              </div>
+            </div>
+
+            <div className="onb-card stack-form">
+              <h3 className="onb-card-title">Tactical Combat &amp; Live Reactions</h3>
+              <ul className="onb-brief-list">
+                <li><strong>Your Turn</strong>: Move around obstacles, <strong>Observe</strong> nearby enemies to reveal hidden HP &amp; Weak Spots, use <strong>1 Consumable</strong>, and either <strong>Attack</strong> or <strong>Cast a Spell</strong>.</li>
+                <li><strong>Opposed Dice Clashes</strong>: When a monster strikes you, react live with <strong>Counter / Parry</strong>, <strong>Block / Dodge</strong>, or a <strong>Reaction Spell</strong>.</li>
+                <li><strong>Fallen State</strong>: Hit <strong>0 HP</strong> and you drop out of turn order to spectate the battlefield until revived.</li>
               </ul>
             </div>
 
-            <div className="panel">
-              <div className="panel-header"><h3>Stats, Modifiers &amp; Milestone Awakenings</h3></div>
+            <div className="onb-card stack-form">
+              <h3 className="onb-card-title">Stats &amp; Awakenings</h3>
               <p className="small">
-                You begin at <strong>Level 1</strong> with <strong>10 free stat points</strong> (plus <strong>+2</strong> every level up). Modifiers use <code>floor((SCORE - 10) / 2)</code>.
+                Start at <strong>Level 1</strong> with <strong>6 free stat points</strong> (<strong>+2</strong> per level, plus <strong>+1 bonus</strong> every 3 levels). Higher stats grant steadily stronger bonuses that scale even harder at high scores — <strong>VIT</strong> directly boosts Max HP and <strong>INT</strong> boosts Max MP.
               </p>
-              <ul className="small" style={{ margin: '6px 0 0 18px', lineHeight: 1.55 }}>
-                <li><strong>STR</strong>: Melee power &bull; <strong>AGI</strong>: Initiative &amp; evasion &bull; <strong>VIT</strong>: Endurance &amp; HP</li>
-                <li><strong>INT</strong>: Spell power &amp; MP &bull; <strong>PER</strong>: Accuracy &amp; range &bull; <strong>LUCK</strong>: Crits &amp; loot</li>
-                <li><strong>Milestone Awakenings</strong>: Reaching <strong>20, 40, 60, 80, and 100</strong> in any stat automatically unlocks Awakened Abilities!</li>
+              <div className="onb-stat-grid">
+                <div><strong>STR</strong><span>Melee Power</span></div>
+                <div><strong>AGI</strong><span>Init &amp; Dodge</span></div>
+                <div><strong>VIT</strong><span>HP &amp; Endurance</span></div>
+                <div><strong>INT</strong><span>Spells &amp; MP</span></div>
+                <div><strong>PER</strong><span>Hit &amp; Range</span></div>
+                <div><strong>LUCK</strong><span>Crits &amp; Loot</span></div>
+              </div>
+              <div className="onb-milestone-row">
+                <span className="muted small">Awakening Milestones:</span>
+                <div className="onb-milestone-pills">
+                  {[20, 40, 60, 80, 100].map((m) => (
+                    <span key={m} className="tag tag-cyan">{m}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="onb-card stack-form">
+              <h3 className="onb-card-title">Builds, Gacha &amp; Prep Rules</h3>
+              <ul className="onb-brief-list">
+                <li><strong>Passive Gacha</strong>: Spend <strong>Mana Stones</strong> to roll from <strong>200 Passive Skills</strong> across 7 tiers (Normal &rarr; Mythic); climbing higher floors improves rare odds.</li>
+                <li><strong>Spells, Loot &amp; Deities</strong>: Unlock and craft elemental spells as you level, claim Boss Chests, and awaken <strong>Patron Deities</strong> on higher floors.</li>
+                <li><strong>Prep Lock</strong>: Allocate stats and swap gear <em>between</em> Story Beats — once a live Story Beat begins, your loadout locks in until it&apos;s cleared.</li>
               </ul>
-              <div className="btn-row mt-md" style={{ justifyContent: 'space-between' }}>
+            </div>
+
+            <div className="onb-footer">
+              <div className="onb-footer-inner onb-footer-split">
                 <button type="button" id="btn-onb-step4-back" className="btn btn-outline" onClick={() => setStep(3)}>
                   &larr; Back
                 </button>
                 <button type="button" id="btn-onb-finish" className="btn btn-cyan btn-lg btn-glow-cyan" onClick={finishOnboarding}>
-                  Enter Player Screen &rarr;
+                  Enter The Tower &rarr;
                 </button>
               </div>
             </div>

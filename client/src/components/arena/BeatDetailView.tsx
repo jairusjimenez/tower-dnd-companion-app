@@ -149,7 +149,6 @@ export function BeatDetailView() {
   const [askOptions, setAskOptions] = useState<string[]>([]);
   const [askBranches, setAskBranches] = useState<Record<string, { scenario: string; dmNote: string; nextQuestion: string }>>({});
   const [showFlowchart, setShowFlowchart] = useState(true);
-  const [playerAnswers, setPlayerAnswers] = useState<Record<string, string>>({});
   const [pendingNpcMoveConfirm, setPendingNpcMoveConfirm] = useState<{
     npcTok: MapToken;
     targetX: number;
@@ -1140,13 +1139,9 @@ export function BeatDetailView() {
             {(beat.prompts || []).length > 0 ? (
               <div className="list-stack mt-xs">
                 {(beat.prompts || []).map((pr) => {
-                  const canPlayerAnswer = !isDm && Boolean(session.characterId) && (pr.target === 'all' || pr.target === session.characterId);
                   const myExistingAnswer = !isDm && session.characterId
                     ? (pr.answers || []).find((a) => a.characterId === session.characterId)
                     : undefined;
-                  const draftAnswer = playerAnswers[pr.id] !== undefined
-                    ? playerAnswers[pr.id]
-                    : (myExistingAnswer?.answer || '');
                   const totalGroup = pr.target === 'all' ? Math.max(1, chars.length) : 1;
                   const allDone =
                     pr.target === 'all'
@@ -1273,45 +1268,6 @@ export function BeatDetailView() {
                       ) : (
                         <div className="muted small mt-xs">
                           Waiting for answer from {pr.target === 'all' ? 'the group' : pr.targetName}...
-                        </div>
-                      )}
-
-                      {canPlayerAnswer && (
-                        <div className="btn-row mt-xs" style={{ gap: '8px' }}>
-                          <input
-                            type="text"
-                            style={{ flex: 1 }}
-                            placeholder="Type your character's answer or action..."
-                            value={draftAnswer}
-                            onChange={(e) => setPlayerAnswers((prev) => ({ ...prev, [pr.id]: e.target.value }))}
-                          />
-                          <button
-                            type="button"
-                            className="btn btn-xs btn-gold"
-                            onClick={async () => {
-                              const text = (draftAnswer || '').trim();
-                              if (!text) {
-                                pushLocalToast({ title: 'ANSWER NEEDED', message: 'Type your response first.', category: 'warning' });
-                                return;
-                              }
-                              const res = await sendAction('story_action', {
-                                subAction: 'answer_beat_prompt',
-                                beatId: beat.id,
-                                promptId: pr.id,
-                                characterId: session.characterId,
-                                answer: text,
-                              });
-                              if (res) {
-                                pushLocalToast({
-                                  title: 'ANSWER SUBMITTED',
-                                  message: 'Your response was sent to the DM and party!',
-                                  category: 'info',
-                                });
-                              }
-                            }}
-                          >
-                            {myExistingAnswer ? 'Update Answer' : 'Submit Answer'}
-                          </button>
                         </div>
                       )}
                     </div>

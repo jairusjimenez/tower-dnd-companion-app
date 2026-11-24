@@ -10,6 +10,7 @@ import {
   getEquippedTotals,
   resolvePlayerDefenseReaction,
   resolvePlayerReactionStyle,
+  scaleSpellForLevel,
   spaceDistanceBetweenPoints,
   type MonsterDefeatSummary,
   type PendingReaction,
@@ -51,7 +52,7 @@ function estimateAverageDice(formula: string): number {
 }
 
 export function CombatClashModal() {
-  const { session, state, sendAction, setDefeatedMonster } = useVtt();
+  const { session, state, sendAction, setDefeatedMonster, activeBeatDetailId } = useVtt();
 
   const [dmRolling, setDmRolling] = useState(false);
   const [dmFlicker, setDmFlicker] = useState(12);
@@ -134,10 +135,29 @@ export function CombatClashModal() {
     };
   }, [resolvedClash?.id, resolvedClash?.resolvedAt]);
 
-  if (!session || !state) return null;
-
   const activeClash = resolutionReport ? resolutionReport.clash : pendingOrResolvedClash;
-  if (!activeClash) return null;
+  const hostBeatForClash =
+    activeClash && state
+      ? (state.storyBeats || []).find((b) => b.arena?.tokens?.some((t) => t.id === activeClash.monsterId))
+      : undefined;
+  const viewedBeat =
+    state && activeBeatDetailId
+      ? (state.storyBeats || []).find((b) => b.id === activeBeatDetailId)
+      : undefined;
+  const clashEventEnded = Boolean(
+    (viewedBeat && (viewedBeat.status === 'resolved' || viewedBeat.status === 'failed')) ||
+      (hostBeatForClash && (hostBeatForClash.status === 'resolved' || hostBeatForClash.status === 'failed')) ||
+      (state && !state.combat?.active && !pendingReaction),
+  );
+
+  useEffect(() => {
+    if (clashEventEnded && resolutionReport) {
+      setResolutionReport(null);
+    }
+  }, [clashEventEnded, resolutionReport]);
+
+  if (!session || !state) return null;
+  if (!activeClash || clashEventEnded) return null;
 
   const targetChar = state.characters?.[activeClash.targetCharacterId];
   const monster = (state.monsters || []).find((m) => m.id === activeClash.monsterId);
@@ -873,7 +893,9 @@ export function CombatClashModal() {
                   </button>
                 </div>
                 <div className="clash-spell-list">
-                  {usableReactionSpells.map((sp) => (
+                  {usableReactionSpells.map((rawSp) => {
+                    const sp = scaleSpellForLevel(rawSp, targetChar?.level || 1);
+                    return (
                     <button
                       key={sp.id}
                       type="button"
@@ -889,11 +911,12 @@ export function CombatClashModal() {
                         <span className="tag tag-purple">{sp.mpCost} MP</span>
                       </div>
                       <span className="clash-action-sub">
-                        {sp.healFormula ? `Heal ${sp.healFormula}` : sp.damageDice || 'Support'} &bull; {sp.rangeSpaces || 3} Sp &bull; INT Accuracy
+                        {sp.healFormula ? `Heal ${sp.healFormula}` : (sp.damageDice && sp.damageDice !== '0' ? sp.damageDice : 'Support')} &bull; {sp.rangeSpaces || 3} Sp &bull; INT Accuracy
                       </span>
                       {renderSpellPreviewBar(sp)}
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

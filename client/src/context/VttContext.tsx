@@ -142,6 +142,7 @@ interface VttContextValue {
   tooltip: { tok: Partial<MapToken>; x: number; y: number } | null;
   showTooltip: (tok: Partial<MapToken>, x: number, y: number) => void;
   hideTooltip: () => void;
+  closeAllGameplayModals: () => void;
 }
 
 const VttContext = createContext<VttContextValue | null>(null);
@@ -468,6 +469,57 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
     };
   }, [disconnectSse, enterSession]);
 
+  const closeAllGameplayModals = useCallback(() => {
+    setAttackRollRequest((prev) => {
+      if (prev) {
+        try {
+          prev.onComplete(null);
+        } catch {
+          // ignore
+        }
+      }
+      return null;
+    });
+    setPendingConsumableUse(null);
+    setActivePromptModal(null);
+    setActiveNpcDialogue(null);
+    setActiveObserveResult(null);
+    setDiceRollModal(null);
+    setChestReveal(null);
+    setTradeItemId(null);
+    setActiveBeatMapId(null);
+    setDefeatQueue([]);
+    setTooltip(null);
+  }, []);
+
+  // Automatically close stale modals if their underlying story beat/event is already resolved or failed
+  useEffect(() => {
+    if (!state) return;
+    if (attackRollRequest) {
+      const beat = (state.storyBeats || []).find((b) => b.id === attackRollRequest.beatId);
+      if (beat && (beat.status === 'resolved' || beat.status === 'failed')) {
+        try {
+          attackRollRequest.onComplete(null);
+        } catch {
+          // ignore
+        }
+        setAttackRollRequest(null);
+      }
+    }
+    if (activeNpcDialogue) {
+      const beat = (state.storyBeats || []).find((b) => b.id === activeNpcDialogue.beatId);
+      if (beat && (beat.status === 'resolved' || beat.status === 'failed')) {
+        setActiveNpcDialogue(null);
+      }
+    }
+    if (activePromptModal && session?.role !== 'dm') {
+      const beat = (state.storyBeats || []).find((b) => b.id === activePromptModal.beatId);
+      if (beat && (beat.status === 'resolved' || beat.status === 'failed')) {
+        setActivePromptModal(null);
+      }
+    }
+  }, [state, session?.role, attackRollRequest, activeNpcDialogue, activePromptModal]);
+
   return (
     <VttContext.Provider
       value={{
@@ -522,6 +574,7 @@ export function VttProvider({ children }: { children: React.ReactNode }) {
         tooltip,
         showTooltip,
         hideTooltip,
+        closeAllGameplayModals,
       }}
     >
       {children}
