@@ -331,6 +331,7 @@ export interface Character {
   xpToNext: number;
   unspentStatPoints: number;
   statsConfirmed?: boolean;
+  pendingCharacterResetOffer?: { offeredAt: string; message?: string } | null;
   passiveTickets: number;
   passives: PassiveSkill[];
   pendingPassiveDraw?: PendingPassiveDraw | null;

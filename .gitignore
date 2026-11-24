@@ -5,3 +5,4 @@ data/backups/
 data/.session-secret
 .DS_Store
 *.log
+*.pem

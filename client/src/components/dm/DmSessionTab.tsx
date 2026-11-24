@@ -144,9 +144,14 @@ export function DmSessionTab() {
                   <div key={acc.email} className="item-card">
                     <div className="item-card-top">
                       <strong>{acc.email}</strong>
-                      <span className={`tag ${acc.activated ? 'tag-cyan' : 'tag-gold'}`}>
-                        {acc.activated ? `Active (${acc.username})` : 'Pending Password Setup'}
-                      </span>
+                      <div className="btn-row">
+                        <span className={`tag ${acc.activated ? 'tag-cyan' : 'tag-gold'}`}>
+                          {acc.activated ? `Active (${acc.username})` : 'Pending Password Setup'}
+                        </span>
+                        {boundChar?.pendingCharacterResetOffer && (
+                          <span className="tag tag-gold">Reset Offered</span>
+                        )}
+                      </div>
                     </div>
                     <div className="muted small">
                       Character: {boundChar ? `${boundChar.name} (Lv ${boundChar.level} ${boundChar.className})` : 'Unassigned'}
@@ -160,6 +165,25 @@ export function DmSessionTab() {
                         >
                           View Character
                         </button>
+                      )}
+                      {boundChar && (
+                        boundChar.pendingCharacterResetOffer ? (
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-outline"
+                            onClick={() => sendAction('dm_manage_invites', { subAction: 'cancel_character_reset', email: acc.email })}
+                          >
+                            Cancel Reset Offer
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-gold"
+                            onClick={() => sendAction('dm_manage_invites', { subAction: 'offer_character_reset', email: acc.email })}
+                          >
+                            Offer Character Reset
+                          </button>
+                        )
                       )}
                       <button
                         type="button"

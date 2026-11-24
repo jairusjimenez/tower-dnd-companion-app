@@ -107,6 +107,26 @@ export function dmManageInvitesAction(ctx: ActionRequestContext, payload: Record
     ctx.state.playerAccounts[email].activated = false;
     ctx.state.playerAccounts[email].salt = null;
     ctx.state.playerAccounts[email].passwordHash = null;
+  } else if (sub === 'offer_character_reset') {
+    const acc = ctx.state.playerAccounts[email];
+    if (!acc) return { status: 404, error: 'Player email not found.' };
+    const ch = ctx.state.characters[acc.characterId];
+    if (!ch) return { status: 404, error: 'Bound player character not found.' };
+    ch.pendingCharacterResetOffer = {
+      offeredAt: new Date().toISOString(),
+    };
+    pushSystemToast(ctx, {
+      title: 'CHARACTER RESET OFFERED',
+      message: 'The Dungeon Master has offered you a full Character Reset. Accept or decline on your Dashboard.',
+      category: 'warning',
+      target: ch.id,
+    });
+  } else if (sub === 'cancel_character_reset') {
+    const acc = ctx.state.playerAccounts[email];
+    if (!acc) return { status: 404, error: 'Player email not found.' };
+    const ch = ctx.state.characters[acc.characterId];
+    if (!ch) return { status: 404, error: 'Bound player character not found.' };
+    ch.pendingCharacterResetOffer = null;
   } else if (sub === 'remove') {
     delete ctx.state.playerAccounts[email];
   } else {

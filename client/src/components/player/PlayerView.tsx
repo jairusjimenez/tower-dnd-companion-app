@@ -12,6 +12,7 @@ export function PlayerView() {
     session,
     state,
     showOnboarding,
+    setShowOnboarding,
     logout,
     sendAction,
     pushLocalToast,
@@ -126,6 +127,46 @@ export function PlayerView() {
           <div>
             <strong>SESSION PAUSED</strong>{' '}
             <span id="p-session-paused-msg">{state.session?.pausedMessage || 'Waiting for DM...'}</span>
+          </div>
+        </div>
+      )}
+
+      {ch.pendingCharacterResetOffer && (
+        <div id="p-reset-offer-banner" className="alert-banner warning phero-alert" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+          <div>
+            <strong>CHARACTER RESET OFFERED</strong>{' '}
+            <span>The Dungeon Master offered to reset your character back to Level 1 and restart onboarding.</span>
+          </div>
+          <div className="btn-row">
+            <button
+              type="button"
+              id="btn-accept-char-reset"
+              className="btn btn-sm btn-gold"
+              onClick={async () => {
+                if (!window.confirm('Reset your character back to Level 1 and restart onboarding? Your current stats, gear, and spells will be cleared.')) {
+                  return;
+                }
+                const res = await sendAction<{ reset?: boolean }>('respond_character_reset_offer', {
+                  characterId: ch.id,
+                  decision: 'accept',
+                });
+                if (res?.reset) {
+                  setActiveBeatDetailId(null);
+                  setShowOnboarding(true);
+                  window.scrollTo(0, 0);
+                }
+              }}
+            >
+              Accept &amp; Reset
+            </button>
+            <button
+              type="button"
+              id="btn-decline-char-reset"
+              className="btn btn-sm btn-outline"
+              onClick={() => sendAction('respond_character_reset_offer', { characterId: ch.id, decision: 'decline' })}
+            >
+              Decline
+            </button>
           </div>
         </div>
       )}

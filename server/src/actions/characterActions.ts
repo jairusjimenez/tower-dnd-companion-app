@@ -17,6 +17,7 @@ import {
 import { generateCharacterArt } from '../services/art';
 import {
   commitState,
+  createNewCharacterRecord,
   grantXpToCharacter,
   logPlayerHistory,
   pushSystemToast,
@@ -70,6 +71,66 @@ export function updateCharacterAction(ctx: ActionRequestContext, payload: Record
   syncCharacterDerived(ctx, ch.id);
   commitState(ctx);
   return { ok: true, character: ch };
+}
+
+export function respondCharacterResetOfferAction(
+  ctx: ActionRequestContext,
+  payload: Record<string, unknown>,
+): ActionResult {
+  const { ch, error } = resolveAuthorizedCharacter(
+    ctx,
+    payload.characterId ? String(payload.characterId) : null,
+    'respond to character reset offer',
+  );
+  if (error || !ch) return error!;
+  if (!ch.pendingCharacterResetOffer) {
+    return { status: 400, error: 'No pending character reset offer from the Dungeon Master.' };
+  }
+
+  const decision = String(payload.decision || '').trim().toLowerCase();
+  if (decision === 'decline') {
+    ch.pendingCharacterResetOffer = null;
+    logPlayerHistory(ctx.state, ch.id, 'character', 'Declined DM character reset offer');
+    commitState(ctx);
+    return { ok: true, declined: true, character: ch };
+  }
+
+  if (decision !== 'accept') {
+    return { status: 400, error: 'Decision must be "accept" or "decline".' };
+  }
+
+  const prevName = ch.name;
+  const preservedId = ch.id;
+  const fresh = createNewCharacterRecord(ctx.state, {
+    name: 'New Adventurer',
+    race: 'Human',
+    className: 'Adventurer',
+  });
+  if (fresh.id !== preservedId) {
+    delete ctx.state.characters[fresh.id];
+    if (ctx.state.map?.tokens) {
+      ctx.state.map.tokens = ctx.state.map.tokens.filter((t) => t.id !== fresh.id);
+    }
+  }
+
+  const resetChar: Character = {
+    ...fresh,
+    id: preservedId,
+    statsConfirmed: false,
+    starterEquipmentChosen: false,
+    pendingCharacterResetOffer: null,
+  };
+  ctx.state.characters[preservedId] = resetChar;
+  recalculateCharacterAcAndDr(ctx.state, resetChar);
+  syncCharacterDerived(ctx, preservedId);
+  logPlayerHistory(ctx.state, preservedId, 'character', 'Accepted DM character reset offer — restarted as Lv 1 Adventurer');
+  pushSystemToast(ctx, {
+    title: 'CHARACTER RESET',
+    message: `${prevName} accepted the Character Reset and is restarting as a Level 1 Adventurer.`,
+    category: 'info',
+  });
+  commitState(ctx);
+  return { ok: true, reset: true, character: resetChar };
 }
 
 export function updateCharacterProfileAction(ctx: ActionRequestContext, payload: Record<string, unknown>): ActionResult {
