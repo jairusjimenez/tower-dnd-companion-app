@@ -1,0 +1,527 @@
+/* Story Prompt Option Buttons & Color-Coded Stat Check Tags */
+.prompt-option-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  text-align: left;
+  padding: 10px 14px;
+  width: 100%;
+}
+
+.prompt-opt-badge {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.prompt-opt-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.prompt-opt-tags {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.prompt-stat-tag {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-weight: 700;
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(129, 140, 248, 0.55);
+  color: #c7d2fe;
+}
+
+.prompt-stat-tag.is-str {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #fca5a5;
+}
+
+.prompt-stat-tag.is-agi {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #6ee7b7;
+}
+
+.prompt-stat-tag.is-vit {
+  background: rgba(249, 115, 22, 0.2);
+  border-color: rgba(251, 146, 60, 0.6);
+  color: #fdba74;
+}
+
+.prompt-stat-tag.is-int {
+  background: rgba(14, 165, 233, 0.2);
+  border-color: rgba(56, 189, 248, 0.6);
+  color: #7dd3fc;
+}
+
+.prompt-stat-tag.is-per {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: rgba(192, 132, 252, 0.6);
+  color: #e9d5ff;
+}
+
+.prompt-stat-tag.is-luck {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: rgba(250, 204, 21, 0.6);
+  color: #fde047;
+}
+
+/* Story Beat Concluded Modal */
+.beat-finish-backdrop {
+  z-index: 9600;
+}
+
+.beat-finish-card {
+  width: min(720px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  background: radial-gradient(circle at top center, rgba(251, 191, 36, 0.14), transparent 52%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(7, 11, 20, 0.99));
+  border: 1.5px solid rgba(251, 191, 36, 0.55);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.78), 0 0 36px rgba(251, 191, 36, 0.18);
+}
+
+.beat-finish-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.beat-finish-crest {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  box-shadow: 0 0 24px rgba(251, 191, 36, 0.22);
+}
+
+.beat-finish-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.beat-finish-title {
+  margin: 0;
+  font-size: 1.32rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.beat-finish-narration {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: #cbd5e1;
+  max-width: 600px;
+}
+
+.beat-finish-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.beat-finish-sec-head {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fbbf24;
+}
+
+.beat-finish-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.beat-finish-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.beat-finish-q {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.86rem;
+  color: #f8fafc;
+}
+
+.beat-finish-ans-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.beat-finish-ans {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  padding-left: 8px;
+  border-left: 2px solid #38bdf8;
+}
+
+.beat-finish-ans b {
+  color: #7dd3fc;
+}
+
+.beat-finish-outcome {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #e2e8f0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.beat-finish-check {
+  font-size: 0.76rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.beat-finish-check.is-pass {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.beat-finish-check.is-fail {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.beat-finish-loot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.beat-finish-loot-item {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+}
+
+.beat-finish-loot-item.is-green {
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(16, 185, 129, 0.1);
+  color: #6ee7b7;
+}
+
+.beat-finish-loot-item.is-cyan {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(14, 165, 233, 0.1);
+  color: #7dd3fc;
+}
+
+.beat-finish-party-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.beat-finish-member-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.beat-finish-member-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.86rem;
+  color: #f8fafc;
+}
+
+.beat-finish-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.beat-finish-bar-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.beat-finish-bar-label b {
+  color: #f8fafc;
+}
+
+.beat-finish-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* Dark Souls Player Death Graphic & Red Atmospheric Lockout */
+.death-atmosphere-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 8800;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 45%,
+    rgba(127, 29, 29, 0.08) 28%,
+    rgba(127, 29, 29, 0.42) 72%,
+    rgba(69, 10, 10, 0.78) 100%
+  );
+  box-shadow: inset 0 0 90px rgba(220, 38, 38, 0.48);
+  animation: deathVignettePulse 3.6s ease-in-out infinite;
+}
+
+@keyframes deathVignettePulse {
+  0%, 100% {
+    opacity: 0.88;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.death-souls-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 9700;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 26px 16px;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(4, 4, 8, 0.88) 18%,
+    rgba(4, 4, 8, 0.94) 50%,
+    rgba(4, 4, 8, 0.88) 82%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  animation: soulsDeathReveal 4.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.death-souls-rule {
+  width: min(560px, 84vw);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(220, 38, 38, 0.75), transparent);
+}
+
+.death-souls-text {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(2rem, 6.2vw, 3.8rem);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-transform: uppercase;
+  text-align: center;
+  color: #dc2626;
+  text-shadow:
+    0 2px 16px rgba(0, 0, 0, 0.95),
+    0 0 28px rgba(220, 38, 38, 0.65),
+    0 0 60px rgba(153, 27, 27, 0.55);
+}
+
+.death-souls-sub {
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #fca5a5;
+  opacity: 0.9;
+  text-align: center;
+}
+
+@keyframes soulsDeathReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.92);
+    letter-spacing: 0.14em;
+  }
+  16% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+    letter-spacing: 0.22em;
+  }
+  82% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1.03);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-50%) scale(1.05);
+  }
+}
+
+.death-spectate-ribbon {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9100;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(24, 6, 10, 0.9);
+  border: 1px solid rgba(220, 38, 38, 0.65);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7), 0 0 14px rgba(220, 38, 38, 0.35);
+}
+
+.death-spectate-title {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: #ef4444;
+}
+
+.death-spectate-sub {
+  font-size: 0.7rem;
+  color: #fca5a5;
+  opacity: 0.9;
+}
+
+.is-dead-hud .pcombat-top {
+  border-bottom-color: rgba(220, 38, 38, 0.45);
+  background: linear-gradient(180deg, rgba(45, 10, 14, 0.92), rgba(15, 23, 42, 0.92));
+}
+
+.is-dead-view button,
+.is-dead-view input,
+.is-dead-view select,
+.is-dead-view textarea {
+  pointer-events: none !important;
+  opacity: 0.45;
+  filter: grayscale(0.35);
+}
+
+.is-dead-view #btn-p-goto-beat,
+.is-dead-view .pnav-btn,
+.is-dead-view #btn-p-logout {
+  pointer-events: auto !important;
+  opacity: 1;
+  filter: none;
+}
+
+/* Combat Victory Graphic Overrides */
+.beat-finish-card.is-victory {
+  background: radial-gradient(circle at top center, rgba(16, 185, 129, 0.16), transparent 48%),
+    radial-gradient(circle at 50% 0%, rgba(251, 191, 36, 0.16), transparent 55%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(7, 11, 20, 0.99));
+  border-color: rgba(250, 204, 21, 0.72);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8), 0 0 42px rgba(251, 191, 36, 0.24);
+}
+
+.beat-finish-victory-word {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(1.8rem, 5vw, 2.7rem);
+  font-weight: 800;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #fef08a 0%, #fbbf24 60%, #f59e0b 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 14px rgba(251, 191, 36, 0.45));
+}
+
+.beat-finish-victory-bento {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .beat-finish-victory-bento {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.beat-finish-victory-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 9px 8px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.62);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  text-align: center;
+}
+
+.beat-finish-victory-k {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+}
+
+.beat-finish-victory-v {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.beat-finish-victory-v.is-crimson { color: #f87171; }
+.beat-finish-victory-v.is-cyan { color: #38bdf8; }
+.beat-finish-victory-v.is-gold { color: #fbbf24; }
+.beat-finish-victory-v.is-purple { color: #c084fc; }
+
