@@ -127,6 +127,15 @@ export function filterStateForRole(
   const recentMonsterDefeats = (srcState.recentMonsterDefeats || []).filter(
     (d) => isDm || (Boolean(characterId) && d.killerCharacterId === characterId),
   );
+  const hiddenMonsterIds = new Set(
+    (srcState.monsters || []).filter((m) => m.hiddenFromPlayers).map((m) => m.id),
+  );
+  const recentArenaFx = (srcState.recentArenaFx || []).filter((fx) => {
+    if (isDm) return true;
+    if (fx.attackerId && hiddenMonsterIds.has(fx.attackerId)) return false;
+    if (fx.targetId && hiddenMonsterIds.has(fx.targetId)) return false;
+    return true;
+  });
 
   return {
     version: srcState.version,
@@ -152,6 +161,7 @@ export function filterStateForRole(
     pendingReactions: filteredReactions,
     lastResolvedClash,
     recentMonsterDefeats,
+    recentArenaFx,
     bestiary: isDm ? srcState.bestiary : [],
     npcRoster: isDm ? srcState.npcRoster || [] : [],
     treasureCatalog: isDm ? srcState.treasureCatalog || [] : [],

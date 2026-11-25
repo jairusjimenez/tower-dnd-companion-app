@@ -25,6 +25,7 @@ import {
   drawManaStoneCrystal,
   drawTokenAvatar,
 } from './drawPrimitives';
+import type { ArenaFxFrame } from './arenaFx';
 
 export type BeatActionMode =
   | 'move'
@@ -52,6 +53,7 @@ export interface DrawBeatArenaOptions {
   session?: SessionIdentity | null;
   state?: FilteredGameState | null;
   hideAxisLabels?: boolean;
+  fxFrame?: ArenaFxFrame | null;
   onPortraitLoaded?: () => void;
 }
 
@@ -68,6 +70,7 @@ export function drawBeatArenaCanvas({
   session = null,
   state = null,
   hideAxisLabels = false,
+  fxFrame = null,
   onPortraitLoaded,
 }: DrawBeatArenaOptions): void {
   const arena = beat.arena || { cols: 20, rows: 20, biome: 'obsidian', terrain: [], tokens: [], chests: [] };
@@ -463,8 +466,12 @@ export function drawBeatArenaCanvas({
   for (const tok of arena.tokens || []) {
     const liveMon = tok.type === 'monster' ? (state?.monsters || []).find((m) => m.id === tok.id) : undefined;
     if (liveMon && ((liveMon.hp !== null && liveMon.hp <= 0) || liveMon.healthTier === 'Defeated')) continue;
-    const cx = axisPad + tok.x * cellPx + cellPx / 2;
-    const cy = axisPad + tok.y * cellPx + cellPx / 2;
+    const animPos = fxFrame?.tokenPositions.get(tok.id);
+    const animOff = fxFrame?.tokenOffsets.get(tok.id);
+    const tx = animPos ? animPos.x : tok.x;
+    const ty = animPos ? animPos.y : tok.y;
+    const cx = axisPad + tx * cellPx + cellPx / 2 + (animOff?.dx || 0);
+    const cy = axisPad + ty * cellPx + cellPx / 2 + (animOff?.dy || 0);
     const r = Math.max(9, Math.floor(cellPx * 0.4));
 
     const drawTok = liveMon?.iconId && !tok.iconId ? { ...tok, iconId: liveMon.iconId } : tok;
@@ -499,4 +506,6 @@ export function drawBeatArenaCanvas({
       ctx.strokeRect(bx, by, bw, bh);
     }
   }
+
+  fxFrame?.drawOverlay(ctx, axisPad, cellPx);
 }

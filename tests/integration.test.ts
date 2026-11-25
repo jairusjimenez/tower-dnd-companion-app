@@ -1718,6 +1718,20 @@ async function runTests(): Promise<void> {
       assert.ok(String(playerPerShot.data.attackRoll.breakdown).includes('[PER]'));
     }
 
+    // Verify recentArenaFx events are recorded and RBAC-filtered for hidden monsters
+    const fxStateRes = await heroPlayer.get('/api/state');
+    const fxList = fxStateRes.data.recentArenaFx || [];
+    assert.ok(fxList.some((fx: { beatId: string; kind: string }) => fx.beatId === rBeatId && fx.kind === 'ranged'));
+
+    // Hide archerMon and verify non-DM players no longer see FX involving archerMon
+    await dm.action('update_monster', { monsterId: archerMon.id, hiddenFromPlayers: true });
+    const hiddenFxState = await heroPlayer.get('/api/state');
+    assert.ok(
+      !(hiddenFxState.data.recentArenaFx || []).some(
+        (fx: { attackerId?: string; targetId?: string }) => fx.attackerId === archerMon.id || fx.targetId === archerMon.id,
+      ),
+    );
+
     console.log('ALL 19 PRODUCTION TEST SUITES PASSED!');
   } finally {
     await app.close();

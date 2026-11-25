@@ -11,6 +11,7 @@
 - Always refer to players as **Adventurers** (`New Adventurer`) in UI copy, onboarding, and system text — never `Climber`.
 
 ## Module Map (Refactored Mega-Files)
+- `client/src/canvas/arenaFx.ts` — Procedural canvas FX engine (BFS walking glide, melee lunge/slash, ranged projectile, elemental spell AoE, floating combat text) driven by an on-demand RAF loop in `BeatArenaCanvas.tsx`.
 - `client/src/styles/game.css` — `@import` manifest preserving cascade order across `client/src/styles/modules/`:
   - `equipment-inventory.css` (portrait studio, paperdoll equipment, bag inventory)
   - `dice-tray.css` (polyhedral dice tray & animations)

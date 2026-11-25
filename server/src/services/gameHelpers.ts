@@ -13,6 +13,7 @@ import {
   computeStatModifier,
   getEquippedTotals,
   type ActiveUnitEffect,
+  type ArenaFxEvent,
   type BeatArena,
   type Character,
   type EquipmentSlot,
@@ -1016,6 +1017,21 @@ export function tickBleedEffectsOnRoundStart(ctx: ActionRequestContext): TickUni
   }
 
   return results;
+}
+
+export function pushArenaFx(
+  state: GameState,
+  fx: Omit<ArenaFxEvent, 'id' | 'createdAt'>,
+): ArenaFxEvent {
+  const entry: ArenaFxEvent = {
+    id: `fx-${Date.now().toString(36)}-${crypto.randomInt(100, 999)}`,
+    createdAt: new Date().toISOString(),
+    ...fx,
+  };
+  if (!Array.isArray(state.recentArenaFx)) state.recentArenaFx = [];
+  state.recentArenaFx.unshift(entry);
+  state.recentArenaFx = state.recentArenaFx.slice(0, 6);
+  return entry;
 }
 
 export { VALID_BIOME_THEMES };

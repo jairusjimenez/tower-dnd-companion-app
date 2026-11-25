@@ -39,6 +39,7 @@ import {
   commitState,
   getAllyAuraBonuses,
   logPlayerHistory,
+  pushArenaFx,
   pushSystemToast,
   removeMonsterTokensFromMaps,
   syncCharacterDerived,
@@ -494,7 +495,23 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
 
   let rangedEval: RangedShotEvaluation | null = null;
   let atkTokForTurn = null;
+  let fxBeatId: string | null = null;
+  let fxFromPos: { x: number; y: number } | null = null;
+  let fxToPos: { x: number; y: number } | null = null;
   const isSpellAttack = Boolean(payload.isSpell);
+
+  if (payload.beatId) {
+    const beatForFx = (ctx.state.storyBeats || []).find((b) => b.id === payload.beatId);
+    if (beatForFx?.arena) {
+      const aTok = attackerChar ? (beatForFx.arena.tokens || []).find((t) => t.id === attackerChar.id) : undefined;
+      const mTok = (beatForFx.arena.tokens || []).find((t) => t.id === monster.id);
+      if (aTok && mTok) {
+        fxBeatId = beatForFx.id;
+        fxFromPos = { x: aTok.x, y: aTok.y };
+        fxToPos = { x: mTok.x, y: mTok.y };
+      }
+    }
+  }
 
   if (!isDm && payload.beatId && attackerChar) {
     const beat = (ctx.state.storyBeats || []).find((b) => b.id === payload.beatId);
@@ -676,6 +693,21 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
           message: ffEntry.summary,
           category: 'warning',
         });
+        if (fxBeatId && fxFromPos) {
+          const ffBeat = (ctx.state.storyBeats || []).find((b) => b.id === fxBeatId);
+          const ffTok = (ffBeat?.arena?.tokens || []).find((t) => t.id === ffAlly.id);
+          pushArenaFx(ctx.state, {
+            beatId: fxBeatId,
+            kind: 'ranged',
+            attackerId: attackerChar.id,
+            targetId: ffAlly.id,
+            from: fxFromPos,
+            to: ffTok ? { x: ffTok.x, y: ffTok.y } : (fxToPos || fxFromPos),
+            damage: ffDamage,
+            friendlyFire: true,
+            label: 'FRIENDLY FIRE!',
+          });
+        }
         commitState(ctx);
         return {
           ok: true,
@@ -706,6 +738,18 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
       };
       ctx.state.combatLog.unshift(missEntry);
       ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
+      if (fxBeatId && fxFromPos && fxToPos) {
+        pushArenaFx(ctx.state, {
+          beatId: fxBeatId,
+          kind: isSpellAttack ? 'spell' : isRanged ? 'ranged' : 'melee',
+          attackerId: attackerChar.id,
+          targetId: monster.id,
+          from: fxFromPos,
+          to: fxToPos,
+          element: isSpellAttack ? damageType : undefined,
+          miss: true,
+        });
+      }
       commitState(ctx);
       return {
         ok: true,
@@ -1125,6 +1169,21 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
       title: 'MONSTER DEFEATED!',
       message: `${attackerName} dealt the finishing blow to ${monster.name}!`,
       category: 'loot',
+    });
+  }
+
+  if (fxBeatId && fxFromPos && fxToPos) {
+    pushArenaFx(ctx.state, {
+      beatId: fxBeatId,
+      kind: isSpellAttack ? 'spell' : isRanged ? 'ranged' : 'melee',
+      attackerId: attackerChar?.id,
+      targetId: monster.id,
+      from: fxFromPos,
+      to: fxToPos,
+      affectedCells: playerAffectedCells.length ? playerAffectedCells : undefined,
+      element: isSpellAttack ? damageType : undefined,
+      damage: finalDamage,
+      crit: isCrit,
     });
   }
 

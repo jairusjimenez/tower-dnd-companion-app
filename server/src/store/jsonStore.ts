@@ -32,6 +32,7 @@ export function migrateGameState(raw: unknown): GameState {
   if (!Array.isArray(parsed.systemMessages)) parsed.systemMessages = [];
   if (!Array.isArray(parsed.pendingReactions)) parsed.pendingReactions = [];
   if (!Array.isArray(parsed.recentMonsterDefeats)) parsed.recentMonsterDefeats = [];
+  if (!Array.isArray(parsed.recentArenaFx)) parsed.recentArenaFx = [];
 
   const LEGACY_GRIMOIRE_IDS = new Set([
     'sp-shinsu-lance',

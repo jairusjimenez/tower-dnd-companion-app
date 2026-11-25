@@ -28,6 +28,7 @@ import {
   createInventoryItem,
   grantXpToCharacter,
   logPlayerHistory,
+  pushArenaFx,
   pushSystemToast,
   recalculateCharacterAcAndDr,
   resolveAuthorizedCharacter,
@@ -201,10 +202,6 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
       if (Number(targetMon.hp ?? 0) <= 0) return { status: 400, error: `${targetMon.name} is already defeated.` };
       authChar.mp = Math.max(0, authChar.mp - cost);
       applyCastSideEffects();
-      if (castTok && !isReactionCast) {
-      castTok.hasCastSpellThisTurn = true;
-    }
-    syncCharacterDerived(ctx, authChar.id);
       const castHealFormula = typeof payload.healFormula === 'string' && payload.healFormula.trim()
         ? payload.healFormula.trim()
         : sp.healFormula;
@@ -307,6 +304,9 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
       castTok.hasCastSpellThisTurn = true;
     }
     syncCharacterDerived(ctx, authChar.id);
+      if (!castHealFormula) {
+        // placeholder match check
+      }
     const castSummary = `${authChar.name} cast ${sp.name} (${sp.areaText}, Cost ${cost} MP)${effectNotes.length ? ` • ${effectNotes.join(', ')}` : ''}.`;
     ctx.state.combatLog.unshift({
       id: `cblog-${Date.now()}`,

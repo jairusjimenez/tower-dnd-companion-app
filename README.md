@@ -100,6 +100,10 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 - **Impassable Terrain Hard-Block & Cover Penalties**: Both player and monster ranged attacks are blocked by impassable terrain (omitted from canvas range overlays and rejected server-side). Units standing in the line of fire (`player`, `monster`, or `npc`) apply **`-2` Hit per unit (capped at `-4`)** and amber-tint the arena overlay; adjacent ranged shots (`1 Sp`) incur a **`-2` Point-Blank** penalty.
 - **Natural 1 Friendly Fire**: Fumbling (`Nat 1`) a ranged shot with a friendly unit in front redirects the stray shot onto the frontmost ally (or fellow monster).
 
+### 9. Live Procedural Arena Animations (`Version 0.8.4`)
+- **Walking, Attack & Spell FX (`arenaFx.ts`)**: Tokens smoothly glide/hop along their BFS movement path with dust puffs, lunge & slash on melee strikes, fire glowing arrows/bolts on ranged shots, and unleash element-themed projectiles & AoE bursts for spells (`Fire`, `Water`, `Wind`, `Earth`, `Light`, `Dark`) and heals/buffs with floating damage/crit/miss numbers.
+- **Zero Idle Phone CPU & Zero Extra Railway Cost**: Synchronized live across DM and Adventurers via a 6-event `recentArenaFx` ring buffer inside existing SSE broadcasts (RBAC-filtered for hidden monsters), driven by an on-demand `requestAnimationFrame` loop that stops immediately when idle and respects `prefers-reduced-motion`.
+
 ---
 
 ## Tech Stack & Project Structure

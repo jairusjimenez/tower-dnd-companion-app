@@ -1040,6 +1040,27 @@ export interface GameNotes {
   sharedQuests: string;
 }
 
+export type ArenaFxKind = 'melee' | 'ranged' | 'spell' | 'heal' | 'buff';
+
+export interface ArenaFxEvent {
+  id: string;
+  beatId: string;
+  createdAt: string;
+  kind: ArenaFxKind;
+  attackerId?: string;
+  targetId?: string;
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+  affectedCells?: Array<{ x: number; y: number }>;
+  element?: string;
+  damage?: number;
+  heal?: number;
+  crit?: boolean;
+  miss?: boolean;
+  friendlyFire?: boolean;
+  label?: string;
+}
+
 export interface GameState {
   version: number;
   schemaVersion?: number;
@@ -1054,6 +1075,7 @@ export interface GameState {
   pendingReactions: PendingReaction[];
   lastResolvedClash?: PendingReaction | null;
   recentMonsterDefeats?: MonsterDefeatSummary[];
+  recentArenaFx?: ArenaFxEvent[];
   bestiary: BestiaryEntry[];
   npcRoster?: NpcEntry[];
   treasureCatalog?: TreasureEntry[];
@@ -1095,6 +1117,7 @@ export interface FilteredGameState {
   pendingReactions: PendingReaction[];
   lastResolvedClash?: PendingReaction | null;
   recentMonsterDefeats?: MonsterDefeatSummary[];
+  recentArenaFx?: ArenaFxEvent[];
   bestiary: BestiaryEntry[];
   npcRoster?: NpcEntry[];
   treasureCatalog?: TreasureEntry[];

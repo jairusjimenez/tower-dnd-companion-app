@@ -33,6 +33,7 @@ import {
   applyUnitEffect,
   commitState,
   getFloorCenterRow,
+  pushArenaFx,
   pushSystemToast,
   removeMonsterTokensFromMaps,
   syncCharacterDerived,
@@ -345,11 +346,15 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
     }
   }
   let monRangedEval: RangedShotEvaluation | null = null;
+  let fxMonPos: { x: number; y: number } | null = null;
+  let fxTgtPos: { x: number; y: number } | null = null;
   const effectiveRange = Math.max(1, Number(mon.rangeSpaces || 1));
   if (hostBeat?.arena) {
     const monTok = hostBeat.arena.tokens.find((t) => t.id === mon.id);
     const tgtTok = hostBeat.arena.tokens.find((t) => t.id === targetChar.id);
     if (monTok && tgtTok) {
+      fxMonPos = { x: monTok.x, y: monTok.y };
+      fxTgtPos = { x: tgtTok.x, y: tgtTok.y };
       const dist = spaceDistanceBetweenPoints(monTok.x, monTok.y, tgtTok.x, tgtTok.y);
       if (dist > effectiveRange) {
         return {
@@ -493,6 +498,20 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
           }
         }
         const ffSummary = `MONSTER FRIENDLY FIRE (NAT 1)! ${strikeLabel}'s fumbled ranged shot struck ${ffMon.name} for ${ffDmg} damage (${ffMon.hp}/${ffMon.maxHp} HP left)!`;
+        if (hostBeat && fxMonPos) {
+          const ffMonTok = (hostBeat.arena?.tokens || []).find((t) => t.id === ffMon.id);
+          pushArenaFx(ctx.state, {
+            beatId: hostBeat.id,
+            kind: 'ranged',
+            attackerId: mon.id,
+            targetId: ffMon.id,
+            from: fxMonPos,
+            to: ffMonTok ? { x: ffMonTok.x, y: ffMonTok.y } : (fxTgtPos || fxMonPos),
+            damage: ffDmg,
+            friendlyFire: true,
+            label: 'FRIENDLY FIRE!',
+          });
+        }
         pushSystemToast(ctx, {
           title: 'MONSTER FRIENDLY FIRE!',
           message: ffSummary,
@@ -557,6 +576,18 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
       return reaction;
     }).filter((r): r is NonNullable<typeof r> => r !== null);
     ctx.state.pendingReactions = ctx.state.pendingReactions.slice(0, 12);
+    if (hostBeat && fxMonPos && fxTgtPos && reactions.length > 0) {
+      pushArenaFx(ctx.state, {
+        beatId: hostBeat.id,
+        kind: effectiveRange >= 2 ? 'ranged' : 'melee',
+        attackerId: mon.id,
+        targetId: targetChar.id,
+        from: fxMonPos,
+        to: fxTgtPos,
+        affectedCells: affectedCells.length ? affectedCells : undefined,
+        damage: effectiveMonDmg,
+      });
+    }
 
     commitState(ctx);
     return {
@@ -604,6 +635,19 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
     return { characterId: tc.id, dmgTaken, evaded: incomingRes.evaded };
   });
   ctx.state.combatLog = ctx.state.combatLog.slice(0, 50);
+  if (hostBeat && fxMonPos && fxTgtPos) {
+    pushArenaFx(ctx.state, {
+      beatId: hostBeat.id,
+      kind: effectiveRange >= 2 ? 'ranged' : 'melee',
+      attackerId: mon.id,
+      targetId: targetChar.id,
+      from: fxMonPos,
+      to: fxTgtPos,
+      affectedCells: affectedCells.length ? affectedCells : undefined,
+      damage: results[0]?.dmgTaken ?? effectiveMonDmg,
+      miss: results[0]?.evaded,
+    });
+  }
   commitState(ctx);
   return {
     ok: true,

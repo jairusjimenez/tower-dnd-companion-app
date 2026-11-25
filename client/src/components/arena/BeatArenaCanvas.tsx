@@ -14,6 +14,7 @@ import {
   type StoryBeat,
 } from '@shared/index';
 import { findBeatTokenAt, getScaledCanvasCell } from '../../canvas/coordinates';
+import { ArenaFxManager, type ArenaFxFrame } from '../../canvas/arenaFx';
 import { drawBeatArenaCanvas, type BeatActionMode } from '../../canvas/drawBeatArena';
 import { useVtt } from '../../context/VttContext';
 
@@ -320,6 +321,10 @@ export function BeatArenaCanvas({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const holdTimerRef = useRef<number | null>(null);
   const [portraitRev, setPortraitRev] = useState(0);
+  const fxManagerRef = useRef<ArenaFxManager>(new ArenaFxManager());
+  const prevTokenPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const prevBeatIdRef = useRef<string | null>(null);
+  const fxRafRef = useRef<number | null>(null);
 
   const cols = beat.arena?.cols || 20;
   const rows = beat.arena?.rows || 20;
@@ -330,46 +335,118 @@ export function BeatArenaCanvas({
   const axisPadRef = useRef(axisPad);
   axisPadRef.current = axisPad;
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    drawBeatArenaCanvas({
-      canvas,
-      beat,
-      cellPx,
-      selectedTokenId,
-      beatActionMode,
-      previewAttackArea,
-      previewAttackAreaModifier,
-      previewAimCell,
-      previewSpell,
-      session,
-      state,
-      hideAxisLabels,
-      onPortraitLoaded: () => setPortraitRev((r) => r + 1),
-    });
+  const drawFrame = useCallback(
+    (fxFrame: ArenaFxFrame | null) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      drawBeatArenaCanvas({
+        canvas,
+        beat,
+        cellPx,
+        selectedTokenId,
+        beatActionMode,
+        previewAttackArea,
+        previewAttackAreaModifier,
+        previewAimCell,
+        previewSpell,
+        session,
+        state,
+        hideAxisLabels,
+        fxFrame,
+        onPortraitLoaded: () => setPortraitRev((r) => r + 1),
+      });
 
-    if (measureStart && measureEnd) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const sx = axisPad + measureStart.x * cellPx + cellPx / 2;
-        const sy = axisPad + measureStart.y * cellPx + cellPx / 2;
-        const ex = axisPad + measureEnd.x * cellPx + cellPx / 2;
-        const ey = axisPad + measureEnd.y * cellPx + cellPx / 2;
-        ctx.save();
-        ctx.strokeStyle = '#fbbf24';
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([5, 4]);
-        ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(ex, ey);
-        ctx.stroke();
-        ctx.restore();
-        const dist = spaceDistanceBetweenPoints(measureStart.x, measureStart.y, measureEnd.x, measureEnd.y);
-        onMeasuredLabel?.(dist);
+      if (measureStart && measureEnd) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const sx = axisPad + measureStart.x * cellPx + cellPx / 2;
+          const sy = axisPad + measureStart.y * cellPx + cellPx / 2;
+          const ex = axisPad + measureEnd.x * cellPx + cellPx / 2;
+          const ey = axisPad + measureEnd.y * cellPx + cellPx / 2;
+          ctx.save();
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(ex, ey);
+          ctx.stroke();
+          ctx.restore();
+          const dist = spaceDistanceBetweenPoints(measureStart.x, measureStart.y, measureEnd.x, measureEnd.y);
+          onMeasuredLabel?.(dist);
+        }
+      }
+    },
+    [beat, cellPx, axisPad, selectedTokenId, beatActionMode, previewAttackArea, previewAttackAreaModifier, previewAimCell, previewSpell, session, state, hideAxisLabels, measureStart, measureEnd, onMeasuredLabel],
+  );
+  const drawFrameRef = useRef(drawFrame);
+  drawFrameRef.current = drawFrame;
+
+  const ensureFxLoop = useCallback(() => {
+    if (fxRafRef.current !== null) return;
+    const tick = (now: number) => {
+      const mgr = fxManagerRef.current;
+      if (!mgr.hasActive(now)) {
+        fxRafRef.current = null;
+        drawFrameRef.current(null);
+        return;
+      }
+      drawFrameRef.current(mgr.sample(now, cellPxRef.current));
+      fxRafRef.current = window.requestAnimationFrame(tick);
+    };
+    fxRafRef.current = window.requestAnimationFrame(tick);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (fxRafRef.current !== null) {
+        window.cancelAnimationFrame(fxRafRef.current);
+        fxRafRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const mgr = fxManagerRef.current;
+    const now = performance.now();
+    const tokens = beat.arena?.tokens || [];
+    const terrainSet = new Set((beat.arena?.terrain || []).map((t) => `${t.x},${t.y}`));
+
+    if (prevBeatIdRef.current !== beat.id) {
+      prevBeatIdRef.current = beat.id;
+      mgr.clear();
+      mgr.seedSeenFx(state?.recentArenaFx || []);
+      const initMap = new Map<string, { x: number; y: number }>();
+      for (const t of tokens) initMap.set(t.id, { x: t.x, y: t.y });
+      prevTokenPosRef.current = initMap;
+    } else {
+      const nextMap = new Map<string, { x: number; y: number }>();
+      for (const t of tokens) {
+        const prev = prevTokenPosRef.current.get(t.id);
+        if (prev && (prev.x !== t.x || prev.y !== t.y)) {
+          mgr.queueWalk(t.id, prev, { x: t.x, y: t.y }, cols, rows, terrainSet, now);
+        }
+        nextMap.set(t.id, { x: t.x, y: t.y });
+      }
+      prevTokenPosRef.current = nextMap;
+
+      for (const fx of [...(state?.recentArenaFx || [])].reverse()) {
+        if (fx.beatId === beat.id) {
+          mgr.queueFx(fx, now);
+        }
       }
     }
-  }, [beat, cellPx, selectedTokenId, beatActionMode, previewAttackArea, previewAttackAreaModifier, previewAimCell, previewSpell, session, state, hideAxisLabels, measureStart, measureEnd, portraitRev, onMeasuredLabel]);
+
+    if (mgr.hasActive(now)) {
+      ensureFxLoop();
+    }
+  }, [beat.id, beat.arena?.tokens, beat.arena?.terrain, cols, rows, state?.recentArenaFx, ensureFxLoop]);
+
+  useEffect(() => {
+    const mgr = fxManagerRef.current;
+    const now = performance.now();
+    drawFrame(mgr.hasActive(now) ? mgr.sample(now, cellPx) : null);
+  }, [drawFrame, portraitRev, cellPx]);
 
   // Center scroll viewport on the active/target unit token
   useEffect(() => {
