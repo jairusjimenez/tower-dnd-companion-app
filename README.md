@@ -104,6 +104,7 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 - **Walking, Attack & Spell FX (`arenaFx.ts`)**: Tokens smoothly glide/hop along their BFS movement path with dust puffs, lunge & slash on melee strikes, fire glowing arrows/bolts on ranged shots, and unleash element-themed projectiles & AoE bursts for spells (`Fire`, `Water`, `Wind`, `Earth`, `Light`, `Dark`) and heals/buffs with floating damage/crit/miss numbers.
 - **Zero Idle Phone CPU & Zero Extra Railway Cost**: Synchronized live across DM and Adventurers via a 6-event `recentArenaFx` ring buffer inside existing SSE broadcasts (RBAC-filtered for hidden monsters), driven by an on-demand `requestAnimationFrame` loop that stops immediately when idle and respects `prefers-reduced-motion`.
 - **Interactive Stat & Breakthrough Hints**: Tapping any attribute (`STR`–`LUCK`), combat bento (`AC`, `DR`, `MOVE`), or the `i` formula toggle expands an inline hint card with plain-English stat effects and all `20 / 40 / 60 / 80 / 100` breakthrough tiers, remaining accessible even while the session is paused.
+- **Mobile-First DM Sanctum (`Version 0.8.6`)**: Replaces the 9-tab top bar on phones (`<= 768px`) with a fixed 4-tab bottom thumb dock (**Beats / Party / Monsters / More**), a slide-up **More** tool sheet (`Tower Map`, `NPCs`, `Treasures`, `Chests`, `Rules`, `Invites`, `Reset`, `Exit`), a 1-tap **Open Beat** quick-jump bar, `16px` no-zoom inputs, `38–42px` touch targets, and single-column readable cards.
 
 ---
 

@@ -12,13 +12,32 @@ import { DmTreasuresTab } from './DmTreasuresTab';
 
 type DmTab = 'story' | 'map' | 'monsters' | 'npcs' | 'treasures' | 'chests' | 'rules' | 'party' | 'session';
 
+const SECONDARY_DM_TABS: Array<{ id: DmTab; label: string; sub: string }> = [
+  { id: 'map', label: 'Tower Map', sub: 'Floors & tokens' },
+  { id: 'npcs', label: 'NPCs', sub: 'Roster & gifts' },
+  { id: 'treasures', label: 'Treasures', sub: 'Loot catalog' },
+  { id: 'chests', label: 'Chests', sub: 'Tier rewards' },
+  { id: 'rules', label: 'Rules & Deities', sub: 'Formulas & gods' },
+  { id: 'session', label: 'Invites', sub: 'Access & resets' },
+];
+
 export function DmView() {
-  const { state, logout, sendAction, setDmSessionModalOpen, pushLocalToast } = useVtt();
+  const { state, logout, sendAction, setDmSessionModalOpen, setActiveBeatDetailId, pushLocalToast } = useVtt();
   const [activeTab, setActiveTab] = useState<DmTab>('story');
+  const [moreOpen, setMoreOpen] = useState(false);
 
   if (!state) return null;
 
   const isLive = state.session?.status === 'active';
+  const activePresentedBeat =
+    (state.storyBeats || []).find((b) => b.presented && b.status !== 'completed') ||
+    (state.storyBeats || []).find((b) => b.presented);
+  const isSecondaryActive = SECONDARY_DM_TABS.some((t) => t.id === activeTab);
+
+  const selectTab = (tab: DmTab) => {
+    setActiveTab(tab);
+    setMoreOpen(false);
+  };
 
   const handleResetCampaign = async () => {
     if (!window.confirm('Reset the entire campaign back to initial Floor 1 state?')) return;
@@ -62,7 +81,7 @@ export function DmView() {
           <button
             type="button"
             id="btn-dm-reset"
-            className="btn btn-sm btn-outline"
+            className="btn btn-sm btn-outline dm-desktop-only"
             onClick={handleResetCampaign}
           >
             Reset
@@ -70,13 +89,29 @@ export function DmView() {
           <button
             type="button"
             id="btn-dm-logout"
-            className="btn btn-sm btn-danger"
+            className="btn btn-sm btn-danger dm-desktop-only"
             onClick={logout}
           >
             Exit
           </button>
         </div>
       </header>
+
+      {activePresentedBeat && (
+        <div className="dm-mobile-active-beat">
+          <div className="dm-mobile-active-info">
+            <span className="tag tag-gold">{activePresentedBeat.floor}F</span>
+            <strong className="dm-mobile-active-title">{activePresentedBeat.title}</strong>
+          </div>
+          <button
+            type="button"
+            className="btn btn-xs btn-gold"
+            onClick={() => setActiveBeatDetailId(activePresentedBeat.id)}
+          >
+            Open Beat
+          </button>
+        </div>
+      )}
 
       <nav id="dm-nav" className="subnav dm-nav">
         <button
@@ -205,6 +240,106 @@ export function DmView() {
         {activeTab === 'party' && <DmPartyTab />}
         {activeTab === 'session' && <DmSessionTab />}
       </main>
+
+      {moreOpen && (
+        <div className="dm-more-backdrop" role="dialog" aria-modal="true" aria-label="DM Tools Menu" onClick={() => setMoreOpen(false)}>
+          <div className="dm-more-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="dm-more-head">
+              <strong>DM Tools &amp; Setup</strong>
+              <button type="button" className="btn btn-xs btn-outline" onClick={() => setMoreOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="dm-more-grid">
+              {SECONDARY_DM_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`dm-more-tile ${activeTab === tab.id ? 'active' : ''}`}
+                  onClick={() => selectTab(tab.id)}
+                >
+                  <strong>{tab.label}</strong>
+                  <span>{tab.sub}</span>
+                </button>
+              ))}
+            </div>
+            <div className="dm-more-footer">
+              <button
+                type="button"
+                className="btn btn-sm btn-outline"
+                onClick={async () => {
+                  setMoreOpen(false);
+                  await handleResetCampaign();
+                }}
+              >
+                Reset Campaign
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                onClick={() => {
+                  setMoreOpen(false);
+                  logout();
+                }}
+              >
+                Exit / Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <nav className="dm-mobile-dock" aria-label="DM Mobile Navigation">
+        <button
+          type="button"
+          className={`dm-dock-btn ${activeTab === 'story' && !moreOpen ? 'active' : ''}`}
+          onClick={() => selectTab('story')}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+          <span>Beats</span>
+        </button>
+        <button
+          type="button"
+          className={`dm-dock-btn ${activeTab === 'party' && !moreOpen ? 'active' : ''}`}
+          onClick={() => selectTab('party')}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          </svg>
+          <span>Party</span>
+        </button>
+        <button
+          type="button"
+          className={`dm-dock-btn ${activeTab === 'monsters' && !moreOpen ? 'active' : ''}`}
+          onClick={() => selectTab('monsters')}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <circle cx="12" cy="10" r="6" />
+            <path d="M9 16v3h6v-3" />
+            <circle cx="10" cy="9.5" r="1" />
+            <circle cx="14" cy="9.5" r="1" />
+          </svg>
+          <span>Monsters</span>
+        </button>
+        <button
+          type="button"
+          className={`dm-dock-btn ${moreOpen || isSecondaryActive ? 'active' : ''}`}
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen((v) => !v)}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+          <span>More</span>
+        </button>
+      </nav>
     </section>
   );
 }

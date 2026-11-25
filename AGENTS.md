@@ -21,6 +21,7 @@
   - `player-dashboard.css` (hybrid dashboard, hero card, bottom nav, vitals, stat bento, sub-tabs)
   - `story-and-outcomes.css` (story prompt buttons, beat concluded modal, death/victory graphics)
   - `onboarding.css` (Tactical Spire Deck Concept C onboarding)
+  - `dm-mobile.css` (Mobile-first DM bottom dock, More sheet, and touch/readability rules)
 - `server/src/actions/combatActions.ts` — barrel re-exporting `server/src/actions/combat/`:
   - `combatVictory.ts` (`checkAndTriggerBeatVictory`, `recordNonPlayerMonsterDefeat`, `awardMonsterDefeatLoot`)
   - `monsterActions.ts` (`spawnMonsterAction`, `updateMonsterAction`, `monsterAttackAction`)
