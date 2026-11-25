@@ -12,13 +12,15 @@ import {
   computePassiveModifiers,
   computeStatModifier,
   evaluateFormula,
+  evaluateRangedShot,
   formatMonsterAttackArea,
   getEquippedTotals,
   getFloorLootProfile,
-  getGridLineCells,
   getMaxAttacksForFloor,
   getWeaponAttackInfo,
+  hasObserveLineOfSight,
   isBossToken,
+  type RangedShotEvaluation,
   resolvePlayerDefenseReaction,
   resolvePlayerReactionStyle,
   scaleSpellForLevel,
@@ -490,8 +492,9 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
   const damageType = String(payload.damageType || 'Physical').slice(0, 24);
   let isCrit = Boolean(payload.isCrit);
 
-  let friendlyAlly = null;
+  let rangedEval: RangedShotEvaluation | null = null;
   let atkTokForTurn = null;
+  const isSpellAttack = Boolean(payload.isSpell);
 
   if (!isDm && payload.beatId && attackerChar) {
     const beat = (ctx.state.storyBeats || []).find((b) => b.id === payload.beatId);
@@ -510,32 +513,52 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
     const monTok = beat?.arena?.tokens?.find((t) => t.id === monster.id);
     if (atkTok) {
       atkTokForTurn = atkTok;
-      if (!payload.isSpell && atkTok.hasCastSpellThisTurn) {
+      if (!isSpellAttack && atkTok.hasCastSpellThisTurn) {
         return { status: 400, error: 'You have already cast a spell this turn! Wait until your next turn.' };
       }
       const floor = Math.max(1, Number(beat?.floor || attackerChar?.currentFloor || ctx.state.map?.currentFloor || 1));
       const maxAttacks = getMaxAttacksForFloor(floor);
       const used = Number(atkTok.attacksUsedThisTurn || 0);
-      if (used >= maxAttacks) {
+      if (!isSpellAttack && used >= maxAttacks) {
         return { status: 400, error: `You have already used your attack (${used}/${maxAttacks}) this turn! Wait until your next turn.` };
       }
     }
     if (atkTok && monTok && beat) {
       const dist = Math.max(Math.abs(monTok.x - atkTok.x), Math.abs(monTok.y - atkTok.y));
       const { isRanged, maxRange } = getWeaponAttackInfo(attackerChar);
-      if (dist > maxRange) {
+      if (!isSpellAttack && dist > maxRange) {
         return {
           status: 400,
           error: `Out of attack range! (${isRanged ? 'Ranged' : 'Melee'} max ${maxRange} Space${maxRange > 1 ? 's' : ''}, target is ${dist} away).`,
         };
       }
-      if (isRanged) {
-        const lineCells = getGridLineCells(atkTok.x, atkTok.y, monTok.x, monTok.y);
-        const friendlyTok = lineCells
-          .map((c) => (beat.arena.tokens || []).find((t) => t.type === 'player' && t.id !== attackerChar.id && t.x === c.x && t.y === c.y))
-          .find(Boolean);
-        if (friendlyTok && ctx.state.characters[friendlyTok.id]) {
-          friendlyAlly = ctx.state.characters[friendlyTok.id];
+      if (!isSpellAttack && isRanged) {
+        rangedEval = evaluateRangedShot({
+          startX: atkTok.x,
+          startY: atkTok.y,
+          targetX: monTok.x,
+          targetY: monTok.y,
+          maxRange,
+          isRanged: true,
+          terrain: beat.arena.terrain,
+          tokens: beat.arena.tokens,
+          attackerId: attackerChar.id,
+          attackerType: 'player',
+          targetId: monster.id,
+        });
+        if (rangedEval.blockedByTerrain) {
+          return {
+            status: 400,
+            error: 'Line of sight blocked by impassable terrain! Reposition for a clear shot.',
+          };
+        }
+      } else if (isSpellAttack && (beat.arena.terrain || []).length > 0) {
+        const terrainSet = new Set((beat.arena.terrain || []).map((t) => `${t.x},${t.y}`));
+        if (!hasObserveLineOfSight({ startX: atkTok.x, startY: atkTok.y, targetX: monTok.x, targetY: monTok.y, blockers: terrainSet })) {
+          return {
+            status: 400,
+            error: 'Spell line of sight is blocked by impassable terrain!',
+          };
         }
       }
     }
@@ -548,7 +571,6 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
   }
   const monEffMods = computeActiveEffectModifiers(monster.activeEffects);
   const auraMods = attackerChar ? getAllyAuraBonuses(ctx.state, attackerChar) : { hitBonus: 0, dmgBonus: 0, acBonus: 0, drBonus: 0 };
-  const isSpellAttack = Boolean(payload.isSpell);
   const { isRanged } = attackerChar ? getWeaponAttackInfo(attackerChar) : { isRanged: false };
 
   let attackRoll: {
@@ -571,8 +593,8 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
     const mechanicsStats = ctx.state.mechanics.stats;
     const hitStatKey = isSpellAttack && attackerChar.stats?.INT !== undefined
       ? 'INT'
-      : isRanged && attackerChar.stats?.AGI !== undefined
-        ? 'AGI'
+      : isRanged && attackerChar.stats?.PER !== undefined
+        ? 'PER'
         : attackerChar.stats?.STR !== undefined
           ? 'STR'
           : mechanicsStats[0]?.key || 'STR';
@@ -588,9 +610,10 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
       STAT_MOD: hitStatMod,
       TARGET_AC: targetAc,
     });
-    let total = natural + hitStatMod + passiveHitBonus;
+    const rangedPenalty = !isSpellAttack && rangedEval ? rangedEval.totalHitPenalty : 0;
+    let total = natural + hitStatMod + passiveHitBonus - rangedPenalty;
     try {
-      total = Math.round(evaluateFormula(ctx.state.mechanics.hitFormula, hitScope)) + passiveHitBonus;
+      total = Math.round(evaluateFormula(ctx.state.mechanics.hitFormula, hitScope)) + passiveHitBonus - rangedPenalty;
     } catch {
       // Fall back to d20 + stat modifier if a custom hit formula is malformed
     }
@@ -605,6 +628,10 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
       hit = true;
       luckyStarNote = ' [Lucky Star!]';
     }
+    const penaltyParts: string[] = [];
+    if (!isSpellAttack && rangedEval?.coverPenalty) penaltyParts.push(`Cover -${rangedEval.coverPenalty}`);
+    if (!isSpellAttack && rangedEval?.pointBlankPenalty) penaltyParts.push(`Point-Blank -${rangedEval.pointBlankPenalty}`);
+    const penaltyNote = penaltyParts.length ? ` (${penaltyParts.join(', ')})` : '';
     attackRoll = {
       natural,
       total,
@@ -612,12 +639,56 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
       hit,
       crit,
       fumble: fumble && !hit,
-      breakdown: `d20 [${natural}] → ${total} vs AC ${targetAc}${luckyStarNote}`,
+      breakdown: `d20 [${natural}] → ${total} vs AC ${targetAc} [${hitStatKey}]${penaltyNote}${luckyStarNote}`,
     };
     isCrit = crit;
 
     if (!hit) {
       if (atkTokForTurn) atkTokForTurn.attacksUsedThisTurn = Number(atkTokForTurn.attacksUsedThisTurn || 0) + 1;
+      const ffAlly = fumble && !isSpellAttack && rangedEval?.frontFriendlyId ? ctx.state.characters[rangedEval.frontFriendlyId] : null;
+      if (ffAlly && Number(ffAlly.hp ?? 0) > 0) {
+        const ffRoll = payload.diceFormula
+          ? rollDiceServer({ formula: String(payload.diceFormula), mode: 'normal' }).total
+          : Math.max(1, Number(payload.rawDamage ?? 4));
+        const ffDamage = Math.max(1, Math.round(ffRoll) - Math.max(0, Number(ffAlly.dr || 0)));
+        const prevAllyHp = ffAlly.hp;
+        ffAlly.hp = Math.max(0, ffAlly.hp - ffDamage);
+        syncCharacterDerived(ctx, ffAlly.id);
+        logPlayerHistory(ctx.state, attackerChar.id, 'combat', `FRIENDLY FIRE (NAT 1)! Stray shot struck ${ffAlly.name} for ${ffDamage} ${damageType} damage!`);
+        const ffEntry = {
+          id: `cblog-${Date.now()}-${crypto.randomInt(10, 99)}`,
+          timestamp: new Date().toISOString(),
+          attacker: attackerName,
+          target: ffAlly.name,
+          targetId: ffAlly.id,
+          rawDamage: ffRoll,
+          finalDamage: ffDamage,
+          damageType,
+          isCrit: false,
+          remainingHp: ffAlly.hp,
+          maxHp: ffAlly.maxHp,
+          summary: `FRIENDLY FIRE (NAT 1)! ${attackerName}'s fumbled ranged shot struck ${ffAlly.name} for ${ffDamage} ${damageType} damage (HP: ${prevAllyHp} -> ${ffAlly.hp}/${ffAlly.maxHp})!`,
+        };
+        ctx.state.combatLog.unshift(ffEntry);
+        ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
+        pushSystemToast(ctx, {
+          title: 'FRIENDLY FIRE (NAT 1)!',
+          message: ffEntry.summary,
+          category: 'warning',
+        });
+        commitState(ctx);
+        return {
+          ok: true,
+          miss: true,
+          hit: false,
+          friendlyFire: true,
+          finalDamage: ffDamage,
+          attackRoll,
+          ally: ffAlly,
+          monster: maskMonsterForRole(monster, ctx.state, ctx.role, ctx.characterId),
+          logEntry: ffEntry,
+        };
+      }
       logPlayerHistory(ctx.state, attackerChar.id, 'combat', `Missed ${monster.name} (${attackRoll.breakdown})`);
       const missEntry = {
         id: `cblog-${Date.now()}-${crypto.randomInt(10, 99)}`,
@@ -716,7 +787,8 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
   let finalDamage = Math.max(0, rawDamage + passiveFlatBonus + passiveDiceBonus + attackerEffMods.dmgDelta);
   if (!payload.ignoreFormula) {
     const primaryStatKey = ctx.state.mechanics.stats[0]?.key || 'STR';
-    const statScore = attackerChar?.stats?.[String(payload.statKey || primaryStatKey)] ?? 10;
+    const defaultDmgStatKey = isSpellAttack ? 'INT' : isRanged ? 'PER' : primaryStatKey;
+    const statScore = attackerChar?.stats?.[String(payload.statKey || defaultDmgStatKey)] ?? 10;
     const statMod = payload.includeStatMod ? computeStatModifier(statScore, ctx.state.mechanics, attackerChar) : 0;
     const effectiveTargetDr = Math.max(
       0,
@@ -758,44 +830,6 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
     } else {
       atkTokForTurn.attacksUsedThisTurn = Number(atkTokForTurn.attacksUsedThisTurn || 0) + 1;
     }
-  }
-
-  if (friendlyAlly && attackerChar) {
-    const prevAllyHp = friendlyAlly.hp;
-    friendlyAlly.hp = Math.max(0, friendlyAlly.hp - finalDamage);
-    syncCharacterDerived(ctx, friendlyAlly.id);
-    logPlayerHistory(ctx.state, attackerChar.id, 'combat', `FRIENDLY FIRE! Arrow struck ${friendlyAlly.name} for ${finalDamage} ${damageType} damage!`);
-    const ffEntry = {
-      id: `cblog-${Date.now()}-${crypto.randomInt(10, 99)}`,
-      timestamp: new Date().toISOString(),
-      attacker: attackerName,
-      target: friendlyAlly.name,
-      targetId: friendlyAlly.id,
-      rawDamage,
-      finalDamage,
-      damageType,
-      isCrit,
-      rollDetails,
-      remainingHp: friendlyAlly.hp,
-      maxHp: friendlyAlly.maxHp,
-      summary: `FRIENDLY FIRE! ${attackerName}'s ranged shot hit ${friendlyAlly.name} for ${finalDamage} ${damageType} damage (HP: ${prevAllyHp} -> ${friendlyAlly.hp}/${friendlyAlly.maxHp})!`,
-    };
-    ctx.state.combatLog.unshift(ffEntry);
-    ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
-    pushSystemToast(ctx, {
-      title: 'FRIENDLY FIRE!',
-      message: ffEntry.summary,
-      category: 'combat',
-    });
-    commitState(ctx);
-    return {
-      ok: true,
-      friendlyFire: true,
-      finalDamage,
-      ally: friendlyAlly,
-      monster: maskMonsterForRole(monster, ctx.state, ctx.role, ctx.characterId),
-      logEntry: ffEntry,
-    };
   }
 
   const prevHp = Number(monster.hp ?? 0);

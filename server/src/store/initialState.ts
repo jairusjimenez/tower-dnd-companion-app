@@ -318,6 +318,8 @@ export function getInitialState(): GameState {
       { id: 'best-beru', name: 'Ant King Beru', category: 'Boss', maxHp: 175, ac: 19, dr: 5, attackFormula: '1d20+11', damageFormula: '4d8+6', rangeSpaces: 2, notes: 'Apex insectoid monarch with lethal speed.' },
       // Classic D&D Monsters
       { id: 'best-dnd-goblin', name: 'Goblin Scout', category: 'D&D', maxHp: 20, ac: 13, dr: 0, attackFormula: '1d20+4', damageFormula: '1d6+2', rangeSpaces: 4, notes: 'Nimble shortbow & scimitar ambusher.' },
+      { id: 'best-goblin-archer', name: 'Goblin Archer', category: 'D&D', maxHp: 20, ac: 13, dr: 0, attackFormula: '1d20+5', damageFormula: '1d6+2', rangeSpaces: 4, iconId: 'goblin', attackArea: 'single', notes: 'Ranged shortbow sniper (4 Sp).' },
+      { id: 'best-skeleton-marksman', name: 'Skeleton Marksman', category: 'D&D', maxHp: 24, ac: 13, dr: 1, attackFormula: '1d20+6', damageFormula: '1d8+2', rangeSpaces: 5, iconId: 'skeleton', attackArea: 'single', notes: 'Undead longbow sniper (5 Sp).' },
       { id: 'best-kobold', name: 'Kobold Trapper', category: 'D&D', maxHp: 18, ac: 12, dr: 0, attackFormula: '1d20+4', damageFormula: '1d6+1', rangeSpaces: 4, notes: 'Cunning pack skirmisher with sling.' },
       { id: 'best-skeleton', name: 'Iron Bone Sentinel', category: 'D&D', maxHp: 42, ac: 15, dr: 2, attackFormula: '1d20+6', damageFormula: '2d6+3', rangeSpaces: 2, notes: 'Armored undead guardian.' },
       { id: 'best-zombie', name: 'Zombie Shambler', category: 'D&D', maxHp: 30, ac: 11, dr: 1, attackFormula: '1d20+4', damageFormula: '1d8+2', rangeSpaces: 1, notes: 'Relentless rotting undead.' },

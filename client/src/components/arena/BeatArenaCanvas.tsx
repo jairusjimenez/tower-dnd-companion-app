@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   computePassiveModifiers,
   computeStatModifier,
+  evaluateRangedShot,
   getArenaCellPx,
   getWeaponAttackInfo,
   hasObserveLineOfSight,
@@ -231,6 +232,29 @@ export function useBeatPlayerCellAction() {
               category: 'warning',
             });
             return true;
+          }
+          if (isRanged) {
+            const shotEval = evaluateRangedShot({
+              startX: myTok.x,
+              startY: myTok.y,
+              targetX: monTok.x,
+              targetY: monTok.y,
+              maxRange,
+              isRanged: true,
+              terrain: arena.terrain,
+              tokens: arena.tokens,
+              attackerId: me.id,
+              attackerType: 'player',
+              targetId: monTok.id,
+            });
+            if (shotEval.blockedByTerrain) {
+              pushLocalToast({
+                title: 'LINE OF SIGHT BLOCKED',
+                message: `Impassable terrain blocks your ranged shot at ${monTok.name}. Reposition first!`,
+                category: 'warning',
+              });
+              return true;
+            }
           }
         }
         const wep = me.equipment?.mainHand || null;

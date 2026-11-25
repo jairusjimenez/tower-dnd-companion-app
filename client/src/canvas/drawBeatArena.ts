@@ -6,6 +6,7 @@ import {
   computePassiveModifiers,
   computeReachableMoveCells,
   computeSegmentedBarTicks,
+  evaluateRangedShot,
   inferDefaultAttackAreaForMonster,
   type AttackArea,
   type MonsterAttackArea,
@@ -140,7 +141,7 @@ export function drawBeatArenaCanvas({
       const floor = Math.max(1, Number(beat.floor || me.currentFloor || 1));
       const maxAttacks = getMaxAttacksForFloor(floor);
       if (Number(myTok.attacksUsedThisTurn || 0) < maxAttacks) {
-        const { maxRange } = getWeaponAttackInfo(me);
+        const { isRanged, maxRange } = getWeaponAttackInfo(me);
         const pArea: AttackArea = previewAttackArea || me.equipment?.mainHand?.attackArea || 'single';
         const pMod = previewAttackAreaModifier ?? me.equipment?.mainHand?.attackAreaModifier ?? 0;
         let nearestMon: { x: number; y: number } | null = null;
@@ -166,23 +167,47 @@ export function drawBeatArenaCanvas({
           rows,
         });
         const affSet = new Set(affectedCells.map((c) => `${c.x},${c.y}`));
+        const tokenByCell = new Map<string, string>();
+        for (const t of arena.tokens || []) tokenByCell.set(`${t.x},${t.y}`, t.id);
+        const evalCell = (cx: number, cy: number) =>
+          isRanged
+            ? evaluateRangedShot({
+                startX: myTok.x,
+                startY: myTok.y,
+                targetX: cx,
+                targetY: cy,
+                maxRange,
+                isRanged: true,
+                terrain: arena.terrain,
+                tokens: arena.tokens,
+                attackerId: me.id,
+                attackerType: 'player',
+                targetId: tokenByCell.get(`${cx},${cy}`),
+              })
+            : null;
         ctx.save();
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.14)';
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.42)';
         ctx.lineWidth = 1;
         for (const c of allReachableCells) {
           const key = `${c.x},${c.y}`;
           if (affSet.has(key) || terrainSet.has(key)) continue;
+          const ev = evalCell(c.x, c.y);
+          if (ev?.blockedByTerrain) continue;
+          const hasPenalty = Boolean(ev && ev.totalHitPenalty > 0);
+          ctx.fillStyle = hasPenalty ? 'rgba(245, 158, 11, 0.22)' : 'rgba(239, 68, 68, 0.14)';
+          ctx.strokeStyle = hasPenalty ? 'rgba(251, 191, 36, 0.68)' : 'rgba(239, 68, 68, 0.42)';
           const px = axisPad + c.x * cellPx;
           const py = axisPad + c.y * cellPx;
           ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
           ctx.strokeRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
         }
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.44)';
-        ctx.strokeStyle = 'rgba(248, 113, 113, 0.95)';
         ctx.lineWidth = 1.6;
         for (const c of affectedCells) {
           if (terrainSet.has(`${c.x},${c.y}`)) continue;
+          const ev = evalCell(c.x, c.y);
+          if (ev?.blockedByTerrain) continue;
+          const hasPenalty = Boolean(ev && ev.totalHitPenalty > 0);
+          ctx.fillStyle = hasPenalty ? 'rgba(245, 158, 11, 0.45)' : 'rgba(239, 68, 68, 0.44)';
+          ctx.strokeStyle = hasPenalty ? 'rgba(251, 191, 36, 0.98)' : 'rgba(248, 113, 113, 0.95)';
           const px = axisPad + c.x * cellPx;
           const py = axisPad + c.y * cellPx;
           ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
@@ -344,26 +369,52 @@ export function drawBeatArenaCanvas({
         rows,
         isSkill,
       });
+      const monRange = Math.max(1, Number(liveMon?.rangeSpaces || 1));
+      const isRangedMon = monRange >= 2;
       const affSet = new Set(affectedCells.map((c) => `${c.x},${c.y}`));
+      const tokenByCell = new Map<string, string>();
+      for (const t of arena.tokens || []) tokenByCell.set(`${t.x},${t.y}`, t.id);
+      const evalMonCell = (cx: number, cy: number) =>
+        isRangedMon
+          ? evaluateRangedShot({
+              startX: monTok.x,
+              startY: monTok.y,
+              targetX: cx,
+              targetY: cy,
+              maxRange: monRange,
+              isRanged: true,
+              terrain: arena.terrain,
+              tokens: arena.tokens,
+              attackerId: monTok.id,
+              attackerType: 'monster',
+              targetId: tokenByCell.get(`${cx},${cy}`),
+            })
+          : null;
       ctx.save();
-      // Reachable area (all facings) - lighter tint
-      ctx.fillStyle = isSkill ? 'rgba(192, 38, 211, 0.16)' : 'rgba(220, 38, 38, 0.18)';
-      ctx.strokeStyle = isSkill ? 'rgba(244, 63, 94, 0.45)' : 'rgba(239, 68, 68, 0.45)';
+      // Reachable area (all facings) - lighter tint (amber if cover/point-blank)
       ctx.lineWidth = 1;
       for (const c of allReachableCells) {
         const key = `${c.x},${c.y}`;
         if (affSet.has(key) || terrainSet.has(key)) continue;
+        const ev = evalMonCell(c.x, c.y);
+        if (ev?.blockedByTerrain) continue;
+        const hasPenalty = Boolean(ev && ev.totalHitPenalty > 0);
+        ctx.fillStyle = hasPenalty ? 'rgba(245, 158, 11, 0.22)' : isSkill ? 'rgba(192, 38, 211, 0.16)' : 'rgba(220, 38, 38, 0.18)';
+        ctx.strokeStyle = hasPenalty ? 'rgba(251, 191, 36, 0.68)' : isSkill ? 'rgba(244, 63, 94, 0.45)' : 'rgba(239, 68, 68, 0.45)';
         const px = axisPad + c.x * cellPx;
         const py = axisPad + c.y * cellPx;
         ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
         ctx.strokeRect(px + 1, py + 1, cellPx - 2, cellPx - 2);
       }
       // Affected strike area (aimed at nearest player) - strong tint
-      ctx.fillStyle = isSkill ? 'rgba(192, 38, 211, 0.42)' : 'rgba(220, 38, 38, 0.48)';
-      ctx.strokeStyle = isSkill ? 'rgba(244, 63, 94, 0.95)' : 'rgba(239, 68, 68, 0.95)';
       ctx.lineWidth = 1.8;
       for (const c of affectedCells) {
         if (terrainSet.has(`${c.x},${c.y}`)) continue;
+        const ev = evalMonCell(c.x, c.y);
+        if (ev?.blockedByTerrain) continue;
+        const hasPenalty = Boolean(ev && ev.totalHitPenalty > 0);
+        ctx.fillStyle = hasPenalty ? 'rgba(245, 158, 11, 0.46)' : isSkill ? 'rgba(192, 38, 211, 0.42)' : 'rgba(220, 38, 38, 0.48)';
+        ctx.strokeStyle = hasPenalty ? 'rgba(251, 191, 36, 0.98)' : isSkill ? 'rgba(244, 63, 94, 0.95)' : 'rgba(239, 68, 68, 0.95)';
         const px = axisPad + c.x * cellPx;
         const py = axisPad + c.y * cellPx;
         ctx.fillRect(px + 1, py + 1, cellPx - 2, cellPx - 2);

@@ -507,7 +507,7 @@ export function OnboardingView() {
                 <div><strong>AGI</strong><span>Init &amp; Dodge</span></div>
                 <div><strong>VIT</strong><span>HP &amp; Endurance</span></div>
                 <div><strong>INT</strong><span>Spells &amp; MP</span></div>
-                <div><strong>PER</strong><span>Hit &amp; Range</span></div>
+                <div><strong>PER</strong><span>Ranged &amp; Observe</span></div>
                 <div><strong>LUCK</strong><span>Crits &amp; Loot</span></div>
               </div>
               <div className="onb-milestone-row">

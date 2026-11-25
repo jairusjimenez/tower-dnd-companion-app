@@ -95,6 +95,11 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
   - Upgraded the Monster Attack stage to display separate **Accuracy `[1d20]`** and **Damage** dice alongside an explicit **Hit & Damage calculation breakdown**, added a **Counter-Attack Damage** die, and added live **Expected Damage / Heal** numbers with inline segmented HP preview bars on **Counter**, **Cast Spell**, **Dodge**, and **Block**.
 - **Unit Hover Tooltips with Buff/Debuff Stack Counts (`TokenTooltip`)**: Hovering (or touch-holding) over any player, monster, or NPC token on the map displays grouped **`BUFFS (N)`** and **`DEBUFFS (N)`** pills with **`×N`** stack badges and remaining durations.
 
+### 8. Tactical Ranged Combat (`Version 0.8.3`)
+- **`PER`-Scaled Ranged Weapons & Monsters**: Bows, crossbows, slingshots, and ranged weapons scale both **Hit Roll** and **Weapon Damage** from **PER** (`Perception`), while monsters distinguish explicit melee (`1 Sp` default) from ranged attackers (`2–5 Sp`, including Bestiary presets like `Goblin Archer` and `Skeleton Marksman`).
+- **Impassable Terrain Hard-Block & Cover Penalties**: Both player and monster ranged attacks are blocked by impassable terrain (omitted from canvas range overlays and rejected server-side). Units standing in the line of fire (`player`, `monster`, or `npc`) apply **`-2` Hit per unit (capped at `-4`)** and amber-tint the arena overlay; adjacent ranged shots (`1 Sp`) incur a **`-2` Point-Blank** penalty.
+- **Natural 1 Friendly Fire**: Fumbling (`Nat 1`) a ranged shot with a friendly unit in front redirects the stray shot onto the frontmost ally (or fellow monster).
+
 ---
 
 ## Tech Stack & Project Structure

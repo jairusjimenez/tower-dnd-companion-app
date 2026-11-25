@@ -203,16 +203,33 @@ export function AttackRollModal() {
           setLanded(false);
           setMissed(true);
           setAccCubeText(String(atk?.natural ?? 'MISS'));
-          setDmgCubeText('—');
-          setFinalCubeText('0');
+          setDmgCubeText(res?.friendlyFire ? String(res.finalDamage ?? 0) : '—');
+          setFinalCubeText(res?.friendlyFire ? String(res.finalDamage ?? 0) : '0');
           setTrioSub({
-            accSub: atk ? `Total ${atk.total} (${atk.natural} ${accBonusLabel}) • MISS` : 'Missed',
-            dmgSub: 'No damage',
-            finalSub: atk?.fumble ? 'Natural 1!' : 'Strike missed',
+            accSub: atk ? `Total ${atk.total} (${atk.natural} ${accBonusLabel}) • ${res?.friendlyFire ? 'NAT 1 FUMBLE' : 'MISS'}` : 'Missed',
+            dmgSub: res?.friendlyFire ? 'Stray shot!' : 'No damage',
+            finalSub: res?.friendlyFire && res.ally ? `Hit ${res.ally.name}` : atk?.fumble ? 'Natural 1!' : 'Strike missed',
           });
           const pills: ResultPill[] = [];
           if (atk) {
             pills.push({ label: `Roll ${atk.total} (d20: ${atk.natural})`, tone: 'cyan' });
+            if (atk.breakdown.includes('Cover -')) {
+              const m = atk.breakdown.match(/Cover -\d+/);
+              if (m) pills.push({ label: m[0], tone: 'gold' });
+            }
+            if (atk.breakdown.includes('Point-Blank -')) {
+              pills.push({ label: 'Point-Blank -2', tone: 'gold' });
+            }
+          }
+          if (res?.friendlyFire && res.ally) {
+            pills.push({ label: `${res.finalDamage ?? 0} Friendly Fire`, tone: 'crimson' });
+            setResultInfo({
+              tierClass: 'tier-rare',
+              title: 'FRIENDLY FIRE (NAT 1)!',
+              pills,
+              note: `Fumbled shot struck ally ${res.ally.name} (HP: ${res.ally.hp}/${res.ally.maxHp}).`,
+            });
+            return;
           }
           setResultInfo({
             tierClass: 'tier-normal',

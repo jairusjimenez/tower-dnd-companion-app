@@ -53,6 +53,7 @@ export function BeatEditDrawer({ beat, onClose }: BeatEditDrawerProps) {
   const [monHp, setMonHp] = useState(initialMonster.maxHp);
   const [monAc, setMonAc] = useState(initialMonster.ac);
   const [monDr, setMonDr] = useState(initialMonster.dr);
+  const [monRange, setMonRange] = useState(1);
 
   const [npcName, setNpcName] = useState('');
   const [npcRole, setNpcRole] = useState('');
@@ -96,6 +97,7 @@ export function BeatEditDrawer({ beat, onClose }: BeatEditDrawerProps) {
     setMonDr(scaled.dr);
     setMonAtk(scaled.attackFormula);
     setMonDmg(scaled.damageFormula);
+    setMonRange(Math.max(1, Number(preset?.rangeSpaces || 1)));
   };
 
   const buildEditMonsterBatch = (): BeatEncounterSpec[] => {
@@ -109,6 +111,7 @@ export function BeatEditDrawer({ beat, onClose }: BeatEditDrawerProps) {
         maxHp: monHp,
         ac: monAc,
         dr: monDr,
+        rangeSpaces: Math.max(1, Math.min(12, Math.trunc(Number(monRange) || 1))),
         attackFormula: monAtk.trim() || '1d20+5',
         damageFormula: monDmg.trim() || '1d8+3',
       });
@@ -320,10 +323,11 @@ export function BeatEditDrawer({ beat, onClose }: BeatEditDrawerProps) {
                     <label><span>Attack Formula</span><input type="text" value={monAtk} onChange={(e) => setMonAtk(e.target.value)} /></label>
                     <label><span>Damage Dice</span><input type="text" value={monDmg} onChange={(e) => setMonDmg(e.target.value)} /></label>
                   </div>
-                  <div className="grid-3">
+                  <div className="grid-4">
                     <label><span>Max HP</span><input type="number" min={1} value={monHp} onChange={(e) => setMonHp(Number(e.target.value || 1))} /></label>
                     <label><span>AC</span><input type="number" value={monAc} onChange={(e) => setMonAc(Number(e.target.value || 10))} /></label>
                     <label><span>DR</span><input type="number" value={monDr} onChange={(e) => setMonDr(Number(e.target.value || 0))} /></label>
+                    <label><span>Range (Sp)</span><input type="number" min={1} max={12} value={monRange} onChange={(e) => setMonRange(Math.max(1, Math.min(12, Number(e.target.value || 1))))} /></label>
                   </div>
                   <button
                     type="button"

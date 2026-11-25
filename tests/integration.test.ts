@@ -15,6 +15,7 @@ import {
   computeReachableMoveCells,
   computeStatModifier,
   evaluateFormula,
+  evaluateRangedShot,
   generateArenaTerrainFromPrompt,
   getArenaCellPx,
   getMonsterXpReward,
@@ -1531,7 +1532,193 @@ async function runTests(): Promise<void> {
     assert.ok(killDummy.data.defeatSummary.xpGained > 0);
     assert.ok(killDummy.data.defeatSummary.goldGained >= 0);
 
-    console.log('ALL 18 PRODUCTION TEST SUITES PASSED!');
+    // ------------------------------------------------------------------
+    // Suite 19: Tactical Ranged Combat (PER, Wall LoS, Cover & Point-Blank)
+    // ------------------------------------------------------------------
+    console.log('Running Suite 19: Tactical Ranged Combat...');
+
+    // Unit checks on evaluateRangedShot
+    const clearShot = evaluateRangedShot({
+      startX: 1,
+      startY: 5,
+      targetX: 4,
+      targetY: 5,
+      maxRange: 4,
+      isRanged: true,
+      terrain: [],
+      tokens: [],
+    });
+    assert.strictEqual(clearShot.blockedByTerrain, false);
+    assert.strictEqual(clearShot.totalHitPenalty, 0);
+
+    const wallShot = evaluateRangedShot({
+      startX: 1,
+      startY: 5,
+      targetX: 4,
+      targetY: 5,
+      maxRange: 4,
+      isRanged: true,
+      terrain: [{ x: 2, y: 5, kind: 'rock', label: 'Wall' } as { x: number; y: number }],
+      tokens: [],
+    });
+    assert.strictEqual(wallShot.blockedByTerrain, true);
+
+    const coverAndPbShot = evaluateRangedShot({
+      startX: 1,
+      startY: 5,
+      targetX: 5,
+      targetY: 5,
+      maxRange: 4,
+      isRanged: true,
+      terrain: [],
+      tokens: [
+        { id: 'ally-1', type: 'player', x: 2, y: 5 },
+        { id: 'mon-2', type: 'monster', x: 3, y: 5 },
+        { id: 'npc-1', type: 'npc', x: 4, y: 5 },
+      ],
+      attackerId: 'p1',
+      attackerType: 'player',
+      targetId: 'mon-target',
+    });
+    assert.strictEqual(coverAndPbShot.coverPenalty, 4); // capped at -4
+    assert.strictEqual(coverAndPbShot.frontFriendlyId, 'ally-1');
+
+    const pointBlankShot = evaluateRangedShot({
+      startX: 1,
+      startY: 5,
+      targetX: 2,
+      targetY: 5,
+      maxRange: 4,
+      isRanged: true,
+      terrain: [],
+      tokens: [],
+    });
+    assert.strictEqual(pointBlankShot.pointBlankPenalty, 2);
+    assert.strictEqual(pointBlankShot.totalHitPenalty, 2);
+
+    // Equip hero with a ranged bow BEFORE presenting beat (equipment is locked during active beat)
+    const addBow = await dm.action('inventory_action', {
+      characterId: heroCharId,
+      subAction: 'add',
+      item: {
+        name: 'Test Shortbow',
+        category: 'weapon',
+        slot: 'mainHand',
+        qty: 1,
+        damageDice: '1d6+1',
+        damageType: 'Piercing (Ranged)',
+        rangeSpaces: 4,
+        attackBonus: 3,
+      },
+    });
+    assert.strictEqual(addBow.status, 200);
+    const bowItem = (addBow.data.character?.inventory || []).find((i: { name: string }) => i.name === 'Test Shortbow');
+    assert.ok(bowItem?.id);
+    const equipBow = await dm.action('equipment_action', {
+      characterId: heroCharId,
+      subAction: 'equip',
+      itemId: bowItem.id,
+    });
+    assert.strictEqual(equipBow.status, 200);
+
+    // Server integration: Create a beat with wall + melee & ranged monsters
+    const rangedBeatRes = await dm.action('story_action', {
+      subAction: 'add_beat',
+      title: 'Ranged LoS Test Beat',
+      floor: 1,
+      beatType: 'combat',
+      encounters: [
+        { name: 'Melee Slime', maxHp: 50, ac: 10, dr: 0, startX: 6, startY: 6, attackFormula: '1d20+5', damageFormula: '1d6+2' },
+        { name: 'Goblin Archer', maxHp: 40, ac: 10, dr: 0, rangeSpaces: 4, startX: 7, startY: 9, attackFormula: '1d20+5', damageFormula: '1d6+2' },
+      ],
+    });
+    assert.strictEqual(rangedBeatRes.status, 200);
+    const rBeatId = rangedBeatRes.data.beat.id as string;
+    await dm.action('story_action', { subAction: 'present_beat', beatId: rBeatId });
+    const spawnBeatMons = await dm.action('story_action', { subAction: 'spawn_beat_monsters', beatId: rBeatId });
+    assert.strictEqual(spawnBeatMons.status, 200);
+
+    // Place wall at (4, 5)
+    const wallPlace = await dm.action('story_action', {
+      subAction: 'toggle_beat_terrain',
+      beatId: rBeatId,
+      x: 4,
+      y: 5,
+      kind: 'rock',
+      label: 'Stone Pillar',
+    });
+    assert.strictEqual(wallPlace.status, 200);
+
+    const rStateRes = await dm.get('/api/state');
+    const rBeat = (rStateRes.data.storyBeats || []).find((b: { id: string }) => b.id === rBeatId);
+    assert.ok(rBeat);
+    const meleeMon = (rStateRes.data.monsters || []).find((m: { name: string }) => m.name === 'Melee Slime');
+    const archerMon = (rStateRes.data.monsters || []).find((m: { name: string }) => m.name === 'Goblin Archer');
+    assert.ok(meleeMon && archerMon);
+    assert.strictEqual(meleeMon.rangeSpaces, 1);
+    assert.strictEqual(archerMon.rangeSpaces, 4);
+
+    const advanceTurnTo = async (targetId: string) => {
+      for (let step = 0; step < 20; step++) {
+        const st = await dm.get('/api/state');
+        const comb = st.data.combat?.combatants?.[st.data.combat?.turnIndex ?? 0];
+        if (!comb || comb.id === targetId) return;
+        await dm.action('initiative_action', { subAction: 'next_turn' });
+      }
+    };
+
+    const moveHero = await dm.action('story_action', { subAction: 'move_beat_token', beatId: rBeatId, tokenId: heroCharId, x: 2, y: 5 });
+    assert.strictEqual(moveHero.status, 200);
+
+    await advanceTurnTo(heroCharId);
+    const wallBlockedPlayer = await heroPlayer.action('inflict_damage', {
+      monsterId: meleeMon.id,
+      beatId: rBeatId,
+      diceFormula: '1d6+1',
+      damageType: 'Piercing (Ranged)',
+      includeStatMod: true,
+      attackRoll: true,
+    });
+    assert.strictEqual(wallBlockedPlayer.status, 400);
+    assert.ok(String(wallBlockedPlayer.data.error || '').toLowerCase().includes('impassable terrain'), wallBlockedPlayer.data.error);
+
+    // Melee Slime at (5,5) cannot attack hero at (2,5) (1 Sp max)
+    await advanceTurnTo(meleeMon.id);
+    const meleeOutOfRange = await dm.action('monster_attack', {
+      monsterId: meleeMon.id,
+      targetCharacterId: heroCharId,
+    });
+    assert.strictEqual(meleeOutOfRange.status, 400);
+    assert.ok(String(meleeOutOfRange.data.error || '').toLowerCase().includes('out of range'), meleeOutOfRange.data.error);
+
+    // Goblin Archer at (6,8) can attack hero at (6,5) (3 Sp away) when hero moves to (6,5), and uses PER for player shots
+    await advanceTurnTo(heroCharId);
+    await dm.action('story_action', { subAction: 'move_beat_token', beatId: rBeatId, tokenId: heroCharId, x: 6, y: 5 });
+    await advanceTurnTo(archerMon.id);
+    const archerHit = await dm.action('monster_attack', {
+      monsterId: archerMon.id,
+      targetCharacterId: heroCharId,
+    });
+    assert.strictEqual(archerHit.status, 200);
+    if (archerHit.data.reactive && archerHit.data.reaction?.id) {
+      await heroPlayer.action('resolve_reaction', { reactionId: archerHit.data.reaction.id, choice: 'accept' });
+    }
+
+    await advanceTurnTo(heroCharId);
+    const playerPerShot = await heroPlayer.action('inflict_damage', {
+      monsterId: archerMon.id,
+      beatId: rBeatId,
+      diceFormula: '1d6+1',
+      damageType: 'Piercing (Ranged)',
+      includeStatMod: true,
+      attackRoll: true,
+    });
+    assert.strictEqual(playerPerShot.status, 200);
+    if (playerPerShot.data.attackRoll) {
+      assert.ok(String(playerPerShot.data.attackRoll.breakdown).includes('[PER]'));
+    }
+
+    console.log('ALL 19 PRODUCTION TEST SUITES PASSED!');
   } finally {
     await app.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

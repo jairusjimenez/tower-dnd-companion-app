@@ -212,6 +212,102 @@ export function hasObserveLineOfSight({
   return true;
 }
 
+export interface RangedShotEvaluation {
+  dist: number;
+  inRange: boolean;
+  isRangedShot: boolean;
+  blockedByTerrain: boolean;
+  blockingUnitIds: string[];
+  coverPenalty: number;
+  pointBlankPenalty: number;
+  totalHitPenalty: number;
+  frontFriendlyId: string | null;
+}
+
+export function evaluateRangedShot({
+  startX,
+  startY,
+  targetX,
+  targetY,
+  maxRange,
+  isRanged,
+  terrain,
+  tokens,
+  attackerId,
+  attackerType,
+  targetId,
+}: {
+  startX: number;
+  startY: number;
+  targetX: number;
+  targetY: number;
+  maxRange: number;
+  isRanged?: boolean;
+  terrain?: Array<{ x: number; y: number }>;
+  tokens?: Array<{ id: string; type: string; x: number; y: number }>;
+  attackerId?: string;
+  attackerType?: 'player' | 'monster';
+  targetId?: string;
+}): RangedShotEvaluation {
+  const dist = spaceDistanceBetweenPoints(startX, startY, targetX, targetY);
+  const inRange = dist <= maxRange;
+  const isRangedShot = isRanged ?? maxRange >= 2;
+  if (!isRangedShot) {
+    return {
+      dist,
+      inRange,
+      isRangedShot: false,
+      blockedByTerrain: false,
+      blockingUnitIds: [],
+      coverPenalty: 0,
+      pointBlankPenalty: 0,
+      totalHitPenalty: 0,
+      frontFriendlyId: null,
+    };
+  }
+
+  const terrainSet = new Set((terrain || []).map((t) => `${t.x},${t.y}`));
+  const blockedByTerrain = !hasObserveLineOfSight({
+    startX,
+    startY,
+    targetX,
+    targetY,
+    blockers: terrainSet,
+  });
+
+  const midCells = getGridLineCells(startX, startY, targetX, targetY);
+  const blockingUnitIds: string[] = [];
+  const seenIds = new Set<string>();
+  let frontFriendlyId: string | null = null;
+  for (const c of midCells) {
+    for (const tok of tokens || []) {
+      if (tok.x !== c.x || tok.y !== c.y) continue;
+      if (tok.id === attackerId || tok.id === targetId) continue;
+      if (!seenIds.has(tok.id)) {
+        seenIds.add(tok.id);
+        blockingUnitIds.push(tok.id);
+      }
+      if (!frontFriendlyId && attackerType && tok.type === attackerType) {
+        frontFriendlyId = tok.id;
+      }
+    }
+  }
+
+  const coverPenalty = Math.min(4, blockingUnitIds.length * 2);
+  const pointBlankPenalty = dist === 1 ? 2 : 0;
+  return {
+    dist,
+    inRange,
+    isRangedShot: true,
+    blockedByTerrain,
+    blockingUnitIds,
+    coverPenalty,
+    pointBlankPenalty,
+    totalHitPenalty: coverPenalty + pointBlankPenalty,
+    frontFriendlyId,
+  };
+}
+
 export type ArenaCanvasVariant = 'modal' | 'detail' | 'draft';
 
 export function getArenaCellPx(cols: number, variant: ArenaCanvasVariant = 'modal'): number {

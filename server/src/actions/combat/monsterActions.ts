@@ -8,16 +8,19 @@ import {
   computeActiveEffectModifiers,
   computePassiveModifiers,
   computeMonsterAttackCells,
+  evaluateRangedShot,
   formatMonsterAttackArea,
   inferDefaultAttackAreaForMonster,
   getDefaultSkillsForMonster,
   getMonsterXpReward,
   scaleMonsterSkillForFloor,
+  spaceDistanceBetweenPoints,
   type AttackArea,
   type ChestTier,
   type Monster,
   type MonsterAttackArea,
   type MonsterSkill,
+  type RangedShotEvaluation,
   type TokenIconId,
   type UnitEffectSpec,
 } from '../../../../shared';
@@ -56,7 +59,6 @@ export function spawnMonsterAction(ctx: ActionRequestContext, payload: Record<st
   const maxHp = Math.max(1, Number(payload.maxHp || 30));
   const ac = Number(payload.ac || 14);
   const dr = Number(payload.dr || 0);
-  const rangeSpaces = Math.max(1, Number(payload.rangeSpaces || 2));
   const hidden = Boolean(payload.hiddenFromPlayers);
   const name = String(payload.name || 'Tower Monster').trim().slice(0, 50);
 
@@ -65,6 +67,7 @@ export function spawnMonsterAction(ctx: ActionRequestContext, payload: Record<st
   const matchedBestiary = (ctx.state.bestiary || []).find(
     (b) => b.name.trim().toLowerCase() === cleanBaseName || name.toLowerCase().includes(b.name.trim().toLowerCase()),
   );
+  const rangeSpaces = Math.max(1, Number(payload.rangeSpaces || matchedBestiary?.rangeSpaces || 1));
   const rawSkillsSource: Array<Partial<MonsterSkill> & { name: string }> = Array.isArray(payload.skills) && payload.skills.length > 0
     ? (payload.skills as Array<Partial<MonsterSkill> & { name: string }>)
     : getDefaultSkillsForMonster(matchedBestiary || { name, maxHp });
@@ -217,6 +220,9 @@ export function updateMonsterAction(ctx: ActionRequestContext, payload: Record<s
     if (payload.hp !== undefined) mon.hp = Math.max(0, Math.min(maxHp, Number(payload.hp)));
     if (payload.ac !== undefined) mon.ac = Number(payload.ac);
     if (payload.dr !== undefined) mon.dr = Number(payload.dr);
+    if (payload.rangeSpaces !== undefined) {
+      mon.rangeSpaces = Math.max(1, Math.min(12, Math.trunc(Number(payload.rangeSpaces) || 1)));
+    }
     if (payload.attackArea !== undefined && MONSTER_ATTACK_AREAS.includes(String(payload.attackArea) as AttackArea)) {
       mon.attackArea = String(payload.attackArea) as AttackArea;
     }
@@ -338,10 +344,40 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
       };
     }
   }
+  let monRangedEval: RangedShotEvaluation | null = null;
+  const effectiveRange = Math.max(1, Number(mon.rangeSpaces || 1));
   if (hostBeat?.arena) {
     const monTok = hostBeat.arena.tokens.find((t) => t.id === mon.id);
     const tgtTok = hostBeat.arena.tokens.find((t) => t.id === targetChar.id);
     if (monTok && tgtTok) {
+      const dist = spaceDistanceBetweenPoints(monTok.x, monTok.y, tgtTok.x, tgtTok.y);
+      if (dist > effectiveRange) {
+        return {
+          status: 400,
+          error: `${mon.name} is out of range! (Max ${effectiveRange} Space${effectiveRange > 1 ? 's' : ''}, target is ${dist} away).`,
+        };
+      }
+      if (effectiveRange >= 2) {
+        monRangedEval = evaluateRangedShot({
+          startX: monTok.x,
+          startY: monTok.y,
+          targetX: tgtTok.x,
+          targetY: tgtTok.y,
+          maxRange: effectiveRange,
+          isRanged: true,
+          terrain: hostBeat.arena.terrain,
+          tokens: hostBeat.arena.tokens,
+          attackerId: mon.id,
+          attackerType: 'monster',
+          targetId: targetChar.id,
+        });
+        if (monRangedEval.blockedByTerrain) {
+          return {
+            status: 400,
+            error: `${mon.name}'s ranged attack is blocked by impassable terrain!`,
+          };
+        }
+      }
       const area = computeMonsterAttackCells({
         monsterX: monTok.x,
         monsterY: monTok.y,
@@ -349,7 +385,7 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
         targetY: tgtTok.y,
         attackArea: effectiveArea,
         areaModifier: effectiveMod,
-        rangeSpaces: mon.rangeSpaces,
+        rangeSpaces: effectiveRange,
         cols: hostBeat.arena.cols || 20,
         rows: hostBeat.arena.rows || 20,
         isSkill: Boolean(usedSkill),
@@ -382,10 +418,15 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
   const isAoe = targetChars.length > 1;
   const aoeSuffix = isAoe ? ` [AoE: ${areaLabel} • ${targetChars.length} climbers caught]` : '';
 
+  const rangedPenaltyParts: string[] = [];
+  if (monRangedEval?.coverPenalty) rangedPenaltyParts.push(`Cover -${monRangedEval.coverPenalty}`);
+  if (monRangedEval?.pointBlankPenalty) rangedPenaltyParts.push(`Point-Blank -${monRangedEval.pointBlankPenalty}`);
+  const rangedPenaltySuffix = rangedPenaltyParts.length ? ` [${rangedPenaltyParts.join(', ')}]` : '';
+
   const rollHitVs = (tc: typeof targetChar) => {
     const tMods = computePassiveModifiers(tc);
     const tEffMods = computeActiveEffectModifiers(tc.activeEffects);
-    const hitPenalty = tMods.auraEnemyHitPenalty || 0;
+    const hitPenalty = (tMods.auraEnemyHitPenalty || 0) + (monRangedEval?.totalHitPenalty || 0);
     const hitRoll = rollDiceServer({ formula: atkFormula });
     const effectiveHitTotal = hitRoll.total + monEffMods.hitDelta - hitPenalty;
     const targetAc = Math.max(1, Number(tc.ac || 12) + tEffMods.acDelta);
@@ -396,6 +437,7 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
       targetAc,
       attackNatural,
       attackHit,
+      attackFumble: hitRoll.isFumble,
       attackModifier: hitRoll.modifier,
       attackEffectDelta: monEffMods.hitDelta,
       attackAuraPenalty: hitPenalty,
@@ -435,6 +477,40 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
   if (ctx.state.mechanics.combatMode === 'reactive') {
     const reactions = targetChars.map((tc, i) => {
       const h = rollHitVs(tc);
+      const ffMon = h.attackFumble && monRangedEval?.frontFriendlyId
+        ? ctx.state.monsters.find((m) => m.id === monRangedEval.frontFriendlyId && Number(m.hp ?? 0) > 0)
+        : undefined;
+      if (ffMon) {
+        const ffDmg = Math.max(1, effectiveMonDmg - Math.max(0, Number(ffMon.dr || 0)));
+        const prevFfHp = Number(ffMon.hp ?? 0);
+        ffMon.hp = Math.max(0, prevFfHp - ffDmg);
+        syncMonsterDerived(ctx, ffMon.id, { skipAutoLoot: true });
+        if (ffMon.hp <= 0) {
+          removeMonsterTokensFromMaps(ctx.state, ffMon.id);
+          if (hostBeat) {
+            recordNonPlayerMonsterDefeat(ctx, ffMon, hostBeat, `${mon.name} (Friendly Fire)`);
+            checkAndTriggerBeatVictory(ctx, hostBeat);
+          }
+        }
+        const ffSummary = `MONSTER FRIENDLY FIRE (NAT 1)! ${strikeLabel}'s fumbled ranged shot struck ${ffMon.name} for ${ffDmg} damage (${ffMon.hp}/${ffMon.maxHp} HP left)!`;
+        pushSystemToast(ctx, {
+          title: 'MONSTER FRIENDLY FIRE!',
+          message: ffSummary,
+          category: 'warning',
+        });
+        ctx.state.combatLog.unshift({
+          id: `cblog-${Date.now()}-${i}`,
+          timestamp: new Date().toISOString(),
+          attacker: strikeLabel,
+          target: ffMon.name,
+          rawDamage: effectiveMonDmg,
+          finalDamage: ffDmg,
+          damageType: 'Friendly Fire (Nat 1)',
+          remainingHp: ffMon.hp,
+          summary: ffSummary,
+        });
+        return null;
+      }
       const reaction = {
         id: `react-${Date.now().toString(36)}-${i}-${crypto.randomInt(10, 99)}`,
         createdAt: new Date().toISOString(),
@@ -463,7 +539,7 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
 
       pushSystemToast(ctx, {
         title: usedSkill ? `MONSTER SKILL: ${usedSkill.name.toUpperCase()}!` : isAoe ? 'AREA ATTACK INCOMING!' : 'REACTION TRIGGERED!',
-        message: `${strikeLabel} attacks ${tc.name} (${h.effectiveHitTotal} to hit, ${reaction.incomingDamage} incoming dmg)${aoeSuffix}! Counter-attack or Parry now!`,
+        message: `${strikeLabel} attacks ${tc.name} (${h.effectiveHitTotal} to hit, ${reaction.incomingDamage} incoming dmg)${rangedPenaltySuffix}${aoeSuffix}! Counter-attack or Parry now!`,
         category: 'combat',
         target: tc.id,
       });
@@ -476,10 +552,10 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
         finalDamage: reaction.incomingDamage,
         damageType: usedSkill ? `Skill: ${usedSkill.name}` : 'Incoming Strike',
         remainingHp: tc.hp,
-        summary: `${strikeLabel} unleashes ${usedSkill ? usedSkill.name : 'an attack'} on ${tc.name} (Hit ${h.effectiveHitTotal}, ${reaction.incomingDamage} dmg)${aoeSuffix} — Waiting for Player Reaction!`,
+        summary: `${strikeLabel} unleashes ${usedSkill ? usedSkill.name : 'an attack'} on ${tc.name} (Hit ${h.effectiveHitTotal}, ${reaction.incomingDamage} dmg)${rangedPenaltySuffix}${aoeSuffix} — Waiting for Player Reaction!`,
       });
       return reaction;
-    });
+    }).filter((r): r is NonNullable<typeof r> => r !== null);
     ctx.state.pendingReactions = ctx.state.pendingReactions.slice(0, 12);
 
     commitState(ctx);
@@ -493,6 +569,7 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
       attackAreaModifier: effectiveMod,
       affectedCells,
       targetsHit: targetChars.map((t) => t.id),
+      rangedEval: monRangedEval,
     };
   }
 
