@@ -13,6 +13,48 @@ import { SegmentedBar } from '../common/SegmentedBar';
 
 type StatsSubTab = 'attributes' | 'passives' | 'history';
 
+const STAT_HINT_COPY: Record<string, { title: string; summary: string }> = {
+  STR: {
+    title: 'Strength (STR)',
+    summary: 'Scales Melee weapon Hit Roll & Damage, physical power checks, and Parry reaction rolls (STR + PER).',
+  },
+  AGI: {
+    title: 'Agility (AGI)',
+    summary: 'Boosts Initiative order, Dodge reaction rolls, Counter-Attack damage & Bleed chance, and +1 Move Space per +4 AGI above 10.',
+  },
+  VIT: {
+    title: 'Vitality (VIT)',
+    summary: 'Increases Max HP (+2 HP per point), physical resilience checks, and Block damage mitigation (up to 95%).',
+  },
+  INT: {
+    title: 'Intelligence (INT)',
+    summary: 'Increases Max MP (+1 MP per point), Spell Hit Roll & Damage, and arcane knowledge checks.',
+  },
+  PER: {
+    title: 'Perception (PER)',
+    summary: 'Scales Ranged weapon Hit Roll & Damage (bows/crossbows), Observe weak-spot discovery, and Parry rolls (STR + PER).',
+  },
+  LUCK: {
+    title: 'Luck (LUCK)',
+    summary: 'Influences fortune checks, critical edge, and rare encounter or loot rolls.',
+  },
+};
+
+const COMBAT_BENTO_HINTS: Record<'AC' | 'DR' | 'MOVE', { title: string; summary: string }> = {
+  AC: {
+    title: 'Armor Class (AC)',
+    summary: 'Target roll enemies must beat to hit you. Scales from Base AC + equipped armor/shields + passives + active buffs.',
+  },
+  DR: {
+    title: 'Damage Reduction (DR)',
+    summary: 'Flat damage subtracted from every incoming hit (minimum 1 dmg taken unless evaded or blocked). Scales from armor, passives, and breakthroughs.',
+  },
+  MOVE: {
+    title: 'Movement Speed (MOVE)',
+    summary: 'Grid spaces you can travel per turn around obstacles. Base 3 Sp + AGI (+1 per +4 AGI above 10) + Floor scaling + passives.',
+  },
+};
+
 function tierClass(t: string): string {
   return `tag-tier-${String(t || 'Normal').toLowerCase().replace(/\s+/g, '-')}`;
 }
@@ -37,6 +79,8 @@ export function PlayerStatsTab({
 
   const [subTab, setSubTab] = useState<StatsSubTab>('attributes');
   const [showFormula, setShowFormula] = useState(false);
+  const [expandedStatKey, setExpandedStatKey] = useState<string | null>(null);
+  const [expandedCombatStat, setExpandedCombatStat] = useState<'AC' | 'DR' | 'MOVE' | null>(null);
 
   if (!state) return null;
 
@@ -270,7 +314,13 @@ export function PlayerStatsTab({
 
       {/* CONCEPT B: 3-COLUMN COMBAT STAT BENTO (AC, DR, MOVE) */}
       <section className="pcombat-stat-bento" aria-label="Combat Stats">
-        <div className="pcombat-bento-tile" title="Armor Class: target roll needed to hit you">
+        <button
+          type="button"
+          className={`pcombat-bento-tile readonly-allow ${expandedCombatStat === 'AC' ? 'is-expanded' : ''}`}
+          aria-expanded={expandedCombatStat === 'AC'}
+          title="Tap for Armor Class details"
+          onClick={() => setExpandedCombatStat((cur) => (cur === 'AC' ? null : 'AC'))}
+        >
           <div className="pcombat-bento-head">
             <svg viewBox="0 0 24 24" width="24" height="24" style={{ flexShrink: 0 }} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -278,10 +328,16 @@ export function PlayerStatsTab({
             <span>AC</span>
           </div>
           <strong id="p-ac-val" className="pcombat-bento-val">{ch.ac}</strong>
-          <small className="pcombat-bento-sub">Hit Defense</small>
-        </div>
+          <small className="pcombat-bento-sub">Hit Defense ▾</small>
+        </button>
 
-        <div className="pcombat-bento-tile" title="Damage Reduction: flat damage subtracted from incoming hits">
+        <button
+          type="button"
+          className={`pcombat-bento-tile readonly-allow ${expandedCombatStat === 'DR' ? 'is-expanded' : ''}`}
+          aria-expanded={expandedCombatStat === 'DR'}
+          title="Tap for Damage Reduction details"
+          onClick={() => setExpandedCombatStat((cur) => (cur === 'DR' ? null : 'DR'))}
+        >
           <div className="pcombat-bento-head">
             <svg viewBox="0 0 24 24" width="24" height="24" style={{ flexShrink: 0 }} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M20 7l-8-4-8 4v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V7z" />
@@ -290,10 +346,16 @@ export function PlayerStatsTab({
             <span>DR</span>
           </div>
           <strong id="p-dr-val" className="pcombat-bento-val">{ch.dr}</strong>
-          <small className="pcombat-bento-sub">Dmg Reduced</small>
-        </div>
+          <small className="pcombat-bento-sub">Dmg Reduced ▾</small>
+        </button>
 
-        <div className="pcombat-bento-tile" title="Movement: Base 3 + AGI (+1 per 4 AGI > 10) + Floor scaling">
+        <button
+          type="button"
+          className={`pcombat-bento-tile readonly-allow ${expandedCombatStat === 'MOVE' ? 'is-expanded' : ''}`}
+          aria-expanded={expandedCombatStat === 'MOVE'}
+          title="Tap for Movement details"
+          onClick={() => setExpandedCombatStat((cur) => (cur === 'MOVE' ? null : 'MOVE'))}
+        >
           <div className="pcombat-bento-head">
             <svg viewBox="0 0 24 24" width="24" height="24" style={{ flexShrink: 0 }} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M13 4v6l5 3M5 20h14" />
@@ -305,10 +367,33 @@ export function PlayerStatsTab({
           <small className="pcombat-bento-sub">
             Base {moveInfo.base}
             {moveInfo.agiBonus > 0 ? ` • AGI +${moveInfo.agiBonus}` : ''}
-            {moveInfo.floorBonus > 0 ? ` • ${partyFloor}F +${moveInfo.floorBonus}` : ''}
+            {moveInfo.floorBonus > 0 ? ` • ${partyFloor}F +${moveInfo.floorBonus}` : ''} ▾
           </small>
-        </div>
+        </button>
       </section>
+
+      {expandedCombatStat && (
+        <div className="pstats-hint-card" role="region" aria-label={COMBAT_BENTO_HINTS[expandedCombatStat].title}>
+          <div className="pstats-hint-head">
+            <strong>{COMBAT_BENTO_HINTS[expandedCombatStat].title}</strong>
+            <button
+              type="button"
+              className="pstats-hint-close readonly-allow"
+              aria-label="Close stat hint"
+              onClick={() => setExpandedCombatStat(null)}
+            >
+              ×
+            </button>
+          </div>
+          <p className="pstats-hint-desc">{COMBAT_BENTO_HINTS[expandedCombatStat].summary}</p>
+          {expandedCombatStat === 'MOVE' && (
+            <div className="pstats-hint-meta">
+              Base {moveInfo.base} + AGI +{moveInfo.agiBonus} + {partyFloor}F +{moveInfo.floorBonus}
+              {pMods.bonusSpeedSpaces > 0 ? ` + Passives +${pMods.bonusSpeedSpaces}` : ''} = <strong>{moveInfo.total} Spaces</strong>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* UNANSWERED DM QUESTION ALERT (ONLY WHEN NEEDED) */}
       {activeBeat && unansweredPrompts.length > 0 && (
@@ -381,7 +466,7 @@ export function PlayerStatsTab({
             </div>
             <button
               type="button"
-              className="pstats-info-btn"
+              className="pstats-info-btn readonly-allow"
               aria-label="Toggle Stat Formula"
               title="View Stat Modifier Formula"
               onClick={() => setShowFormula((v) => !v)}
@@ -418,75 +503,167 @@ export function PlayerStatsTab({
                   ? `Awakened: ${latestUnlocked.abilityName}`
                   : '';
 
+              const isExpanded = expandedStatKey === st.key;
+              const hintMeta = STAT_HINT_COPY[st.key] || {
+                title: `${st.name || st.key} (${st.key})`,
+                summary: `Governs ${st.name || st.key} checks and scaling formulas.`,
+              };
+              const derivedNote =
+                st.key === 'VIT'
+                  ? `Currently grants +${score * 2} Max HP from VIT.`
+                  : st.key === 'INT'
+                    ? `Currently grants +${score} Max MP from INT.`
+                    : st.key === 'AGI'
+                      ? `Currently grants +${moveInfo.agiBonus} Move Space${moveInfo.agiBonus === 1 ? '' : 's'} from AGI.`
+                      : null;
+
               return (
-                <div key={st.key} className={`pattr-row ${msUnlocked ? 'is-awakened' : ''}`}>
-                  <div className="pattr-left">
-                    <span className="pattr-key">{st.key}</span>
-                    <strong className="pattr-score">{score}</strong>
-                    <span className="pattr-mod">{modStr}</span>
-                  </div>
-
-                  <div className="pattr-mid" title={(latestUnlocked || nextMs)?.description || ''}>
-                    {msLabel && (
-                      <>
-                        <div className="pattr-ms-label">{msLabel}</div>
-                        <div className="pattr-ms-track">
-                          <div
-                            className={`pattr-ms-fill ${msUnlocked ? 'is-gold' : ''}`}
-                            style={{ width: `${msPct}%` }}
-                          />
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  <div className="pattr-actions">
-                    {!isBuildLocked && !(Boolean(ch.statsConfirmed) && unspentPts === 0) && score > 1 && (
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-outline pattr-step-btn readonly-allow"
-                        title="Refund 1 point"
-                        onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: -1 })}
-                      >
-                        -
-                      </button>
-                    )}
-                    {!isBuildLocked && unspentPts > 0 && (
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-gold pattr-step-btn readonly-allow"
-                        title="Spend 1 point"
-                        onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: 1 })}
-                      >
-                        +
-                      </button>
-                    )}
+                <div key={st.key} className="pattr-item">
+                  <div className={`pattr-row ${msUnlocked ? 'is-awakened' : ''} ${isExpanded ? 'is-expanded' : ''}`}>
                     <button
                       type="button"
-                      className="btn btn-xs btn-outline pattr-roll-btn"
-                      onClick={async () => {
-                        const floorNum = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
-                        const dc = 10 + Math.floor(floorNum * 1.2);
-                        const res = await sendAction<{ roll?: RollLogEntry }>('roll_dice', {
-                          count: 1,
-                          sides: 20,
-                          modifier: mod,
-                          dc,
-                          label: `${st.key} Check (DC ${dc})`,
-                          rollerName: ch.name,
-                        });
-                        if (res?.roll) {
-                          pushLocalToast({
-                            title: `${st.key} CHECK`,
-                            message: `Rolled ${res.roll.total} vs DC ${dc} (${res.roll.passed ? 'SUCCESS' : 'FAILED'})`,
-                            category: res.roll.passed ? 'loot' : 'warning',
-                          });
-                        }
-                      }}
+                      className="pattr-info-trigger readonly-allow"
+                      aria-expanded={isExpanded}
+                      title={`Tap for ${st.key} & breakthrough hints`}
+                      onClick={() => setExpandedStatKey((cur) => (cur === st.key ? null : st.key))}
                     >
-                      d20{modStr}
+                      <div className="pattr-left">
+                        <span className="pattr-key">{st.key}</span>
+                        <strong className="pattr-score">{score}</strong>
+                        <span className="pattr-mod">{modStr}</span>
+                      </div>
+
+                      <div className="pattr-mid">
+                        {msLabel && (
+                          <>
+                            <div className="pattr-ms-label">{msLabel}</div>
+                            <div className="pattr-ms-track">
+                              <div
+                                className={`pattr-ms-fill ${msUnlocked ? 'is-gold' : ''}`}
+                                style={{ width: `${msPct}%` }}
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <span className="pattr-chevron" aria-hidden="true">
+                        {isExpanded ? '▾' : '▸'}
+                      </span>
                     </button>
+
+                    <div className="pattr-actions">
+                      {!isBuildLocked && !(Boolean(ch.statsConfirmed) && unspentPts === 0) && score > 1 && (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline pattr-step-btn readonly-allow"
+                          title="Refund 1 point"
+                          onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: -1 })}
+                        >
+                          -
+                        </button>
+                      )}
+                      {!isBuildLocked && unspentPts > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-gold pattr-step-btn readonly-allow"
+                          title="Spend 1 point"
+                          onClick={() => sendAction('allocate_stat', { characterId: ch.id, statKey: st.key, amount: 1 })}
+                        >
+                          +
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-outline pattr-roll-btn"
+                        onClick={async () => {
+                          const floorNum = Math.max(1, Number(ch.currentFloor || state.map?.currentFloor || 1));
+                          const dc = 10 + Math.floor(floorNum * 1.2);
+                          const res = await sendAction<{ roll?: RollLogEntry }>('roll_dice', {
+                            count: 1,
+                            sides: 20,
+                            modifier: mod,
+                            dc,
+                            label: `${st.key} Check (DC ${dc})`,
+                            rollerName: ch.name,
+                          });
+                          if (res?.roll) {
+                            pushLocalToast({
+                              title: `${st.key} CHECK`,
+                              message: `Rolled ${res.roll.total} vs DC ${dc} (${res.roll.passed ? 'SUCCESS' : 'FAILED'})`,
+                              category: res.roll.passed ? 'loot' : 'warning',
+                            });
+                          }
+                        }}
+                      >
+                        d20{modStr}
+                      </button>
+                    </div>
                   </div>
+
+                  {isExpanded && (
+                    <div className="pstats-hint-card" role="region" aria-label={hintMeta.title}>
+                      <div className="pstats-hint-head">
+                        <strong>
+                          {hintMeta.title} • Score {score} ({modStr} mod)
+                        </strong>
+                        <button
+                          type="button"
+                          className="pstats-hint-close readonly-allow"
+                          aria-label={`Close ${st.key} hint`}
+                          onClick={() => setExpandedStatKey(null)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <p className="pstats-hint-desc">{hintMeta.summary}</p>
+                      {derivedNote && <div className="pstats-hint-meta">{derivedNote}</div>}
+
+                      <div className="pstats-ms-section">
+                        <div className="pstats-ms-title">Breakthroughs</div>
+                        {statMilestones.length === 0 ? (
+                          <div className="muted small">No breakthroughs configured for this stat.</div>
+                        ) : (
+                          <div className="pstats-ms-list">
+                            {statMilestones.map((m) => {
+                              const unlocked = score >= Number(m.threshold || 20);
+                              const isNext = !unlocked && nextMs?.id === m.id;
+                              const bonusParts: string[] = [];
+                              if (m.bonusHp) bonusParts.push(`+${m.bonusHp} HP`);
+                              if (m.bonusMp) bonusParts.push(`+${m.bonusMp} MP`);
+                              if (m.bonusAc) bonusParts.push(`+${m.bonusAc} AC`);
+                              if (m.bonusDr) bonusParts.push(`+${m.bonusDr} DR`);
+                              return (
+                                <div
+                                  key={m.id}
+                                  className={`pstats-ms-row ${unlocked ? 'is-unlocked' : isNext ? 'is-next' : ''}`}
+                                >
+                                  <div className="pstats-ms-row-top">
+                                    <span className="pstats-ms-name">
+                                      {m.threshold} {st.key} — {m.abilityName}
+                                    </span>
+                                    <span
+                                      className={`tag ${unlocked ? 'tag-gold' : isNext ? 'tag-cyan' : 'tag-outline'}`}
+                                    >
+                                      {unlocked ? 'UNLOCKED' : isNext ? `NEXT (${score}/${m.threshold})` : 'LOCKED'}
+                                    </span>
+                                  </div>
+                                  {bonusParts.length > 0 && (
+                                    <div className="pstats-ms-bonuses">
+                                      {bonusParts.map((bp) => (
+                                        <span key={bp} className="tag tag-green">{bp}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {m.description && <div className="pstats-ms-desc">{m.description}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
