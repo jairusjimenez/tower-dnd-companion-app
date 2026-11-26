@@ -533,6 +533,8 @@ export interface NpcEntry {
   story: string;
   dialogue: string;
   appearances?: NpcAppearance[];
+  recruitable?: boolean;
+  settlementRole?: SettlementNpcRole;
 }
 
 export interface BestiaryLootDrop {
@@ -596,6 +598,9 @@ export interface MapToken {
   rewardXp?: number;
   rewardGold?: number;
   rewardClaimed?: boolean;
+  recruitable?: boolean;
+  settlementRole?: SettlementNpcRole;
+  recruitedToSettlementId?: string;
 }
 
 export interface MapChest {
@@ -1096,7 +1101,52 @@ export interface GameState {
   sessionChronicle?: SessionChronicleEntry[];
   sessionRecaps?: SessionRecapRecord[];
   chronicleIntegrations?: ChronicleIntegrationStatus;
+  settlements?: Settlement[];
   rollLog: RollLogEntry[];
+}
+
+export type SettlementBuildingType = 'forge' | 'alchemy_lab' | 'arcane_study' | 'inn' | 'shrine';
+export type SettlementNpcRole = 'blacksmith' | 'alchemist' | 'enchanter' | 'innkeeper' | 'oracle' | 'villager';
+
+export interface SettlementBuilding {
+  id: string;
+  type: SettlementBuildingType;
+  level: number;
+  targetLevel: number;
+  status: 'funding' | 'under_construction' | 'active' | 'upgrading';
+  fundedGold: number;
+  requiredGold: number;
+  fundedManaStones: number;
+  requiredManaStones: number;
+  beatsCompleted: number;
+  beatsRequired: number;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface SettlementResident {
+  id: string;
+  name: string;
+  role: SettlementNpcRole;
+  iconId?: TokenIconId;
+  dialogue?: string;
+  recruitedBy?: string;
+  recruitedFloor?: number;
+  recruitedAt: string;
+  sourceBeatId?: string;
+  sourceTokenId?: string;
+}
+
+export interface Settlement {
+  id: string;
+  name: string;
+  ownerPartyName: string;
+  allowVisitors: boolean;
+  shrineUnlocked: boolean;
+  buildings: SettlementBuilding[];
+  residents: SettlementResident[];
+  restedCharacterIdsByBeat?: Record<string, string[]>;
+  createdAt: string;
 }
 
 export type ChronicleCategory =
@@ -1186,6 +1236,7 @@ export interface FilteredGameState {
   sessionChronicle?: SessionChronicleEntry[];
   sessionRecaps?: SessionRecapRecord[];
   chronicleIntegrations?: ChronicleIntegrationStatus;
+  settlements?: Settlement[];
   rollLog: RollLogEntry[];
 }
 

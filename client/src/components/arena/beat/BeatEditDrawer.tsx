@@ -63,6 +63,8 @@ export function BeatEditDrawer({ beat, onClose }: BeatEditDrawerProps) {
   const [npcRewardType, setNpcRewardType] = useState('none');
   const [npcRewardName, setNpcRewardName] = useState('');
   const [npcRewardXp, setNpcRewardXp] = useState(50);
+  const [npcRecruitable, setNpcRecruitable] = useState(false);
+  const [npcSettlementRole, setNpcSettlementRole] = useState('blacksmith');
 
   const [trName, setTrName] = useState('');
   const [trCat, setTrCat] = useState('relic');
@@ -434,6 +436,23 @@ export function BeatEditDrawer({ beat, onClose }: BeatEditDrawerProps) {
                     <label><span>Item / Skill Book Name</span><input type="text" placeholder="e.g. Shadow Step" value={npcRewardName} onChange={(e) => setNpcRewardName(e.target.value)} /></label>
                     <label><span>XP Amount</span><input type="number" min={0} value={npcRewardXp} onChange={(e) => setNpcRewardXp(Number(e.target.value || 0))} /></label>
                   </div>
+                  <div className="grid-2">
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', flexDirection: 'row' }}>
+                      <input type="checkbox" checked={npcRecruitable} onChange={(e) => setNpcRecruitable(e.target.checked)} />
+                      <span>Recruitable to Settlement</span>
+                    </label>
+                    <label>
+                      <span>Settlement Role</span>
+                      <select value={npcSettlementRole} disabled={!npcRecruitable} onChange={(e) => setNpcSettlementRole(e.target.value)}>
+                        <option value="blacksmith">Blacksmith (Forge)</option>
+                        <option value="alchemist">Alchemist (Lab)</option>
+                        <option value="enchanter">Enchanter (Arcane Study)</option>
+                        <option value="innkeeper">Innkeeper (Sanctuary Inn)</option>
+                        <option value="oracle">Oracle (Deity Shrine)</option>
+                        <option value="villager">Villager</option>
+                      </select>
+                    </label>
+                  </div>
                   <button
                     type="button"
                     className="btn btn-sm btn-outline"
@@ -454,11 +473,13 @@ export function BeatEditDrawer({ beat, onClose }: BeatEditDrawerProps) {
                         rewardType: npcRewardType,
                         rewardItemName: npcRewardName.trim(),
                         rewardXp: npcRewardXp,
+                        ...(npcRecruitable ? { recruitable: true, settlementRole: npcSettlementRole } : {}),
                       });
                       setNpcName('');
                       setNpcRole('');
                       setNpcDialogue('');
                       setNpcRewardName('');
+                      setNpcRecruitable(false);
                     }}
                   >
                     + Add NPC to Beat Arena

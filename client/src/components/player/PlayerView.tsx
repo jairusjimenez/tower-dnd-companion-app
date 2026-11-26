@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useVtt } from '../../context/VttContext';
 import { PlayerInventoryTab } from './PlayerInventoryTab';
+import { PlayerSettlementTab } from './PlayerSettlementTab';
 import { PlayerSpellsTab } from './PlayerSpellsTab';
 import { PlayerStatsTab } from './PlayerStatsTab';
 import { PlayerTowerTab } from './PlayerTowerTab';
 
-type PlayerTab = 'stats' | 'inventory' | 'magic' | 'map';
+type PlayerTab = 'stats' | 'inventory' | 'magic' | 'settlement' | 'map';
 
 export function PlayerView() {
   const {
@@ -215,6 +216,7 @@ export function PlayerView() {
         )}
         {activeTab === 'inventory' && <PlayerInventoryTab ch={ch} />}
         {activeTab === 'magic' && <PlayerSpellsTab ch={ch} />}
+        {activeTab === 'settlement' && <PlayerSettlementTab ch={ch} />}
         {activeTab === 'map' && (
           <PlayerTowerTab
             onOpenBeat={(id) => {
@@ -260,6 +262,17 @@ export function PlayerView() {
             <path d="M12 7l1 2.5L15.5 10.5 13 11.5 12 14l-1-2.5L8.5 10.5 11 9.5 12 7z" />
           </svg>
           <span>Spells</span>
+        </button>
+        <button
+          type="button"
+          className={`pbottom-nav-btn ${activeTab === 'settlement' ? 'active' : ''}`}
+          onClick={() => setActiveTab('settlement')}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M3 10l9-7 9 7v11H3z" />
+            <path d="M9 21V12h6v9" />
+          </svg>
+          <span>Town</span>
         </button>
         <button
           type="button"

@@ -38,6 +38,21 @@ export function migrateGameState(raw: unknown): GameState {
   }
   if (!Array.isArray(parsed.sessionChronicle)) parsed.sessionChronicle = [];
   if (!Array.isArray(parsed.sessionRecaps)) parsed.sessionRecaps = [];
+  if (!Array.isArray(parsed.settlements) || parsed.settlements.length === 0) {
+    parsed.settlements = [
+      {
+        id: 'settlement-primary',
+        name: 'Camp Zero — First Clearing',
+        ownerPartyName: 'First Spire Vanguard',
+        allowVisitors: true,
+        shrineUnlocked: false,
+        buildings: [],
+        residents: [],
+        restedCharacterIdsByBeat: {},
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
 
   const LEGACY_GRIMOIRE_IDS = new Set([
     'sp-shinsu-lance',

@@ -5,6 +5,7 @@ import { TokenIconSvg } from '../common/TokenIconSvg';
 export function NpcDialogueModal() {
   const { activeNpcDialogue, setActiveNpcDialogue, state, session, sendAction } = useVtt();
   const [claiming, setClaiming] = useState(false);
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     if (!activeNpcDialogue) return;
@@ -156,6 +157,41 @@ export function NpcDialogueModal() {
             <span className="tag tag-outline small muted">Gift already claimed</span>
           </div>
         ) : null}
+
+        {liveTok?.recruitable && (
+          <div className="npc-dialog-reward is-offer" style={{ marginTop: '8px' }}>
+            <div className="npc-dialog-reward-label">SETTLEMENT RECRUITMENT</div>
+            {liveTok.recruitedToSettlementId ? (
+              <span className="tag tag-green">Resident of Settlement ✓</span>
+            ) : (
+              <div className="btn-row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <span className="small muted">
+                  Role: <strong>{(liveTok.settlementRole || 'villager').toUpperCase()}</strong>
+                </span>
+                <button
+                  type="button"
+                  id="btn-npc-invite-settlement"
+                  className="btn btn-sm btn-gold"
+                  disabled={inviting}
+                  onClick={async () => {
+                    setInviting(true);
+                    try {
+                      await sendAction('settlement_action', {
+                        subAction: 'invite_npc',
+                        beatId: activeNpcDialogue.beatId,
+                        tokenId: activeNpcDialogue.tokenId,
+                      });
+                    } finally {
+                      setInviting(false);
+                    }
+                  }}
+                >
+                  {inviting ? 'Inviting...' : 'Invite to Settlement'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="npc-dialog-footer">
           {hasUnclaimedReward ? (

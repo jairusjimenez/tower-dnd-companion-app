@@ -15,6 +15,7 @@ import {
   type StoryBeat,
 } from '../../../../shared';
 import {
+  advanceSettlementConstructionOnBeatResolved,
   applyGoldBonus,
   createInventoryItem,
   grantXpToCharacter,
@@ -56,6 +57,7 @@ export function checkAndTriggerBeatVictory(ctx: ActionRequestContext, beat: Stor
     message: `All ${log.length} monster${log.length === 1 ? '' : 's'} defeated in "${beat.title}"!`,
     category: 'loot',
   });
+  advanceSettlementConstructionOnBeatResolved(ctx, beat.title);
   return true;
 }
 

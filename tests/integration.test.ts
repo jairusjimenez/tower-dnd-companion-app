@@ -1814,6 +1814,144 @@ async function runTests(): Promise<void> {
     assert.strictEqual(newSessRes.data.currentSessionNumber, 2);
 
     console.log('ALL 20 PRODUCTION TEST SUITES PASSED!');
+
+    // ------------------------------------------------------------------
+    // Suite 21: Settlement Building, Beat-Gated Construction, NPCs & Shrine
+    // ------------------------------------------------------------------
+    console.log('Running Suite 21: Settlement Building & NPC Recruitment...');
+
+    const initSettleState = await heroPlayer.get('/api/state');
+    const homeSettle = initSettleState.data.settlements?.[0];
+    assert.ok(homeSettle);
+    assert.strictEqual(homeSettle.buildings.length, 0);
+    assert.strictEqual(homeSettle.shrineUnlocked, false);
+
+    // Ensure session is active and no combat/active beat locks downtime workshops
+    const allBeatsRes = await dm.get('/api/state');
+    for (const b of allBeatsRes.data.storyBeats || []) {
+      if (b.presented && b.status === 'active') {
+        await dm.action('story_action', { subAction: 'set_status', beatId: b.id, status: 'resolved' });
+      }
+    }
+
+    // 1. Locked Deity Shrine cannot be built or prayed at by players
+    const lockedShrineRes = await heroPlayer.action('settlement_action', {
+      subAction: 'start_or_fund_building',
+      settlementId: homeSettle.id,
+      buildingType: 'shrine',
+      gold: 10,
+    });
+    assert.strictEqual(lockedShrineRes.status, 403);
+
+    // 2. DM spawns a recruitable Blacksmith NPC in a beat -> player invites them -> resident joins settlement
+    const settleBeatRes = await dm.action('story_action', {
+      subAction: 'add_beat',
+      title: 'Blacksmith Rescue Beat',
+      floor: 1,
+      beatType: 'combat',
+    });
+    assert.strictEqual(settleBeatRes.status, 200);
+    const sBeatId = settleBeatRes.data.beat.id as string;
+
+    const addSmithRes = await dm.action('story_action', {
+      subAction: 'add_beat_npc',
+      beatId: sBeatId,
+      name: 'Master Brokk',
+      npcRole: 'Blacksmith',
+      x: 3,
+      y: 3,
+      dialogue: 'Build me a forge and I will craft you steel!',
+      recruitable: true,
+      settlementRole: 'blacksmith',
+    });
+    assert.strictEqual(addSmithRes.status, 200);
+    const smithTok = (addSmithRes.data.beat?.arena?.tokens || []).find((t: { name: string }) => t.name === 'Master Brokk');
+    assert.ok(smithTok?.id);
+
+    const inviteRes = await heroPlayer.action('settlement_action', {
+      subAction: 'invite_npc',
+      beatId: sBeatId,
+      tokenId: smithTok.id,
+      settlementId: homeSettle.id,
+    });
+    assert.strictEqual(inviteRes.status, 200);
+    assert.strictEqual(inviteRes.data.resident.role, 'blacksmith');
+
+    // 3. Grant hero Gold, Mana Stones & Tower Iron Ore, fund Forge Lv 1 -> enters under_construction (0/1 Beat)
+    await dm.action('update_character', {
+      characterId: heroCharId,
+      updates: { currency: { gold: 200, manaStones: 5 } },
+    });
+    await dm.action('inventory_action', {
+      characterId: heroCharId,
+      subAction: 'add',
+      item: { name: 'Tower Iron Ore', category: 'material', qty: 2 },
+    });
+
+    const fundForgeRes = await heroPlayer.action('settlement_action', {
+      subAction: 'start_or_fund_building',
+      settlementId: homeSettle.id,
+      buildingType: 'forge',
+      gold: 60,
+      manaStones: 1,
+    });
+    assert.strictEqual(fundForgeRes.status, 200);
+    assert.strictEqual(fundForgeRes.data.building.status, 'under_construction');
+    assert.strictEqual(fundForgeRes.data.building.beatsCompleted, 0);
+    assert.strictEqual(fundForgeRes.data.building.beatsRequired, 1);
+
+    // Crafting is blocked while Forge is still under construction
+    const craftBeforeBeat = await heroPlayer.action('settlement_action', {
+      subAction: 'craft_item',
+      settlementId: homeSettle.id,
+      recipeId: 'craft-iron-longsword',
+    });
+    assert.strictEqual(craftBeforeBeat.status, 400);
+
+    // 4. Resolving the beat finishes Forge Lv 1 construction (1/1 Beat -> active)
+    const resolveBeatRes = await dm.action('story_action', {
+      subAction: 'set_status',
+      beatId: sBeatId,
+      status: 'resolved',
+    });
+    assert.strictEqual(resolveBeatRes.status, 200);
+
+    const postBuildState = await heroPlayer.get('/api/state');
+    const activeForge = postBuildState.data.settlements?.[0]?.buildings?.find((b: { type: string }) => b.type === 'forge');
+    assert.strictEqual(activeForge?.status, 'active');
+    assert.strictEqual(activeForge?.level, 1);
+
+    // 5. Craft Tower-Forged Longsword using Gold + Tower Iron Ore
+    const craftRes = await heroPlayer.action('settlement_action', {
+      subAction: 'craft_item',
+      settlementId: homeSettle.id,
+      recipeId: 'craft-iron-longsword',
+    });
+    assert.strictEqual(craftRes.status, 200);
+    assert.strictEqual(craftRes.data.item.name, 'Tower-Forged Longsword');
+
+    // 6. Second party (firstPlayer) can visit the settlement and see the active Forge & Master Brokk
+    const visitorState = await firstPlayer.get('/api/state');
+    const visited = visitorState.data.settlements?.find((s: { id: string }) => s.id === homeSettle.id);
+    assert.ok(visited);
+    assert.strictEqual(visited.residents.length, 1);
+
+    // 7. DM unlocks Deity Shrine -> player can now start funding it
+    const unlockShrineRes = await dm.action('settlement_action', {
+      subAction: 'dm_update_settlement',
+      settlementId: homeSettle.id,
+      shrineUnlocked: true,
+    });
+    assert.strictEqual(unlockShrineRes.status, 200);
+    const fundShrineRes = await heroPlayer.action('settlement_action', {
+      subAction: 'start_or_fund_building',
+      settlementId: homeSettle.id,
+      buildingType: 'shrine',
+      gold: 10,
+    });
+    assert.strictEqual(fundShrineRes.status, 200);
+
+    console.log('ALL 21 PRODUCTION TEST SUITES PASSED!');
   } finally {
     await app.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

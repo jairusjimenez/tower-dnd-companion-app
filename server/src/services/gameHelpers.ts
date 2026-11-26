@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {
   BALANCE,
   DEFAULT_STAT_MILESTONES,
+  BUILDING_BLUEPRINTS,
   UNIT_EFFECT_META,
   VALID_FLOOR_THEME_IDS,
   computeActiveEffectModifiers,
@@ -1067,6 +1068,38 @@ export function recordChronicleEvent(
     state.sessionChronicle = state.sessionChronicle.slice(-2000);
   }
   return entry;
+}
+
+export function advanceSettlementConstructionOnBeatResolved(
+  ctx: ActionRequestContext,
+  beatTitle?: string,
+): string[] {
+  const completed: string[] = [];
+  for (const settlement of ctx.state.settlements || []) {
+    for (const b of settlement.buildings || []) {
+      if (b.status !== 'under_construction' && b.status !== 'upgrading') continue;
+      b.beatsCompleted = Math.min(b.beatsRequired, Number(b.beatsCompleted || 0) + 1);
+      if (b.beatsCompleted >= b.beatsRequired) {
+        b.level = b.targetLevel;
+        b.status = 'active';
+        b.completedAt = new Date().toISOString();
+        const bpName = BUILDING_BLUEPRINTS[b.type]?.name || b.type;
+        const msg = `${bpName} (Lv ${b.level}) is now complete in ${settlement.name}!`;
+        completed.push(msg);
+        pushSystemToast(ctx, {
+          title: 'CONSTRUCTION COMPLETE!',
+          message: msg,
+          category: 'loot',
+        });
+        recordChronicleEvent(ctx.state, {
+          category: 'story',
+          actor: settlement.name,
+          summary: `${msg}${beatTitle ? ` (Finished after "${beatTitle}")` : ''}`,
+        });
+      }
+    }
+  }
+  return completed;
 }
 
 export { VALID_BIOME_THEMES };

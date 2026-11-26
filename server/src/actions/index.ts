@@ -36,6 +36,7 @@ import {
 } from './sessionActions';
 import { storyAction } from './storyActions';
 import { chronicleAction } from './chronicleActions';
+import { settlementAction } from './settlementActions';
 import type { ActionRequestContext, ActionResult } from './types';
 
 const ActionEnvelopeSchema = z.object({
@@ -81,6 +82,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   level_up: levelUpAction,
   grant_xp: grantXpAction,
   chronicle_action: chronicleAction,
+  settlement_action: settlementAction,
 };
 
 export async function dispatchAction(ctx: ActionRequestContext, rawBody: unknown): Promise<ActionResult> {

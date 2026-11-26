@@ -18,6 +18,7 @@ import {
   getChestDefaultsForFloor,
   getPartyFloor,
   hasObserveLineOfSight,
+  inferSettlementRoleFromLabel,
   isPartyInCombat,
   restSpotRestore,
   rollChestLoot,
@@ -43,6 +44,7 @@ import {
 } from '../../../shared';
 import { rollSingleDie } from '../services/dice';
 import {
+  advanceSettlementConstructionOnBeatResolved,
   applyGoldBonus,
   clampArenaEntitiesToBounds,
   commitState,
@@ -85,6 +87,7 @@ function createNpcArenaToken(n: Record<string, unknown>, idx: number, gridCols: 
     rewardXp: Math.max(0, Number(n.rewardXp || 0)),
     rewardGold: Math.max(0, Number(n.rewardGold || 0)),
     rewardClaimed: false,
+    ...(n.recruitable ? { recruitable: true, settlementRole: (n.settlementRole ? String(n.settlementRole) : inferSettlementRoleFromLabel(String(n.npcRole || n.role || ''))) as MapToken['settlementRole'] } : {}),
     type: 'npc',
     x: nx,
     y: ny,
@@ -888,10 +891,14 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
     beat.presented = false;
   } else if (sub === 'set_status') {
     if (typeof payload.status === 'string' && ['upcoming', 'active', 'resolved', 'failed'].includes(payload.status)) {
+      const prevStatus = beat.status;
       beat.status = payload.status;
       if (payload.status === 'resolved') {
         ctx.state.pendingReactions = [];
         ctx.state.lastResolvedClash = null;
+        if (prevStatus !== 'resolved') {
+          advanceSettlementConstructionOnBeatResolved(ctx, beat.title);
+        }
       }
       if (payload.status === 'resolved' && beat.beatType !== 'narration' && !beat.victorySummary) {
         const log = beat.defeatedLog || [];
@@ -1781,10 +1788,14 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
       if (beat.presented && beat.status === 'upcoming') beat.status = 'active';
     }
     if (typeof payload.status === 'string' && ['upcoming', 'active', 'resolved', 'failed'].includes(payload.status)) {
+      const prevStatus = beat.status;
       beat.status = payload.status;
       if (payload.status === 'resolved') {
         ctx.state.pendingReactions = [];
         ctx.state.lastResolvedClash = null;
+        if (prevStatus !== 'resolved') {
+          advanceSettlementConstructionOnBeatResolved(ctx, beat.title);
+        }
       }
       if (payload.status === 'resolved' && beat.beatType !== 'narration' && !beat.victorySummary) {
         const log = beat.defeatedLog || [];
@@ -1982,6 +1993,7 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
           message: `"${beat.title}" has reached its conclusion!`,
           category: 'loot',
         });
+        advanceSettlementConstructionOnBeatResolved(ctx, beat.title);
       }
     }
   } else if (sub === 'trigger_prompt_branch') {

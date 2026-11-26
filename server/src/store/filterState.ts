@@ -207,5 +207,6 @@ export function filterStateForRole(
           targetFolderUrl: 'https://drive.google.com/drive/folders/1fY8URu1zmJKB6sKNtDza-V0fNsGdFRNW?usp=sharing',
         }
       : undefined,
+    settlements: (srcState.settlements || []).filter((s, idx) => isDm || idx === 0 || s.allowVisitors),
   };
 }

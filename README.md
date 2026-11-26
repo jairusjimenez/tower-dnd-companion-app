@@ -1,4 +1,4 @@
-# The Tower — DnD Companion App (`v0.7.1`)
+# The Tower — DnD Companion App (`v0.9`)
 
 A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** virtual tabletop and companion app built with **Full-Stack TypeScript, React 18 (Vite), and Fastify**, synchronized live across Dungeon Masters and Players via **Server-Sent Events (SSE)**.
 
@@ -26,7 +26,7 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 
 ---
 
-## What's Implemented (`Version 0.7.1`)
+## What's Implemented (`Version 0.9`)
 
 ### 1. Security, Signed Cookie Sessions & RBAC Onboarding
 - **Two-Step Authentication (`The Tower — DnD Companion App`)**: Clean glassmorphic **Username or Email -> Password** login flow with **no mock accounts or demo quick-login shortcuts**.
@@ -110,6 +110,11 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 - **Lossless Session Chronicle (`recordChronicleEvent`)**: Captures up to 2,000 chronological session events (session start/stop, story beats, DM questions & player answers, combat hits/crits/misses/Nat 1 friendly fire/reactions, spells, NPC dialogues, chests, level-ups, passives, and DM table-talk notes), strictly DM-only via RBAC filtering.
 - **Unhinged Dungeon Crawler Carl AI Narrator & Hybrid Export (`DmChroniclePanel`)**: Generates a 1,200–2,400 word LitRPG chapter with `[NEW ACHIEVEMENT!]` / `[SYSTEM]` callouts via Gemini (`@google/genai`, `gemini-4-hydrogen`), lets you download raw `.json`/`.md` logs for Antigravity, or exports 1-click to your Google Doc via [chronicle-webhook.gs](file:///d:/Antigravity/dnd-vtt/docs/google-apps-script/chronicle-webhook.gs).
 - **2-Minute Google Doc Setup**: Open your Google Doc → **Extensions → Apps Script** → paste `docs/google-apps-script/chronicle-webhook.gs` → set Script Property `CHRONICLE_WEBHOOK_SECRET` → **Deploy as Web App** (`Anyone`) → set `GEMINI_API_KEY`, `GOOGLE_DOC_WEBHOOK_URL`, and `GOOGLE_DOC_WEBHOOK_SECRET` in Railway Variables.
+
+### 11. Tower Settlement Building, NPC Recruitment & Workshops (`Version 0.9`)
+- **0-Building Start & Beat-Gated Construction (`Town` Tab)**: Parties start with **0 buildings** at `Camp Zero — First Clearing`. Adventurers co-fund workshops with Gold & Mana Stones, then complete **1 / 2 / 3 Story or Combat Beats** (`Lv 1 = 1 Beat`, `Lv 2 = 2 Beats`, `Lv 3 = 3 Beats`) for construction to finish automatically.
+- **In-Beat NPC Recruitment & Crafting**: Flag beat NPCs as **Recruitable** (`Blacksmith`, `Alchemist`, `Enchanter`, `Innkeeper`, `Oracle`); players invite them during beats via `NpcDialogueModal`, then craft Lv 1–3 weapons/armor using monster material drops at the **Blacksmith Forge**, brew potions at the **Alchemist Lab**, enchant gear at the **Arcane Study**, or rest at the **Sanctuary Inn**.
+- **Multi-Party Visiting & Locked Deity Shrine**: Registered players from other hosted parties can visit settlements with **Visitors Allowed**, while the **Shrine of the Spire** stays locked (`shrineUnlocked: false`) until the DM unlocks it in **DM Sanctum → Towns**.
 
 ---
 

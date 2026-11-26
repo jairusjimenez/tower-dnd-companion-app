@@ -7,13 +7,15 @@ import { DmNpcsTab } from './DmNpcsTab';
 import { DmPartyTab } from './DmPartyTab';
 import { DmRulesTab } from './DmRulesTab';
 import { DmSessionTab } from './DmSessionTab';
+import { DmSettlementTab } from './DmSettlementTab';
 import { DmStoryTab } from './DmStoryTab';
 import { DmTreasuresTab } from './DmTreasuresTab';
 
-type DmTab = 'story' | 'map' | 'monsters' | 'npcs' | 'treasures' | 'chests' | 'rules' | 'party' | 'session';
+type DmTab = 'story' | 'map' | 'monsters' | 'npcs' | 'treasures' | 'chests' | 'rules' | 'party' | 'settlement' | 'session';
 
 const SECONDARY_DM_TABS: Array<{ id: DmTab; label: string; sub: string }> = [
   { id: 'map', label: 'Tower Map', sub: 'Floors & tokens' },
+  { id: 'settlement', label: 'Settlements', sub: 'Towns & Shrine' },
   { id: 'npcs', label: 'NPCs', sub: 'Roster & gifts' },
   { id: 'treasures', label: 'Treasures', sub: 'Loot catalog' },
   { id: 'chests', label: 'Chests', sub: 'Tier rewards' },
@@ -217,6 +219,18 @@ export function DmView() {
         </button>
         <button
           type="button"
+          className={`nav-btn ${activeTab === 'settlement' ? 'active' : ''}`}
+          data-dmtab="settlement"
+          onClick={() => setActiveTab('settlement')}
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M3 10l9-7 9 7v11H3z" />
+            <path d="M9 21V12h6v9" />
+          </svg>
+          <span>Towns</span>
+        </button>
+        <button
+          type="button"
           className={`nav-btn ${activeTab === 'session' ? 'active' : ''}`}
           data-dmtab="session"
           onClick={() => setActiveTab('session')}
@@ -238,6 +252,7 @@ export function DmView() {
         {activeTab === 'chests' && <DmChestsTab />}
         {activeTab === 'rules' && <DmRulesTab />}
         {activeTab === 'party' && <DmPartyTab />}
+        {activeTab === 'settlement' && <DmSettlementTab />}
         {activeTab === 'session' && <DmSessionTab />}
       </main>
 
