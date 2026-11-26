@@ -22,6 +22,7 @@ import {
   logPlayerHistory,
   pushSystemToast,
   recalculateCharacterAcAndDr,
+  recordChronicleEvent,
   resolveAuthorizedCharacter,
   syncCharacterDerived,
 } from '../services/gameHelpers';
@@ -460,6 +461,11 @@ export function resolvePassiveGachaAction(ctx: ActionRequestContext, payload: Re
   }
 
   logPlayerHistory(ctx.state, ch.id, 'passive_gacha', `Unlocked ${tier} Passive: ${picked.name} (${picked.description})`);
+  recordChronicleEvent(ctx.state, {
+    category: 'passive',
+    actor: ch.name,
+    summary: `${ch.name} unlocked ${tier} Passive Skill: ${picked.name} (${picked.description}).`,
+  });
   pushSystemToast(ctx, {
     title: `${tier.toUpperCase()} PASSIVE UNLOCKED!`,
     message: `${ch.name} drew ${picked.name} [${tier}]: ${picked.description}`,
@@ -510,6 +516,11 @@ export function levelUpAction(ctx: ActionRequestContext, payload: Record<string,
     'xp',
     `Leveled up to Level ${ch.level} (+${gainedPoints} Stat Pts, +${growth.hp} Max HP, +${growth.mp} Max MP, +1 Passive Ticket)!`,
   );
+  recordChronicleEvent(ctx.state, {
+    category: 'level_up',
+    actor: ch.name,
+    summary: `${ch.name} leveled up to Level ${ch.level}! (+${gainedPoints} Stat Pts, +${growth.hp} Max HP, +${growth.mp} Max MP).`,
+  });
   syncCharacterDerived(ctx, ch.id);
   commitState(ctx);
 

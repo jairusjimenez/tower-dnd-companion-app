@@ -106,6 +106,11 @@ A mobile-friendly, real-time **Dungeons & Dragons & Korean Manhwa Tower RPG** vi
 - **Interactive Stat & Breakthrough Hints**: Tapping any attribute (`STR`–`LUCK`), combat bento (`AC`, `DR`, `MOVE`), or the `i` formula toggle expands an inline hint card with plain-English stat effects and all `20 / 40 / 60 / 80 / 100` breakthrough tiers, remaining accessible even while the session is paused.
 - **Mobile-First DM Sanctum (`Version 0.8.6`)**: Replaces the 9-tab top bar on phones (`<= 768px`) with a fixed 4-tab bottom thumb dock (**Beats / Party / Monsters / More**), a slide-up **More** tool sheet (`Tower Map`, `NPCs`, `Treasures`, `Chests`, `Rules`, `Invites`, `Reset`, `Exit`), a 1-tap **Open Beat** quick-jump bar, `16px` no-zoom inputs, `38–42px` touch targets, and single-column readable cards.
 
+### 10. Session Chronicle, LitRPG Narrator & Google Doc Export (`Version 0.8.7`)
+- **Lossless Session Chronicle (`recordChronicleEvent`)**: Captures up to 2,000 chronological session events (session start/stop, story beats, DM questions & player answers, combat hits/crits/misses/Nat 1 friendly fire/reactions, spells, NPC dialogues, chests, level-ups, passives, and DM table-talk notes), strictly DM-only via RBAC filtering.
+- **Unhinged Dungeon Crawler Carl AI Narrator & Hybrid Export (`DmChroniclePanel`)**: Generates a 1,200–2,400 word LitRPG chapter with `[NEW ACHIEVEMENT!]` / `[SYSTEM]` callouts via Gemini (`@google/genai`, `gemini-4-hydrogen`), lets you download raw `.json`/`.md` logs for Antigravity, or exports 1-click to your Google Doc via [chronicle-webhook.gs](file:///d:/Antigravity/dnd-vtt/docs/google-apps-script/chronicle-webhook.gs).
+- **2-Minute Google Doc Setup**: Open your Google Doc → **Extensions → Apps Script** → paste `docs/google-apps-script/chronicle-webhook.gs` → set Script Property `CHRONICLE_WEBHOOK_SECRET` → **Deploy as Web App** (`Anyone`) → set `GEMINI_API_KEY`, `GOOGLE_DOC_WEBHOOK_URL`, and `GOOGLE_DOC_WEBHOOK_SECRET` in Railway Variables.
+
 ---
 
 ## Tech Stack & Project Structure

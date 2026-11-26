@@ -1092,7 +1092,60 @@ export interface GameState {
   systemMessages: ToastMessage[];
   combatLog: CombatLogEntry[];
   playerHistory: PlayerHistoryEntry[];
+  currentSessionNumber?: number;
+  sessionChronicle?: SessionChronicleEntry[];
+  sessionRecaps?: SessionRecapRecord[];
+  chronicleIntegrations?: ChronicleIntegrationStatus;
   rollLog: RollLogEntry[];
+}
+
+export type ChronicleCategory =
+  | 'session'
+  | 'story'
+  | 'prompt'
+  | 'combat'
+  | 'spell'
+  | 'reaction'
+  | 'loot'
+  | 'npc'
+  | 'level_up'
+  | 'passive'
+  | 'death'
+  | 'dm_note';
+
+export interface SessionChronicleEntry {
+  id: string;
+  sessionNumber: number;
+  timestamp: string;
+  floor: number;
+  beatId?: string;
+  beatTitle?: string;
+  category: ChronicleCategory;
+  actor?: string;
+  target?: string;
+  summary: string;
+  details?: string;
+}
+
+export interface SessionRecapRecord {
+  sessionNumber: number;
+  title: string;
+  startedAt: string;
+  endedAt?: string;
+  directorNotes?: string;
+  generatedNarrative?: string;
+  modelUsed?: string;
+  generatedAt?: string;
+  exportedAt?: string;
+  exportedDocUrl?: string;
+}
+
+export interface ChronicleIntegrationStatus {
+  geminiConfigured: boolean;
+  webhookConfigured: boolean;
+  defaultModel: string;
+  targetDocUrl: string;
+  targetFolderUrl: string;
 }
 
 export interface FilteredGameState {
@@ -1129,6 +1182,10 @@ export interface FilteredGameState {
   systemMessages: ToastMessage[];
   combatLog: CombatLogEntry[];
   playerHistory: PlayerHistoryEntry[];
+  currentSessionNumber?: number;
+  sessionChronicle?: SessionChronicleEntry[];
+  sessionRecaps?: SessionRecapRecord[];
+  chronicleIntegrations?: ChronicleIntegrationStatus;
   rollLog: RollLogEntry[];
 }
 

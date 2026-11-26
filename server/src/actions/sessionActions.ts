@@ -3,6 +3,7 @@ import {
   commitState,
   createNewCharacterRecord,
   pushSystemToast,
+  recordChronicleEvent,
   syncCharacterDerived,
 } from '../services/gameHelpers';
 import { sanitizeAccounts } from '../store/filterState';
@@ -25,11 +26,21 @@ export function sessionControlAction(ctx: ActionRequestContext, payload: Record<
       message: `The Dungeon Master has started the session: "${ctx.state.session.title}". Roll initiative and prepare to climb!`,
       category: 'info',
     });
+    recordChronicleEvent(ctx.state, {
+      category: 'session',
+      actor: 'Dungeon Master',
+      summary: `Session started: "${ctx.state.session.title || 'Tower Campaign'}".`,
+    });
   } else {
     pushSystemToast(ctx, {
       title: 'SESSION STOPPED / PAUSED',
       message: ctx.state.session.pausedMessage || 'The Dungeon Master has paused the session.',
       category: 'warning',
+    });
+    recordChronicleEvent(ctx.state, {
+      category: 'session',
+      actor: 'Dungeon Master',
+      summary: `Session paused: ${ctx.state.session.pausedMessage || 'DM paused the session.'}`,
     });
   }
   commitState(ctx);

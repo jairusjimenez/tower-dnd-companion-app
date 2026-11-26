@@ -304,6 +304,15 @@ export function getInitialState(): GameState {
     pendingReactions: [],
     recentMonsterDefeats: [],
     recentArenaFx: [],
+    currentSessionNumber: 1,
+    sessionChronicle: [],
+    sessionRecaps: [
+      {
+        sessionNumber: 1,
+        title: 'Session #1 — Into The Tower',
+        startedAt: new Date().toISOString(),
+      },
+    ],
     bestiary: ([
       // Core & Famous Manhwa Monsters
       { id: 'best-goblin', name: 'Goblin Gatekeeper', category: 'Manhwa', maxHp: 26, ac: 14, dr: 1, attackFormula: '1d20+5', damageFormula: '1d8+3', rangeSpaces: 2, notes: 'Tower 1F gate sentry.' },

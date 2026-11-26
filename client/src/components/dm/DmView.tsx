@@ -18,7 +18,7 @@ const SECONDARY_DM_TABS: Array<{ id: DmTab; label: string; sub: string }> = [
   { id: 'treasures', label: 'Treasures', sub: 'Loot catalog' },
   { id: 'chests', label: 'Chests', sub: 'Tier rewards' },
   { id: 'rules', label: 'Rules & Deities', sub: 'Formulas & gods' },
-  { id: 'session', label: 'Invites', sub: 'Access & resets' },
+  { id: 'session', label: 'Invites & Log', sub: 'Chronicle & export' },
 ];
 
 export function DmView() {

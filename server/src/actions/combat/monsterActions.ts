@@ -35,6 +35,7 @@ import {
   getFloorCenterRow,
   pushArenaFx,
   pushSystemToast,
+  recordChronicleEvent,
   removeMonsterTokensFromMaps,
   syncCharacterDerived,
   syncMonsterDerived,
@@ -587,6 +588,15 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
         affectedCells: affectedCells.length ? affectedCells : undefined,
         damage: effectiveMonDmg,
       });
+      recordChronicleEvent(ctx.state, {
+        beatId: hostBeat.id,
+        beatTitle: hostBeat.title,
+        floor: hostBeat.floor,
+        category: 'combat',
+        actor: strikeLabel,
+        target: targetChar.name,
+        summary: `${strikeLabel} attacked ${targetChar.name} (${effectiveMonDmg} incoming dmg)${rangedPenaltySuffix}${aoeSuffix}.`,
+      });
     }
 
     commitState(ctx);
@@ -646,6 +656,17 @@ export function monsterAttackAction(ctx: ActionRequestContext, payload: Record<s
       affectedCells: affectedCells.length ? affectedCells : undefined,
       damage: results[0]?.dmgTaken ?? effectiveMonDmg,
       miss: results[0]?.evaded,
+    });
+    recordChronicleEvent(ctx.state, {
+      beatId: hostBeat.id,
+      beatTitle: hostBeat.title,
+      floor: hostBeat.floor,
+      category: 'combat',
+      actor: strikeLabel,
+      target: targetChar.name,
+      summary: results[0]?.evaded
+        ? `${targetChar.name} evaded ${strikeLabel}'s attack.`
+        : `${strikeLabel} hit ${targetChar.name} for ${results[0]?.dmgTaken ?? effectiveMonDmg} damage${rangedPenaltySuffix}.`,
     });
   }
   commitState(ctx);

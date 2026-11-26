@@ -21,6 +21,7 @@ import {
   type GameState,
   type InventoryItem,
   type Monster,
+  type SessionChronicleEntry,
   type StoryBeat,
   type ToastMessage,
   type UnitEffectSpec,
@@ -1031,6 +1032,40 @@ export function pushArenaFx(
   if (!Array.isArray(state.recentArenaFx)) state.recentArenaFx = [];
   state.recentArenaFx.unshift(entry);
   state.recentArenaFx = state.recentArenaFx.slice(0, 6);
+  return entry;
+}
+
+export function recordChronicleEvent(
+  state: GameState,
+  input: Omit<SessionChronicleEntry, 'id' | 'timestamp' | 'sessionNumber' | 'floor'> & {
+    floor?: number;
+    sessionNumber?: number;
+  },
+): SessionChronicleEntry {
+  const sessionNumber = Math.max(1, Number(input.sessionNumber ?? state.currentSessionNumber ?? 1));
+  state.currentSessionNumber = sessionNumber;
+  if (!Array.isArray(state.sessionChronicle)) state.sessionChronicle = [];
+  if (!Array.isArray(state.sessionRecaps)) state.sessionRecaps = [];
+
+  if (!state.sessionRecaps.some((r) => r.sessionNumber === sessionNumber)) {
+    state.sessionRecaps.push({
+      sessionNumber,
+      title: `Session #${sessionNumber}`,
+      startedAt: new Date().toISOString(),
+    });
+  }
+
+  const entry: SessionChronicleEntry = {
+    id: `chr-${Date.now().toString(36)}-${crypto.randomInt(100, 999)}`,
+    sessionNumber,
+    timestamp: new Date().toISOString(),
+    floor: Math.max(1, Number(input.floor ?? getPartyFloor(state) ?? 1)),
+    ...input,
+  };
+  state.sessionChronicle.push(entry);
+  if (state.sessionChronicle.length > 2000) {
+    state.sessionChronicle = state.sessionChronicle.slice(-2000);
+  }
   return entry;
 }
 

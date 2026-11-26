@@ -30,6 +30,7 @@ import {
   logPlayerHistory,
   pushArenaFx,
   pushSystemToast,
+  recordChronicleEvent,
   recalculateCharacterAcAndDr,
   resolveAuthorizedCharacter,
   syncCharacterDerived,
@@ -308,6 +309,14 @@ export function spellAction(ctx: ActionRequestContext, payload: Record<string, u
         // placeholder match check
       }
     const castSummary = `${authChar.name} cast ${sp.name} (${sp.areaText}, Cost ${cost} MP)${effectNotes.length ? ` • ${effectNotes.join(', ')}` : ''}.`;
+    recordChronicleEvent(ctx.state, {
+      beatId: castBeat?.id,
+      beatTitle: castBeat?.title,
+      floor: castBeat?.floor,
+      category: 'spell',
+      actor: authChar.name,
+      summary: castSummary,
+    });
     ctx.state.combatLog.unshift({
       id: `cblog-${Date.now()}`,
       timestamp: new Date().toISOString(),

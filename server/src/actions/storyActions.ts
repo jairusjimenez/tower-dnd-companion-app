@@ -50,6 +50,7 @@ import {
   grantXpToCharacter,
   logPlayerHistory,
   pushSystemToast,
+  recordChronicleEvent,
   resetArenaTurnFlags,
   resetCombatPassiveFlags,
   syncCharacterDerived,
@@ -874,6 +875,15 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
       message: beat.narration || `The Dungeon Master revealed ${beat.title}.`,
       category: 'info',
     });
+    recordChronicleEvent(ctx.state, {
+      floor: beat.floor,
+      beatId: beat.id,
+      beatTitle: beat.title,
+      category: 'story',
+      actor: 'Dungeon Master',
+      summary: `Beat revealed: "${beat.title}" (${beat.floor}F).`,
+      details: beat.narration || undefined,
+    });
   } else if (sub === 'hide_beat') {
     beat.presented = false;
   } else if (sub === 'set_status') {
@@ -1130,6 +1140,16 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
     });
     if (ch) {
       logPlayerHistory(ctx.state, ch.id, 'npc', `Spoke with ${tok.name}${rewardSummary ? ` (Received: ${rewardSummary})` : ''}`);
+      recordChronicleEvent(ctx.state, {
+        floor: beat.floor,
+        beatId: beat.id,
+        beatTitle: beat.title,
+        category: 'npc',
+        actor: ch.name,
+        target: tok.name,
+        summary: `${ch.name} spoke with ${tok.name}${rewardSummary ? ` and received ${rewardSummary}` : ''}.`,
+        details: dialogue,
+      });
     }
     commitState(ctx);
     return {
@@ -1938,6 +1958,14 @@ export function storyAction(ctx: ActionRequestContext, payload: Record<string, u
     if (ch) {
       logPlayerHistory(ctx.state, ch.id, 'story', `Answered DM in "${beat.title}": "${answerText}"`);
     }
+    recordChronicleEvent(ctx.state, {
+      floor: beat.floor,
+      beatId: beat.id,
+      beatTitle: beat.title,
+      category: 'prompt',
+      actor: characterName,
+      summary: `${characterName} answered "${promptObj.question}": "${answerText}".`,
+    });
     pushSystemToast(ctx, {
       title: `${characterName.toUpperCase()} ANSWERED`,
       message: `Re: "${promptObj.question}" — "${answerText}"`,

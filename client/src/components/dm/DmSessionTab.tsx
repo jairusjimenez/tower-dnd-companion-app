@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useVtt } from '../../context/VttContext';
+import { DmChroniclePanel } from './DmChroniclePanel';
 
 export function DmSessionTab() {
   const { state, sendAction, pushLocalToast, setDmCharModalId } = useVtt();
@@ -59,7 +60,9 @@ export function DmSessionTab() {
   };
 
   return (
-    <div className="two-col">
+    <div className="stack">
+      <DmChroniclePanel />
+      <div className="two-col">
       <div className="col stack">
         <div className="panel card-glow-cyan">
           <div className="panel-header">
@@ -278,6 +281,7 @@ export function DmSessionTab() {
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }

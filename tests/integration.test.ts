@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
+import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -1733,6 +1734,86 @@ async function runTests(): Promise<void> {
     );
 
     console.log('ALL 19 PRODUCTION TEST SUITES PASSED!');
+
+    // ------------------------------------------------------------------
+    // Suite 20: Session Chronicle, RBAC & Google Doc Webhook Export
+    // ------------------------------------------------------------------
+    console.log('Running Suite 20: Session Chronicle & Google Doc Export...');
+
+    // 1. DM state has lossless sessionChronicle from earlier suites; non-DM receives empty chronicle & 403 on action
+    const dmChronicleState = await dm.get('/api/state');
+    assert.ok(Array.isArray(dmChronicleState.data.sessionChronicle));
+    assert.ok(dmChronicleState.data.sessionChronicle.length > 0);
+    assert.strictEqual(dmChronicleState.data.chronicleIntegrations?.targetFolderUrl, 'https://drive.google.com/drive/folders/1fY8URu1zmJKB6sKNtDza-V0fNsGdFRNW?usp=sharing');
+
+    const playerChronicleState = await heroPlayer.get('/api/state');
+    assert.strictEqual((playerChronicleState.data.sessionChronicle || []).length, 0);
+    assert.strictEqual((playerChronicleState.data.sessionRecaps || []).length, 0);
+    assert.strictEqual(playerChronicleState.data.chronicleIntegrations, undefined);
+
+    const playerChronicleBlocked = await heroPlayer.action('chronicle_action', { subAction: 'add_note', text: 'Hack note' });
+    assert.strictEqual(playerChronicleBlocked.status, 403);
+
+    // 2. DM adds table-talk note & saves narrative draft
+    const addNoteRes = await dm.action('chronicle_action', {
+      subAction: 'add_note',
+      text: 'The party argued with a goblin for 5 minutes.',
+    });
+    assert.strictEqual(addNoteRes.status, 200);
+    assert.strictEqual(addNoteRes.data.entry.category, 'dm_note');
+
+    const saveDraftRes = await dm.action('chronicle_action', {
+      subAction: 'save_narrative',
+      sessionNumber: 1,
+      title: 'The Goblin Debate',
+      directorNotes: 'Include the goblin joke.',
+      generatedNarrative: '## The Door Incident\n> **[NEW ACHIEVEMENT! Certified Door Debater!]**\n> You yelled at wood.',
+    });
+    assert.strictEqual(saveDraftRes.status, 200);
+    assert.strictEqual(saveDraftRes.data.recap.title, 'The Goblin Debate');
+
+    // 3. Mock Google Apps Script webhook server & verify export_google_doc
+    let receivedWebhookBody: Record<string, unknown> | null = null;
+    const webhookServer = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        receivedWebhookBody = JSON.parse(body || '{}');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, docUrl: 'https://docs.google.com/document/d/1uBWEitKlPfFP_Z5tmSYKqRzuForlwv1tgnnS6lyAK6U/edit', appendedBlocks: 3 }));
+      });
+    });
+    await new Promise<void>((resolve) => webhookServer.listen(0, '127.0.0.1', () => resolve()));
+    const whAddr = webhookServer.address() as AddressInfo;
+    const prevWhUrl = process.env.GOOGLE_DOC_WEBHOOK_URL;
+    const prevWhSecret = process.env.GOOGLE_DOC_WEBHOOK_SECRET;
+    process.env.GOOGLE_DOC_WEBHOOK_URL = `http://127.0.0.1:${whAddr.port}/exec`;
+    process.env.GOOGLE_DOC_WEBHOOK_SECRET = 'test-wh-secret';
+    try {
+      const exportRes = await dm.action('chronicle_action', {
+        subAction: 'export_google_doc',
+        sessionNumber: 1,
+      });
+      assert.strictEqual(exportRes.status, 200);
+      assert.strictEqual(exportRes.data.appendedBlocks, 3);
+      assert.ok(exportRes.data.recap.exportedAt);
+      assert.strictEqual((receivedWebhookBody as any)?.secret, 'test-wh-secret');
+      assert.strictEqual((receivedWebhookBody as any)?.folderId, '1fY8URu1zmJKB6sKNtDza-V0fNsGdFRNW');
+      assert.strictEqual((receivedWebhookBody as any)?.docId, '1uBWEitKlPfFP_Z5tmSYKqRzuForlwv1tgnnS6lyAK6U');
+    } finally {
+      if (prevWhUrl === undefined) delete process.env.GOOGLE_DOC_WEBHOOK_URL;
+      else process.env.GOOGLE_DOC_WEBHOOK_URL = prevWhUrl;
+      if (prevWhSecret === undefined) delete process.env.GOOGLE_DOC_WEBHOOK_SECRET;
+      else process.env.GOOGLE_DOC_WEBHOOK_SECRET = prevWhSecret;
+      await new Promise<void>((resolve) => webhookServer.close(() => resolve()));
+    }
+
+    // 4. Start new session #2
+    const newSessRes = await dm.action('chronicle_action', { subAction: 'start_new_session', title: 'Session #2 — Deeper Floor' });
+    assert.strictEqual(newSessRes.status, 200);
+    assert.strictEqual(newSessRes.data.currentSessionNumber, 2);
+
+    console.log('ALL 20 PRODUCTION TEST SUITES PASSED!');
   } finally {
     await app.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

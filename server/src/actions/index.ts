@@ -35,6 +35,7 @@ import {
   updateNotesAction,
 } from './sessionActions';
 import { storyAction } from './storyActions';
+import { chronicleAction } from './chronicleActions';
 import type { ActionRequestContext, ActionResult } from './types';
 
 const ActionEnvelopeSchema = z.object({
@@ -79,6 +80,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   resolve_passive_gacha: resolvePassiveGachaAction,
   level_up: levelUpAction,
   grant_xp: grantXpAction,
+  chronicle_action: chronicleAction,
 };
 
 export async function dispatchAction(ctx: ActionRequestContext, rawBody: unknown): Promise<ActionResult> {

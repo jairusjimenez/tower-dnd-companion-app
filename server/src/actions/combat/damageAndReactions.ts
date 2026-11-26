@@ -41,6 +41,7 @@ import {
   logPlayerHistory,
   pushArenaFx,
   pushSystemToast,
+  recordChronicleEvent,
   removeMonsterTokensFromMaps,
   syncCharacterDerived,
   syncMonsterDerived,
@@ -708,6 +709,13 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
             label: 'FRIENDLY FIRE!',
           });
         }
+        recordChronicleEvent(ctx.state, {
+          beatId: fxBeatId || undefined,
+          category: 'combat',
+          actor: attackerName,
+          target: ffAlly.name,
+          summary: ffEntry.summary,
+        });
         commitState(ctx);
         return {
           ok: true,
@@ -750,6 +758,13 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
           miss: true,
         });
       }
+      recordChronicleEvent(ctx.state, {
+        beatId: fxBeatId || undefined,
+        category: isSpellAttack ? 'spell' : 'combat',
+        actor: attackerName,
+        target: monster.name,
+        summary: missEntry.summary,
+      });
       commitState(ctx);
       return {
         ok: true,
@@ -1143,6 +1158,13 @@ export function inflictDamageAction(ctx: ActionRequestContext, payload: Record<s
   };
   ctx.state.combatLog.unshift(logEntry);
   ctx.state.combatLog = ctx.state.combatLog.slice(0, 60);
+  recordChronicleEvent(ctx.state, {
+    beatId: fxBeatId || undefined,
+    category: isSpellAttack ? 'spell' : 'combat',
+    actor: attackerName,
+    target: monster.name,
+    summary: logEntry.summary,
+  });
 
   if (rollDetails) {
     ctx.state.rollLog.unshift({

@@ -11,6 +11,8 @@
 - Always refer to players as **Adventurers** (`New Adventurer`) in UI copy, onboarding, and system text — never `Climber`.
 
 ## Module Map (Refactored Mega-Files)
+- `server/src/actions/chronicleActions.ts` & `server/src/services/narrator.ts` — Lossless Session Chronicle, Dungeon Crawler Carl LitRPG Gemini narrator (`@google/genai`, `gemini-4-hydrogen`), and Google Apps Script webhook exporter (`Tower DnD` folder `1fY8URu1zmJKB6sKNtDza-V0fNsGdFRNW` -> Doc `1uBWEitKlPfFP_Z5tmSYKqRzuForlwv1tgnnS6lyAK6U`).
+- `client/src/components/dm/DmChroniclePanel.tsx` — DM Chronicle & LitRPG Narrator export panel inside `DmSessionTab.tsx`.
 - `client/src/canvas/arenaFx.ts` — Procedural canvas FX engine (BFS walking glide, melee lunge/slash, ranged projectile, elemental spell AoE, floating combat text) driven by an on-demand RAF loop in `BeatArenaCanvas.tsx`.
 - `client/src/styles/game.css` — `@import` manifest preserving cascade order across `client/src/styles/modules/`:
   - `equipment-inventory.css` (portrait studio, paperdoll equipment, bag inventory)

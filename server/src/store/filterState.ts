@@ -195,5 +195,17 @@ export function filterStateForRole(
     combatLog: srcState.combatLog || [],
     playerHistory: srcState.playerHistory || [],
     rollLog: (srcState.rollLog || []).filter((r) => isDm || !r.isSecret),
+    currentSessionNumber: srcState.currentSessionNumber || 1,
+    sessionChronicle: isDm ? srcState.sessionChronicle || [] : [],
+    sessionRecaps: isDm ? srcState.sessionRecaps || [] : [],
+    chronicleIntegrations: isDm
+      ? {
+          geminiConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
+          webhookConfigured: Boolean(process.env.GOOGLE_DOC_WEBHOOK_URL),
+          defaultModel: process.env.GEMINI_CHRONICLE_MODEL || 'gemini-4-hydrogen',
+          targetDocUrl: 'https://docs.google.com/document/d/1uBWEitKlPfFP_Z5tmSYKqRzuForlwv1tgnnS6lyAK6U/edit',
+          targetFolderUrl: 'https://drive.google.com/drive/folders/1fY8URu1zmJKB6sKNtDza-V0fNsGdFRNW?usp=sharing',
+        }
+      : undefined,
   };
 }
